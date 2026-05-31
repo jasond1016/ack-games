@@ -17,6 +17,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   min-height: 100vh;
   margin: 0;
@@ -182,6 +186,109 @@ body {
   right: 16px;
 }
 
+.racing-card-art {
+  background:
+    linear-gradient(180deg, rgba(74, 125, 191, 0.26), rgba(255, 255, 255, 0.1) 46%),
+    linear-gradient(180deg, #eef7ff 0%, #edf3e8 100%);
+}
+
+.mini-road {
+  position: absolute;
+  left: 126px;
+  top: -20px;
+  width: 118px;
+  height: 236px;
+  border-radius: 50%;
+  background: #323940;
+  transform: rotate(-18deg);
+}
+
+.mini-road::after {
+  position: absolute;
+  inset: 28px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #eff5e8, #e6efdf);
+  content: "";
+}
+
+.mini-road-line {
+  position: absolute;
+  left: 176px;
+  top: 28px;
+  width: 6px;
+  height: 96px;
+  border-radius: 99px;
+  background: repeating-linear-gradient(
+    180deg,
+    #f4d35e 0 14px,
+    transparent 14px 27px
+  );
+  transform: rotate(-18deg);
+}
+
+.mini-car {
+  position: absolute;
+  left: 148px;
+  bottom: 34px;
+  width: 76px;
+  height: 36px;
+  border-radius: 8px 8px 14px 14px;
+  background: linear-gradient(180deg, #c72c41, #8c1b2a);
+  box-shadow: 0 10px 20px rgba(31, 41, 51, 0.22);
+  transform: rotate(-18deg);
+}
+
+.mini-car::before {
+  position: absolute;
+  left: 20px;
+  top: 6px;
+  width: 34px;
+  height: 12px;
+  border-radius: 4px;
+  background: #cfe9f7;
+  content: "";
+}
+
+.mini-car::after {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: -5px;
+  height: 10px;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #15191f 0 18%, transparent 18% 78%, #15191f 78%);
+  content: "";
+}
+
+.mini-tree {
+  position: absolute;
+  width: 22px;
+  height: 42px;
+  border-radius: 50% 50% 42% 42%;
+  background: #2f7d4f;
+}
+
+.mini-tree::after {
+  position: absolute;
+  left: 9px;
+  bottom: -18px;
+  width: 5px;
+  height: 22px;
+  border-radius: 4px;
+  background: #7b4a2a;
+  content: "";
+}
+
+.mini-tree-one {
+  left: 48px;
+  top: 54px;
+}
+
+.mini-tree-two {
+  right: 44px;
+  bottom: 46px;
+}
+
 .empty-art {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -236,6 +343,19 @@ body {
   margin: 0 auto;
 }
 
+.racing-view {
+  width: min(100%, 1020px);
+}
+
+.racing-stage {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #9fc9f3;
+  box-shadow: 0 18px 46px rgba(31, 41, 51, 0.16);
+}
+
 .topbar {
   display: grid;
   grid-template-columns: 44px 1fr 44px;
@@ -281,6 +401,10 @@ h1 {
   margin-bottom: 14px;
 }
 
+.racing-hud {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
 .hud div {
   min-width: 0;
   padding: 10px 12px;
@@ -310,7 +434,7 @@ h1 {
   text-overflow: ellipsis;
 }
 
-#gameCanvas {
+.game-canvas {
   width: 100%;
   aspect-ratio: 640 / 760;
   display: block;
@@ -319,6 +443,210 @@ h1 {
   background: #fafdff;
   box-shadow: 0 18px 46px rgba(31, 41, 51, 0.16);
   touch-action: none;
+}
+
+.racing-canvas {
+  width: 100%;
+  height: min(68vh, 620px);
+  min-height: 420px;
+  display: block;
+  background: #9fc9f3;
+  border: 0;
+  touch-action: none;
+}
+
+.race-result-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(10, 18, 28, 0.46);
+  backdrop-filter: blur(7px);
+}
+
+.race-result-card {
+  position: relative;
+  width: min(100%, 410px);
+  display: grid;
+  gap: 12px;
+  padding: 24px 24px 22px;
+  overflow: hidden;
+  border: 1px solid rgba(15, 139, 141, 0.22);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(239, 249, 247, 0.98));
+  color: #10202b;
+  box-shadow: 0 18px 44px rgba(7, 17, 26, 0.3);
+}
+
+.race-result-card.is-loss {
+  border-color: rgba(233, 100, 73, 0.34);
+  background: linear-gradient(180deg, rgba(47, 53, 61, 0.98), rgba(22, 26, 31, 0.98));
+  color: #f7eee4;
+}
+
+.race-result-card.is-loss::before {
+  position: absolute;
+  top: 18px;
+  right: 20px;
+  width: 78px;
+  height: 78px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.18), transparent 58%),
+    conic-gradient(
+      from 45deg,
+      #f3f5f7 0deg 90deg,
+      #262a31 90deg 180deg,
+      #f3f5f7 180deg 270deg,
+      #262a31 270deg 360deg
+    );
+  opacity: 0.14;
+  transform: rotate(-20deg);
+  content: "";
+}
+
+.race-result-tag,
+.race-result-title,
+.race-result-summary {
+  margin: 0;
+}
+
+.race-result-tag {
+  position: relative;
+  z-index: 1;
+  width: fit-content;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(15, 139, 141, 0.12);
+  color: var(--accent-dark);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.race-result-card.is-loss .race-result-tag {
+  background: rgba(233, 100, 73, 0.14);
+  color: #ffccb9;
+}
+
+.race-result-title {
+  position: relative;
+  z-index: 1;
+  font-size: clamp(34px, 7vw, 46px);
+  line-height: 1;
+}
+
+.race-result-summary {
+  position: relative;
+  z-index: 1;
+  max-width: 30ch;
+  color: inherit;
+  opacity: 0.84;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.race-result-stats {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.race-result-stats div {
+  padding: 12px 14px;
+  border: 1px solid rgba(14, 34, 47, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.race-result-card.is-loss .race-result-stats div {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.race-result-stats span,
+.race-result-stats strong {
+  display: block;
+}
+
+.race-result-stats span {
+  color: inherit;
+  opacity: 0.68;
+  font-size: 13px;
+}
+
+.race-result-stats strong {
+  margin-top: 6px;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.race-result-button {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid rgba(15, 139, 141, 0.22);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #13a0a4, #0f8b8d);
+  color: #f7fbfd;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.race-result-button:hover,
+.race-result-button:focus-visible {
+  outline: 3px solid rgba(15, 139, 141, 0.22);
+  border-color: var(--accent-dark);
+}
+
+.race-result-card.is-loss .race-result-button {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: linear-gradient(180deg, #ed7b5a, #d85d44);
+}
+
+.race-confetti {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.race-result-card.is-win .race-confetti {
+  opacity: 1;
+}
+
+.confetti-piece {
+  position: absolute;
+  top: -28px;
+  width: 10px;
+  height: 26px;
+  border-radius: 4px;
+  background: var(--piece-color);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.14);
+  animation: confetti-fall var(--duration) linear infinite;
+  animation-delay: var(--delay);
+}
+
+@keyframes confetti-fall {
+  0% {
+    transform: translate3d(0, -28px, 0) rotate(0deg);
+    opacity: 0;
+  }
+
+  10% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translate3d(var(--drift), 292px, 0) rotate(var(--spin));
+    opacity: 0;
+  }
 }
 
 @media (max-width: 420px) {
@@ -336,5 +664,18 @@ h1 {
 
   .hud {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .racing-canvas {
+    height: 60vh;
+    min-height: 360px;
+  }
+
+  .race-result-overlay {
+    padding: 14px;
+  }
+
+  .race-result-card {
+    padding: 18px 18px 16px;
   }
 }
