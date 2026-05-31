@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ACK Games</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section id="homeView" class="home-view" aria-label="游戏大厅">
+        <header class="home-header">
+          <p class="brand">ACK Games</p>
+          <h1>游戏大厅</h1>
+        </header>
+
+        <section class="game-grid" aria-label="游戏列表">
+          <button id="vacuumGameCard" class="game-card" type="button">
+            <span class="game-card-art" aria-hidden="true">
+              <span class="mini-pipe"></span>
+              <span class="mini-pipe"></span>
+              <span class="mini-pipe"></span>
+              <span class="mini-coin"></span>
+              <span class="mini-bill"></span>
+              <span class="mini-vacuum"></span>
+            </span>
+            <span class="game-card-copy">
+              <span class="game-state">可玩</span>
+              <strong>吸尘器接管道</strong>
+              <span>60 秒目标 200 分</span>
+            </span>
+          </button>
+
+          <article class="game-card game-card-disabled" aria-label="更多游戏">
+            <span class="game-card-art empty-art" aria-hidden="true">
+              <span></span>
+              <span></span>
+              <span></span>
+            </span>
+            <span class="game-card-copy">
+              <span class="game-state">准备中</span>
+              <strong>更多游戏</strong>
+              <span>下一款加入这里</span>
+            </span>
+          </article>
+        </section>
+      </section>
+
+      <section id="gameView" class="game-view" aria-label="当前游戏" hidden>
+        <header class="topbar">
+          <button id="homeButton" class="icon-button" type="button" aria-label="返回首页" title="返回首页">
+            ‹
+          </button>
+          <h1>吸尘器接管道</h1>
+          <button id="restartButton" class="icon-button" type="button" aria-label="再来一次" title="再来一次">
+            ↻
+          </button>
+        </header>
+
+        <section class="hud" aria-label="游戏状态">
+          <div>
+            <span>分数</span>
+            <strong id="scoreValue">0</strong>
+          </div>
+          <div>
+            <span>时间</span>
+            <strong id="timeValue">60</strong>
+          </div>
+          <div>
+            <span>目标</span>
+            <strong id="targetValue">200</strong>
+          </div>
+          <div>
+            <span>状态</span>
+            <strong id="statusValue">游戏中</strong>
+          </div>
+        </section>
+
+        <canvas id="gameCanvas" width="640" height="760" aria-label="吸尘器接管道游戏画面"></canvas>
+      </section>
+    </main>
+
+    <script src="game.js"></script>
+  </body>
+</html>

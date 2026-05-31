@@ -1,0 +1,9 @@
+_deploy/
+.wrangler/
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+verification-screenshot.png
+.DS_Store
+Thumbs.db
