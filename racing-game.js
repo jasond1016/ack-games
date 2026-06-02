@@ -1,8 +1,12 @@
 import * as THREE from "three";
 import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/loaders/GLTFLoader.js";
+import RAPIER from "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/+esm";
 
 const carModelUrl = new URL("./kenney_car-kit/Models/GLB format/race-future.glb", import.meta.url).href;
 const carModelLoader = new GLTFLoader();
+const rapierReadyPromise = RAPIER.init();
+const upAxis = new THREE.Vector3(0, 1, 0);
+const tempQuaternion = new THREE.Quaternion();
 
 export function createRacingGame() {
   const canvas = document.getElementById("racingCanvas");
@@ -45,21 +49,20 @@ export function createRacingGame() {
     controlPoints: [
       [-78, -54],
       [-28, -70],
-      [38, -66],
-      [84, -36],
-      [70, 8],
-      [30, 18],
-      [78, 52],
-      [26, 76],
-      [-52, 66],
-      [-92, 24],
-      [-48, 0],
-      [-90, -30]
+      [34, -64],
+      [78, -32],
+      [68, 0],
+      [48, 18],
+      [64, 42],
+      [18, 68],
+      [-44, 62],
+      [-82, 24],
+      [-58, 6],
+      [-82, -22]
     ]
   };
 
   const railConfig = {
-    offset: trackConfig.width / 2 + 1.08,
     sampleCount: 200,
     railHeight: 0.78,
     railRadius: 0.16,
@@ -78,31 +81,65 @@ export function createRacingGame() {
   };
 
   const carConfig = {
-    maxForwardSpeed: 44,
+    maxForwardSpeed: 46,
     maxReverseSpeed: 11,
-    engineForce: 31,
-    brakeForce: 44,
+    engineForce: 35,
+    brakeForce: 40,
     reverseForce: 15,
-    drag: 0.032,
-    rollingResistance: 0.82,
-    roadGrip: 8.4,
+    drag: 0.028,
+    rollingResistance: 0.76,
+    roadGrip: 9.4,
     grassGrip: 2.9,
-    maxSteerRate: 1.55
+    maxSteerRate: 1.82
+  };
+
+  const handlingConfig = {
+    steeringResponse: 0.3,
+    steeringReleaseResponse: 0.2,
+    lowSpeedSteerBoost: 1.42,
+    highSpeedSteerStart: 18,
+    highSpeedSteerEnd: 42,
+    highSpeedSteerMin: 0.58,
+    steerFactorFloor: 0.48,
+    driftEntrySpeed: 9,
+    driftSustainSpeed: 6.5,
+    driftSteerThreshold: 0.22,
+    driftGripMultiplier: 0.2,
+    driftBrakeMultiplier: 0.26,
+    driftTurnMultiplier: 1.48,
+    driftYawAssist: 0.62,
+    launchBoostThreshold: 12,
+    launchForceMultiplier: 1.18,
+    grassTopSpeedMultiplier: 0.66,
+    grassDragMultiplier: 1.55
   };
 
   const collisionConfig = {
-    roadLimit: trackConfig.width / 2 - 0.3,
-    railLimit: trackConfig.width / 2 + 1.0,
-    stopSeconds: 1.1,
-    carRadius: 1.9,
-    carStopSeconds: 0.72,
-    opponentPauseSeconds: 0.72
+    stopSeconds: 0.16,
+    carStopSeconds: 0.12,
+    opponentPauseSeconds: 0.36
   };
 
   const opponentConfig = {
     speed: Math.min(8.2, 30 / 3.6),
     laneOffset: -2.7,
     startProgress: raceConfig.startProgress
+  };
+
+  const physicsConfig = {
+    fixedHeight: 0.34,
+    carHalfWidth: 0.9,
+    carHalfHeight: 0.34,
+    carHalfLength: 1.55,
+    railHalfHeight: 0.56,
+    railHalfDepth: 0.34,
+    stepSeconds: 1 / 60
+  };
+
+  const trackShapeConfig = {
+    minHalfWidthScale: 0.4,
+    curvatureRadiusFactor: 4,
+    widthSmoothingPasses: 8
   };
 
   const keyState = new Set();
@@ -128,7 +165,8 @@ export function createRacingGame() {
     lapLockSeconds: 0,
     lapArmed: false,
     boostSeconds: 0,
-    boostCharges: boostConfig.charges
+    boostCharges: boostConfig.charges,
+    drifting: false
   };
   const opponentState = {
     progress: opponentConfig.startProgress,
@@ -162,6 +200,7 @@ export function createRacingGame() {
   let initializationPromise = null;
   let carTemplatePromise = null;
   let startRequestId = 0;
+  let physics = null;
 
   function start() {
     prepareConfetti();
@@ -229,6 +268,7 @@ export function createRacingGame() {
 
       createLights();
       createWorld();
+      await initializePhysics();
 
       [car, opponentCar] = await Promise.all([
         createCar(0xd40000),
@@ -286,18 +326,169 @@ export function createRacingGame() {
     addMountains();
   }
 
+  async function initializePhysics() {
+    if (physics) {
+      return;
+    }
+
+    await rapierReadyPromise;
+
+    const world = new RAPIER.World({ x: 0, y: -18, z: 0 });
+    world.timestep = physicsConfig.stepSeconds;
+
+    physics = {
+      world,
+      eventQueue: new RAPIER.EventQueue(true),
+      colliderTags: new Map(),
+      playerBody: null,
+      playerCollider: null,
+      opponentBody: null,
+      opponentCollider: null
+    };
+
+    const groundCollider = world.createCollider(
+      RAPIER.ColliderDesc.cuboid(180, 0.3, 150)
+        .setTranslation(0, -0.3, 0)
+        .setFriction(1.2)
+    );
+    physics.colliderTags.set(groundCollider.handle, "ground");
+
+    createRailColliders(1);
+    createRailColliders(-1);
+
+    const playerBodyDesc = RAPIER.RigidBodyDesc.dynamic()
+      .setTranslation(0, physicsConfig.fixedHeight, 0)
+      .enabledRotations(false, true, false)
+      .setCanSleep(false)
+      .setCcdEnabled(true)
+      .setAngularDamping(8);
+    physics.playerBody = world.createRigidBody(playerBodyDesc);
+    physics.playerCollider = world.createCollider(
+      RAPIER.ColliderDesc.cuboid(
+        physicsConfig.carHalfWidth,
+        physicsConfig.carHalfHeight,
+        physicsConfig.carHalfLength
+      )
+        .setFriction(0.15)
+        .setRestitution(0)
+        .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
+      physics.playerBody
+    );
+    physics.colliderTags.set(physics.playerCollider.handle, "player");
+
+    const opponentBodyDesc = RAPIER.RigidBodyDesc.kinematicPositionBased()
+      .setTranslation(0, physicsConfig.fixedHeight, 0)
+      .enabledRotations(false, true, false)
+      .setCanSleep(false);
+    physics.opponentBody = world.createRigidBody(opponentBodyDesc);
+    physics.opponentCollider = world.createCollider(
+      RAPIER.ColliderDesc.cuboid(
+        physicsConfig.carHalfWidth,
+        physicsConfig.carHalfHeight,
+        physicsConfig.carHalfLength
+      )
+        .setFriction(0.15)
+        .setRestitution(0),
+      physics.opponentBody
+    );
+    physics.colliderTags.set(physics.opponentCollider.handle, "opponent");
+  }
+
+  function createRailColliders(side) {
+    if (!physics) {
+      return;
+    }
+
+    for (let index = 0; index < railConfig.sampleCount; index += 1) {
+      const startSample = trackProfileAtProgress(index / railConfig.sampleCount);
+      const endSample = trackProfileAtProgress((index + 1) / railConfig.sampleCount);
+      const start = startSample.center.clone().add(startSample.normal.clone().multiplyScalar(startSample.railOffset * side));
+      const end = endSample.center.clone().add(endSample.normal.clone().multiplyScalar(endSample.railOffset * side));
+      const segment = end.clone().sub(start);
+      const length = segment.length();
+
+      if (length <= 0.01) {
+        continue;
+      }
+
+      const midpoint = start.clone().add(end).multiplyScalar(0.5);
+      const yaw = Math.atan2(segment.x, segment.y);
+      const railCollider = physics.world.createCollider(
+        RAPIER.ColliderDesc.cuboid(length * 0.5, physicsConfig.railHalfHeight, physicsConfig.railHalfDepth)
+          .setTranslation(midpoint.x, physicsConfig.railHalfHeight, midpoint.y)
+          .setRotation(rapierRotationFromYaw(yaw))
+          .setFriction(0.12)
+          .setRestitution(0.04)
+      );
+      physics.colliderTags.set(railCollider.handle, "rail");
+    }
+  }
+
+  function syncPlayerPhysicsState(preferredIndex = state.trackIndex) {
+    if (!physics?.playerBody) {
+      return;
+    }
+
+    const translation = physics.playerBody.translation();
+    const velocity = physics.playerBody.linvel();
+    state.position.set(translation.x, translation.z);
+    state.velocity.set(velocity.x, velocity.z);
+    syncPlayerTrackMetrics(preferredIndex);
+  }
+
+  function syncOpponentPhysicsState() {
+    if (!physics?.opponentBody) {
+      return;
+    }
+
+    const translation = physics.opponentBody.translation();
+    opponentState.position.set(translation.x, translation.z);
+  }
+
+  function setPlayerBodyPose(position, heading) {
+    if (!physics?.playerBody) {
+      return;
+    }
+
+    physics.playerBody.setTranslation({ x: position.x, y: physicsConfig.fixedHeight, z: position.y }, true);
+    physics.playerBody.setRotation(rapierRotationFromYaw(heading), true);
+    physics.playerBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    physics.playerBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+  }
+
+  function setOpponentBodyPose(position, heading) {
+    if (!physics?.opponentBody) {
+      return;
+    }
+
+    physics.opponentBody.setTranslation({ x: position.x, y: physicsConfig.fixedHeight, z: position.y }, true);
+    physics.opponentBody.setRotation(rapierRotationFromYaw(heading), true);
+    physics.opponentBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    physics.opponentBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+  }
+
+  function rapierRotationFromYaw(yaw) {
+    tempQuaternion.setFromAxisAngle(upAxis, yaw);
+    return {
+      w: tempQuaternion.w,
+      x: tempQuaternion.x,
+      y: tempQuaternion.y,
+      z: tempQuaternion.z
+    };
+  }
+
   function createRoadMesh() {
     const positions = [];
+    const normals = [];
     const indices = [];
-    const halfWidth = trackConfig.width / 2;
 
-    for (let index = 0; index < trackConfig.samples; index += 1) {
-      const sample = sampleTrack(index / trackConfig.samples);
-      const left = sample.center.clone().add(sample.normal.clone().multiplyScalar(halfWidth));
-      const right = sample.center.clone().add(sample.normal.clone().multiplyScalar(-halfWidth));
+    for (const sample of trackSamples) {
+      const left = sample.center.clone().add(sample.normal.clone().multiplyScalar(sample.halfWidth));
+      const right = sample.center.clone().add(sample.normal.clone().multiplyScalar(-sample.halfWidth));
 
       positions.push(left.x, 0.06, left.y);
       positions.push(right.x, 0.06, right.y);
+      normals.push(0, 1, 0, 0, 1, 0);
     }
 
     for (let index = 0; index < trackConfig.samples; index += 1) {
@@ -307,31 +498,27 @@ export function createRacingGame() {
       const nextLeft = next * 2;
       const nextRight = nextLeft + 1;
 
-      indices.push(left, right, nextLeft);
-      indices.push(right, nextRight, nextLeft);
+      indices.push(left, nextLeft, right);
+      indices.push(right, nextLeft, nextRight);
     }
 
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
     geometry.setIndex(indices);
-    geometry.computeVertexNormals();
 
     return new THREE.Mesh(
       geometry,
       new THREE.MeshStandardMaterial({
         color: 0x16181c,
         roughness: 0.94,
-        metalness: 0.02,
-        side: THREE.DoubleSide,
-        polygonOffset: true,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits: -1
+        metalness: 0.02
       })
     );
   }
 
   function addFinishLine() {
-    const sample = sampleTrack(raceConfig.startProgress);
+    const sample = trackProfileAtProgress(raceConfig.startProgress);
     const group = new THREE.Group();
     group.position.set(sample.center.x, 0, sample.center.y);
     group.rotation.y = sample.heading;
@@ -365,8 +552,8 @@ export function createRacingGame() {
     });
     const leftPost = new THREE.Mesh(postGeometry, postMaterial);
     const rightPost = new THREE.Mesh(postGeometry, postMaterial);
-    leftPost.position.set(trackConfig.width / 2 + 1.15, 1.65, 0);
-    rightPost.position.set(-trackConfig.width / 2 - 1.15, 1.65, 0);
+    leftPost.position.set(sample.railOffset + 0.07, 1.65, 0);
+    rightPost.position.set(-sample.railOffset - 0.07, 1.65, 0);
     leftPost.castShadow = true;
     rightPost.castShadow = true;
 
@@ -414,12 +601,11 @@ export function createRacingGame() {
     const curbWhiteMaterial = new THREE.MeshStandardMaterial({ color: 0xf6f6f6, roughness: 0.58 });
     const lineGeometry = new THREE.BoxGeometry(0.18, 0.03, 3.8);
     const curbGeometry = new THREE.BoxGeometry(0.84, 0.05, 2.7);
-    const halfWidth = trackConfig.width / 2;
-    const lineOffset = halfWidth - 0.4;
-    const curbOffset = halfWidth + 0.18;
 
     for (let index = 0; index < 120; index += 1) {
-      const sample = sampleTrack(index / 120);
+      const sample = trackProfileAtProgress(index / 120);
+      const lineOffset = sample.halfWidth - 0.4;
+      const curbOffset = sample.halfWidth + 0.18;
       const leftLinePosition = sample.center.clone().add(sample.normal.clone().multiplyScalar(lineOffset));
       const rightLinePosition = sample.center.clone().add(sample.normal.clone().multiplyScalar(-lineOffset));
 
@@ -460,8 +646,8 @@ export function createRacingGame() {
       metalness: 0.55
     });
 
-    const outerPoints = createRailPoints(railConfig.offset, railConfig.sampleCount);
-    const innerPoints = createRailPoints(-railConfig.offset, railConfig.sampleCount);
+    const outerPoints = createRailPoints(1, railConfig.sampleCount);
+    const innerPoints = createRailPoints(-1, railConfig.sampleCount);
 
     scene.add(
       createRailRun(outerPoints, railMaterial),
@@ -522,10 +708,10 @@ export function createRacingGame() {
     return group;
   }
 
-  function createRailPoints(offset, sampleCount) {
+  function createRailPoints(side, sampleCount) {
     return Array.from({ length: sampleCount }, (_, index) => {
-      const sample = sampleTrack(index / sampleCount);
-      const point = sample.center.clone().add(sample.normal.clone().multiplyScalar(offset));
+      const sample = trackProfileAtProgress(index / sampleCount);
+      const point = sample.center.clone().add(sample.normal.clone().multiplyScalar(sample.railOffset * side));
       return new THREE.Vector3(point.x, railConfig.railHeight, point.y);
     });
   }
@@ -883,10 +1069,6 @@ export function createRacingGame() {
     if (!raceState.finished) {
       updateControls();
       updatePhysics(deltaSeconds);
-      if (raceState.opponentEnabled) {
-        updateOpponent(deltaSeconds);
-        handleCarCollision();
-      }
       updateRaceState(deltaSeconds);
     } else {
       state.throttle = 0;
@@ -914,7 +1096,10 @@ export function createRacingGame() {
     state.brake = brakePressed ? 1 : 0;
 
     const targetSteer = (leftPressed ? 1 : 0) - (rightPressed ? 1 : 0);
-    state.steering += (targetSteer - state.steering) * 0.22;
+    const steeringResponse = targetSteer === 0
+      ? handlingConfig.steeringReleaseResponse
+      : handlingConfig.steeringResponse;
+    state.steering += (targetSteer - state.steering) * steeringResponse;
   }
 
   function updateBoostEffect(timestamp) {
@@ -953,81 +1138,43 @@ export function createRacingGame() {
   }
 
   function updatePhysics(deltaSeconds) {
-    syncPlayerTrackMetrics();
+    if (!physics?.playerBody) {
+      return;
+    }
+
+    physics.world.timestep = deltaSeconds;
+    syncPlayerPhysicsState();
+    state.previousPosition.copy(state.position);
+    state.previousTrackIndex = state.trackIndex;
     state.boostSeconds = Math.max(0, state.boostSeconds - deltaSeconds);
+    const verticalVelocity = physics.playerBody.linvel().y;
+    const impactRecovery = state.stoppedByImpactSeconds > 0 ? 0.48 : 1;
 
     if (state.stoppedByImpactSeconds > 0) {
       state.stoppedByImpactSeconds = Math.max(0, state.stoppedByImpactSeconds - deltaSeconds);
-      state.velocity.set(0, 0);
-      return;
+      state.drifting = false;
     }
 
-    const forward = forwardVector();
-    const right = new THREE.Vector2(forward.y, -forward.x);
-    const forwardSpeed = state.velocity.dot(forward);
-    const boostActive = state.boostSeconds > 0;
-    const currentMaxForwardSpeed = playerMaxForwardSpeed();
-    const currentEngineForce = carConfig.engineForce * (boostActive ? boostConfig.engineForceMultiplier : 1);
+    drivePlayerBody(deltaSeconds, verticalVelocity, impactRecovery);
 
-    if (state.throttle > 0 && forwardSpeed < currentMaxForwardSpeed) {
-      const speedRatio = Math.max(0, forwardSpeed / currentMaxForwardSpeed);
-      const force = currentEngineForce * (1 - speedRatio * 0.32);
-      state.velocity.addScaledVector(forward, force * deltaSeconds);
-    }
-
-    if (state.brake > 0) {
-      if (forwardSpeed > 1.2) {
-        state.velocity.addScaledVector(forward, -carConfig.brakeForce * deltaSeconds);
-      } else if (forwardSpeed > -carConfig.maxReverseSpeed) {
-        state.velocity.addScaledVector(forward, -carConfig.reverseForce * deltaSeconds);
-      }
-    }
-
-    const lateralSpeed = state.velocity.dot(right);
-    const grip = state.onRoad ? carConfig.roadGrip : carConfig.grassGrip;
-    state.velocity.addScaledVector(right, -lateralSpeed * Math.min(1, grip * deltaSeconds));
-
-    const rolling = Math.max(0, 1 - carConfig.rollingResistance * deltaSeconds * (state.onRoad ? 1 : 1.7));
-    const drag = Math.max(0, 1 - state.velocity.lengthSq() * carConfig.drag * deltaSeconds * 0.01);
-    state.velocity.multiplyScalar(rolling * drag);
-
-    if (!state.onRoad) {
-      state.velocity.multiplyScalar(Math.max(0, 1 - 1.25 * deltaSeconds));
-    }
-
-    const speed = state.velocity.length();
-    const speedSign = forwardSpeed >= 0 ? 1 : -1;
-    const steerFactor = Math.min(1, speed / 9);
-    const turnRate = state.steering * carConfig.maxSteerRate * steerFactor * speedSign;
-    state.heading += turnRate * deltaSeconds;
-
-    const speedAlongHeading = state.velocity.dot(forwardVector());
-    const maxSpeed = speedAlongHeading >= 0 ? currentMaxForwardSpeed : carConfig.maxReverseSpeed;
-    if (speed > maxSpeed) {
-      state.velocity.multiplyScalar(maxSpeed / speed);
-    }
-
-    state.previousPosition.copy(state.position);
-    state.previousTrackIndex = state.trackIndex;
-
-    state.position.addScaledVector(state.velocity, deltaSeconds);
-    syncPlayerTrackMetrics(state.previousTrackIndex);
-    handleRailCollision(state.previousPosition, state.previousTrackIndex);
-  }
-
-  function handleRailCollision(previousPosition, previousTrackIndex) {
-    if (trackDistanceFromIndex(state.position, state.trackIndex) <= collisionConfig.railLimit) {
-      return;
-    }
-
-    state.position.copy(previousPosition);
-    state.velocity.set(0, 0);
-    state.stoppedByImpactSeconds = collisionConfig.stopSeconds;
-    syncPlayerTrackMetrics(previousTrackIndex);
+    updateOpponent(deltaSeconds);
+    physics.world.step(physics.eventQueue);
+    drainPhysicsEvents();
+    syncPlayerPhysicsState(state.previousTrackIndex);
+    syncOpponentPhysicsState();
   }
 
   function updateOpponent(deltaSeconds) {
+    if (!physics?.opponentBody || !physics?.opponentCollider) {
+      return;
+    }
+
     opponentState.collisionHoldSeconds = Math.max(0, opponentState.collisionHoldSeconds - deltaSeconds);
+    physics.opponentCollider.setEnabled(raceState.opponentEnabled);
+
+    if (!raceState.opponentEnabled) {
+      return;
+    }
 
     if (opponentState.collisionHoldSeconds === 0) {
       opponentState.progress = wrapProgress(opponentState.progress + (opponentConfig.speed * deltaSeconds) / trackLength);
@@ -1035,39 +1182,215 @@ export function createRacingGame() {
 
     syncOpponentPose();
     opponentState.raceProgress = relativeRaceProgress(opponentState.progress);
+    physics.opponentBody.setNextKinematicTranslation({
+      x: opponentState.position.x,
+      y: physicsConfig.fixedHeight,
+      z: opponentState.position.y
+    });
+    physics.opponentBody.setNextKinematicRotation(rapierRotationFromYaw(opponentState.heading));
   }
 
-  function handleCarCollision() {
-    const delta = state.position.clone().sub(opponentState.position);
-    const minimumDistance = collisionConfig.carRadius * 2;
-    let distance = delta.length();
+  function drivePlayerBody(deltaSeconds, verticalVelocity, controlScale = 1) {
+    const velocity = state.velocity.clone();
+    const forward = forwardVector();
+    const right = new THREE.Vector2(forward.y, -forward.x);
+    const boostActive = state.boostSeconds > 0;
+    const maxForwardSpeed = playerMaxForwardSpeed() * (state.onRoad ? 1 : handlingConfig.grassTopSpeedMultiplier);
+    const currentEngineForce = carConfig.engineForce
+      * (boostActive ? boostConfig.engineForceMultiplier : 1)
+      * controlScale;
+    let forwardSpeed = velocity.dot(forward);
+    const driftIntent = controlScale >= 0.95 &&
+      state.onRoad &&
+      state.throttle > 0 &&
+      state.brake > 0 &&
+      Math.abs(state.steering) > handlingConfig.driftSteerThreshold &&
+      Math.abs(forwardSpeed) > handlingConfig.driftEntrySpeed;
 
-    if (distance >= minimumDistance) {
+    if (state.drifting) {
+      state.drifting =
+        state.onRoad &&
+        Math.abs(forwardSpeed) > handlingConfig.driftSustainSpeed &&
+        Math.abs(state.steering) > 0.08 &&
+        (driftIntent || state.throttle > 0);
+    } else {
+      state.drifting = driftIntent;
+    }
+
+    if (state.throttle > 0 && forwardSpeed < maxForwardSpeed) {
+      const speedRatio = Math.max(0, forwardSpeed / maxForwardSpeed);
+      const launchMultiplier = Math.abs(forwardSpeed) < handlingConfig.launchBoostThreshold
+        ? handlingConfig.launchForceMultiplier
+        : 1;
+      const force = currentEngineForce * launchMultiplier * (1 - speedRatio * 0.34);
+      velocity.addScaledVector(forward, force * deltaSeconds);
+    }
+
+    if (state.brake > 0) {
+      if (forwardSpeed > 1.2) {
+        const brakeForce = state.drifting
+          ? carConfig.brakeForce * handlingConfig.driftBrakeMultiplier
+          : carConfig.brakeForce;
+        velocity.addScaledVector(forward, -brakeForce * deltaSeconds);
+      } else if (forwardSpeed > -carConfig.maxReverseSpeed) {
+        velocity.addScaledVector(forward, -carConfig.reverseForce * deltaSeconds);
+      }
+    }
+
+    let lateralSpeed = velocity.dot(right);
+    const grip = state.onRoad
+      ? state.drifting ? carConfig.roadGrip * handlingConfig.driftGripMultiplier : carConfig.roadGrip
+      : carConfig.grassGrip;
+    velocity.addScaledVector(right, -lateralSpeed * Math.min(1, grip * deltaSeconds));
+
+    const rolling = Math.max(0, 1 - carConfig.rollingResistance * deltaSeconds * (state.onRoad ? 1 : 1.75));
+    const drag = Math.max(0, 1 - velocity.lengthSq() * carConfig.drag * deltaSeconds * 0.01);
+    velocity.multiplyScalar(rolling * drag);
+
+    if (!state.onRoad) {
+      velocity.multiplyScalar(Math.max(0, 1 - handlingConfig.grassDragMultiplier * deltaSeconds));
+    }
+
+    const speed = velocity.length();
+    const speedSign = forwardSpeed >= 0 ? 1 : -1;
+    const lowSpeedBlend = 1 - clamp(speed / handlingConfig.highSpeedSteerStart, 0, 1);
+    const highSpeedBlend = clamp(
+      (speed - handlingConfig.highSpeedSteerStart)
+        / (handlingConfig.highSpeedSteerEnd - handlingConfig.highSpeedSteerStart),
+      0,
+      1
+    );
+    const steerFactor = Math.max(
+      handlingConfig.steerFactorFloor,
+      handlingConfig.lowSpeedSteerBoost * lowSpeedBlend
+        + (1 - highSpeedBlend) * (1 - lowSpeedBlend)
+        + handlingConfig.highSpeedSteerMin * highSpeedBlend
+    );
+    const driftTurnBonus = state.drifting ? handlingConfig.driftTurnMultiplier : 1;
+    const turnRate = state.steering * carConfig.maxSteerRate * steerFactor * speedSign * driftTurnBonus;
+    state.heading += turnRate * deltaSeconds;
+
+    if (state.drifting) {
+      state.heading += state.steering * handlingConfig.driftYawAssist * deltaSeconds;
+    }
+
+    const headingForward = forwardVector();
+    const speedAlongHeading = velocity.dot(headingForward);
+    const maxSpeed = speedAlongHeading >= 0 ? maxForwardSpeed : carConfig.maxReverseSpeed;
+    if (speed > maxSpeed) {
+      velocity.multiplyScalar(maxSpeed / speed);
+    }
+
+    physics.playerBody.setRotation(rapierRotationFromYaw(state.heading), true);
+    physics.playerBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    physics.playerBody.setLinvel(
+      {
+        x: velocity.x,
+        y: clamp(verticalVelocity, -12, 12),
+        z: velocity.y
+      },
+      true
+    );
+  }
+
+  function drainPhysicsEvents() {
+    if (!physics?.playerCollider || !physics?.playerBody) {
       return;
     }
 
-    if (distance < 0.001) {
-      delta.copy(forwardVector());
-      distance = 1;
-    } else {
-      delta.multiplyScalar(1 / distance);
+    physics.eventQueue.drainCollisionEvents((handle1, handle2, started) => {
+      if (!started) {
+        return;
+      }
+
+      if (handle1 !== physics.playerCollider.handle && handle2 !== physics.playerCollider.handle) {
+        return;
+      }
+
+      const otherHandle = handle1 === physics.playerCollider.handle ? handle2 : handle1;
+      const tag = physics.colliderTags.get(otherHandle);
+      const current = physics.playerBody.linvel();
+      let responseVelocity = null;
+
+      if (tag === "rail") {
+        const impactNormal = currentRailImpactNormal();
+        responseVelocity = resolveRailImpactVelocity(
+          new THREE.Vector2(current.x, current.z),
+          impactNormal
+        );
+        separatePlayerFromImpact(impactNormal, 0.18);
+        physics.playerBody.setLinvel({ x: responseVelocity.x, y: current.y, z: responseVelocity.y }, true);
+        state.boostSeconds = 0;
+        state.drifting = false;
+        state.stoppedByImpactSeconds = Math.max(state.stoppedByImpactSeconds, collisionConfig.stopSeconds);
+      } else if (tag === "opponent" && raceState.opponentEnabled) {
+        const opponentDelta = state.position.clone().sub(opponentState.position).normalize();
+        responseVelocity = resolveImpactVelocity(
+          new THREE.Vector2(current.x, current.z),
+          opponentDelta.lengthSq() > 0.0001 ? opponentDelta : forwardVector(),
+          0.56,
+          0.24
+        );
+        physics.playerBody.setLinvel({ x: responseVelocity.x, y: current.y, z: responseVelocity.y }, true);
+        state.boostSeconds = 0;
+        state.drifting = false;
+        state.stoppedByImpactSeconds = Math.max(state.stoppedByImpactSeconds, collisionConfig.carStopSeconds);
+        opponentState.collisionHoldSeconds = Math.max(
+          opponentState.collisionHoldSeconds,
+          collisionConfig.opponentPauseSeconds
+        );
+      }
+
+      if (responseVelocity && responseVelocity.lengthSq() > 0.4) {
+        state.heading = Math.atan2(responseVelocity.x, responseVelocity.y);
+      }
+    });
+  }
+
+  function currentRailImpactNormal() {
+    const sample = trackSamples[state.trackIndex];
+    const delta = state.position.clone().sub(sample.center);
+    const side = Math.sign(delta.dot(sample.normal)) || 1;
+    return sample.normal.clone().multiplyScalar(side).normalize();
+  }
+
+  function resolveRailImpactVelocity(velocity, surfaceNormal) {
+    const trackTangent = trackSamples[state.trackIndex].tangent.clone();
+    const tangentDirection = velocity.dot(trackTangent) >= 0 ? 1 : -1;
+    const slideDirection = trackTangent.multiplyScalar(tangentDirection);
+    const forwardTrackSpeed = Math.abs(velocity.dot(slideDirection));
+    const slideFloor = state.throttle > 0.1 ? 3.8 : 1.6;
+    const slideVelocity = slideDirection.multiplyScalar(Math.max(forwardTrackSpeed * 0.62, slideFloor));
+    const bounceVelocity = resolveImpactVelocity(velocity, surfaceNormal, 0.34, 0.28);
+
+    return slideVelocity.add(bounceVelocity).clampLength(0, playerMaxForwardSpeed() * 0.76);
+  }
+
+  function separatePlayerFromImpact(surfaceNormal, distance) {
+    if (!physics?.playerBody || distance <= 0) {
+      return;
     }
 
-    const overlap = minimumDistance - distance + 0.04;
-    state.position.addScaledVector(delta, overlap);
-    state.velocity.set(0, 0);
-    state.boostSeconds = 0;
-    state.stoppedByImpactSeconds = Math.max(state.stoppedByImpactSeconds, collisionConfig.carStopSeconds);
-    opponentState.collisionHoldSeconds = Math.max(
-      opponentState.collisionHoldSeconds,
-      collisionConfig.opponentPauseSeconds
+    const translation = physics.playerBody.translation();
+    physics.playerBody.setTranslation(
+      {
+        x: translation.x + surfaceNormal.x * distance,
+        y: translation.y,
+        z: translation.z + surfaceNormal.y * distance
+      },
+      true
     );
+  }
 
-    syncPlayerTrackMetrics(state.trackIndex);
-    if (trackDistanceFromIndex(state.position, state.trackIndex) > collisionConfig.railLimit) {
-      state.position.copy(state.previousPosition);
-      syncPlayerTrackMetrics(state.previousTrackIndex);
-    }
+  function resolveImpactVelocity(velocity, surfaceNormal, tangentDamping, bounceFactor) {
+    const normal = surfaceNormal.clone().normalize();
+    const tangent = new THREE.Vector2(-normal.y, normal.x);
+    const normalSpeed = velocity.dot(normal);
+    const tangentSpeed = velocity.dot(tangent);
+    const bouncedNormalSpeed = normalSpeed > 0 ? -normalSpeed * bounceFactor : normalSpeed * 0.2;
+
+    return tangent.multiplyScalar(tangentSpeed * tangentDamping)
+      .add(normal.multiplyScalar(bouncedNormalSpeed));
   }
 
   function updateRaceState(deltaSeconds) {
@@ -1133,7 +1456,10 @@ export function createRacingGame() {
     raceState.playerPlace = winner === "player" ? 1 : 2;
     state.velocity.set(0, 0);
     state.boostSeconds = 0;
+    state.drifting = false;
     keyState.clear();
+    physics?.playerBody?.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    physics?.playerBody?.setAngvel({ x: 0, y: 0, z: 0 }, true);
     showResultOverlay(winner);
     updateHud();
   }
@@ -1187,11 +1513,15 @@ export function createRacingGame() {
     }
 
     if (state.stoppedByImpactSeconds > 0) {
-      return "撞停";
+      return "碰撞恢复";
     }
 
     if (state.boostSeconds > 0) {
       return "加速中";
+    }
+
+    if (state.drifting) {
+      return "漂移中";
     }
 
     if (!state.onRoad) {
@@ -1204,7 +1534,7 @@ export function createRacingGame() {
   function resetRace() {
     hideResultOverlay();
 
-    const start = sampleTrack(raceConfig.startProgress);
+    const start = trackProfileAtProgress(raceConfig.startProgress);
     const startPosition = start.center.clone().add(start.normal.clone().multiplyScalar(2.8));
 
     state.position.copy(startPosition);
@@ -1226,6 +1556,7 @@ export function createRacingGame() {
     state.lapArmed = false;
     state.boostSeconds = 0;
     state.boostCharges = boostConfig.charges;
+    state.drifting = false;
 
     opponentState.progress = opponentConfig.startProgress;
     opponentState.laneOffset = opponentConfig.laneOffset;
@@ -1242,6 +1573,13 @@ export function createRacingGame() {
 
     syncPlayerTrackMetrics();
     syncOpponentPose();
+    setPlayerBodyPose(startPosition, start.heading);
+    setOpponentBodyPose(opponentState.position, opponentState.heading);
+    if (physics?.opponentCollider) {
+      physics.opponentCollider.setEnabled(raceState.opponentEnabled);
+    }
+    syncPlayerPhysicsState(state.trackIndex);
+    syncOpponentPhysicsState();
     state.lastRaceProgress = state.raceProgress;
     opponentState.raceProgress = relativeRaceProgress(opponentState.progress);
     opponentState.lastRaceProgress = opponentState.raceProgress;
@@ -1300,6 +1638,9 @@ export function createRacingGame() {
     raceState.opponentEnabled = !raceState.opponentEnabled;
     opponentState.collisionHoldSeconds = 0;
     raceState.playerPlace = 1;
+    if (physics?.opponentCollider) {
+      physics.opponentCollider.setEnabled(raceState.opponentEnabled);
+    }
     updateOpponentTransform();
     updateHud();
     return raceState.opponentEnabled;
@@ -1393,7 +1734,45 @@ export function createRacingGame() {
   }
 
   function createTrackSamples() {
-    return Array.from({ length: trackConfig.samples }, (_, index) => sampleTrack(index / trackConfig.samples));
+    const baseSamples = Array.from(
+      { length: trackConfig.samples },
+      (_, index) => sampleTrack(index / trackConfig.samples)
+    );
+    const baseHalfWidth = trackConfig.width / 2;
+    const minHalfWidth = baseHalfWidth * trackShapeConfig.minHalfWidthScale;
+    let halfWidths = baseSamples.map((_, index) => {
+      const previous = baseSamples[wrapIndex(index - 1, baseSamples.length)];
+      const next = baseSamples[wrapIndex(index + 1, baseSamples.length)];
+      const dot = clamp(previous.tangent.dot(next.tangent), -1, 1);
+      const turnAngle = Math.acos(dot);
+      const span = previous.center.distanceTo(next.center);
+      const radiusEstimate = turnAngle < 0.0001 ? Number.POSITIVE_INFINITY : span / turnAngle;
+      const widthScale = clamp(
+        radiusEstimate / (baseHalfWidth * trackShapeConfig.curvatureRadiusFactor),
+        trackShapeConfig.minHalfWidthScale,
+        1
+      );
+      return Math.max(minHalfWidth, baseHalfWidth * widthScale);
+    });
+
+    for (let pass = 0; pass < trackShapeConfig.widthSmoothingPasses; pass += 1) {
+      halfWidths = halfWidths.map((width, index) => {
+        const previous = halfWidths[wrapIndex(index - 1, halfWidths.length)];
+        const next = halfWidths[wrapIndex(index + 1, halfWidths.length)];
+        return clamp(previous * 0.25 + width * 0.5 + next * 0.25, minHalfWidth, baseHalfWidth);
+      });
+    }
+
+    return baseSamples.map((sample, index) => {
+      const halfWidth = halfWidths[index];
+      return {
+        ...sample,
+        halfWidth,
+        railOffset: halfWidth + 1.08,
+        roadLimit: Math.max(halfWidth - 0.3, 2.8),
+        railLimit: halfWidth + 1.0
+      };
+    });
   }
 
   function measureTrackLength() {
@@ -1424,12 +1803,24 @@ export function createRacingGame() {
     };
   }
 
+  function trackProfileAtProgress(progress) {
+    const base = sampleTrack(progress);
+    const profile = trackSamples[Math.round(wrapProgress(progress) * trackConfig.samples) % trackConfig.samples];
+    return {
+      ...base,
+      halfWidth: profile.halfWidth,
+      railOffset: profile.railOffset,
+      roadLimit: profile.roadLimit,
+      railLimit: profile.railLimit
+    };
+  }
+
   function syncOpponentPose() {
-    const sample = sampleTrack(opponentState.progress);
+    const sample = trackProfileAtProgress(opponentState.progress);
     const laneOffset = clamp(
       opponentState.laneOffset,
-      -collisionConfig.railLimit + 1.4,
-      collisionConfig.railLimit - 1.4
+      -sample.railLimit + 1.4,
+      sample.railLimit - 1.4
     );
     const position = sample.center.clone().add(sample.normal.clone().multiplyScalar(laneOffset));
 
@@ -1443,7 +1834,7 @@ export function createRacingGame() {
     state.trackIndex = nearest.index;
     state.trackProgress = nearest.progress;
     state.raceProgress = relativeRaceProgress(nearest.progress);
-    state.onRoad = nearest.distance <= collisionConfig.roadLimit;
+    state.onRoad = nearest.distance <= nearest.sample.roadLimit;
     return nearest;
   }
 
@@ -1478,7 +1869,8 @@ export function createRacingGame() {
     return {
       index: bestIndex,
       progress: bestIndex / trackConfig.samples,
-      distance: Math.sqrt(bestDistanceSq)
+      distance: Math.sqrt(bestDistanceSq),
+      sample: trackSamples[bestIndex]
     };
   }
 
@@ -1552,6 +1944,7 @@ export function createRacingGame() {
         lapArmed: state.lapArmed,
         boostSeconds: Number(state.boostSeconds.toFixed(2)),
         boostCharges: state.boostCharges,
+        drifting: state.drifting,
         speedKmh: Math.round(state.velocity.length() * 3.6),
         playerMaxForwardSpeed: playerMaxForwardSpeed(),
         status: currentStatusLabel(),
@@ -1575,7 +1968,7 @@ export function createRacingGame() {
     const opponentProgress = 0.12;
     const laneOffset = 0;
     const playerProgress = wrapProgress(opponentProgress + 0.0065);
-    const playerSample = sampleTrack(playerProgress);
+    const playerSample = trackProfileAtProgress(playerProgress);
 
     opponentState.progress = opponentProgress;
     opponentState.laneOffset = laneOffset;
@@ -1592,8 +1985,16 @@ export function createRacingGame() {
     state.onRoad = true;
     state.stoppedByImpactSeconds = 0;
     state.boostSeconds = 0;
+    state.drifting = false;
     syncPlayerTrackMetrics();
     state.previousTrackIndex = state.trackIndex;
+    setOpponentBodyPose(opponentState.position, opponentState.heading);
+    setPlayerBodyPose(state.position, state.heading);
+    if (physics?.opponentCollider) {
+      physics.opponentCollider.setEnabled(true);
+    }
+    syncPlayerPhysicsState(state.trackIndex);
+    syncOpponentPhysicsState();
 
     if (car && opponentCar && camera && renderer) {
       updateCarTransform();
