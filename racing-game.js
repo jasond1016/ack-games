@@ -1,4 +1,8 @@
 import * as THREE from "three";
+import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/loaders/GLTFLoader.js";
+
+const carModelUrl = new URL("./kenney_car-kit/Models/GLB format/race-future.glb", import.meta.url).href;
+const carModelLoader = new GLTFLoader();
 
 export function createRacingGame() {
   const canvas = document.getElementById("racingCanvas");
@@ -155,26 +159,49 @@ export function createRacingGame() {
   let listening = false;
   let animationFrameId = 0;
   let lastFrameTime = 0;
+  let initializationPromise = null;
+  let carTemplatePromise = null;
+  let startRequestId = 0;
 
   function start() {
-    initializeScene();
     prepareConfetti();
     keyState.clear();
-    resetRace();
     addListeners();
-    resizeRenderer();
     active = true;
-    lastFrameTime = performance.now();
+    const requestId = ++startRequestId;
+    statusValue.textContent = "载入赛车";
 
-    if (animationFrameId) {
-      cancelAnimationFrame(animationFrameId);
-    }
+    initializeScene()
+      .then(() => {
+        if (!active || requestId !== startRequestId) {
+          return;
+        }
 
-    animationFrameId = requestAnimationFrame(loop);
+        resetRace();
+        resizeRenderer();
+        lastFrameTime = performance.now();
+
+        if (animationFrameId) {
+          cancelAnimationFrame(animationFrameId);
+        }
+
+        animationFrameId = requestAnimationFrame(loop);
+      })
+      .catch((error) => {
+        console.error("Failed to initialize racing scene.", error);
+        if (requestId !== startRequestId) {
+          return;
+        }
+
+        active = false;
+        removeListeners();
+        statusValue.textContent = "赛车加载失败";
+      });
   }
 
   function stop() {
     active = false;
+    startRequestId += 1;
     keyState.clear();
     removeListeners();
 
@@ -184,29 +211,42 @@ export function createRacingGame() {
     }
   }
 
-  function initializeScene() {
+  async function initializeScene() {
     if (initialized) return;
+    if (initializationPromise) return initializationPromise;
 
-    renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
-    renderer.setClearColor(0x9fc9f3);
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFShadowMap;
+    initializationPromise = (async () => {
+      renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+      renderer.setClearColor(0x9fc9f3);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFShadowMap;
 
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x9fc9f3);
-    scene.fog = new THREE.Fog(0x9fc9f3, 150, 260);
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x9fc9f3);
+      scene.fog = new THREE.Fog(0x9fc9f3, 150, 260);
 
-    camera = new THREE.PerspectiveCamera(58, 1, 0.1, 500);
+      camera = new THREE.PerspectiveCamera(58, 1, 0.1, 500);
 
-    createLights();
-    createWorld();
+      createLights();
+      createWorld();
 
-    car = createCar();
-    opponentCar = createCar(0x1f4fa3);
-    scene.add(car);
-    scene.add(opponentCar);
+      [car, opponentCar] = await Promise.all([
+        createCar(0xd40000),
+        createCar(0x88a5ff)
+      ]);
 
-    initialized = true;
+      scene.add(car);
+      scene.add(opponentCar);
+
+      initialized = true;
+    })();
+
+    try {
+      await initializationPromise;
+    } catch (error) {
+      initializationPromise = null;
+      throw error;
+    }
   }
 
   function createLights() {
@@ -278,8 +318,8 @@ export function createRacingGame() {
     return new THREE.Mesh(
       geometry,
       new THREE.MeshStandardMaterial({
-        color: 0x2f353b,
-        roughness: 0.78,
+        color: 0x16181c,
+        roughness: 0.94,
         metalness: 0.02
       })
     );
@@ -359,20 +399,52 @@ export function createRacingGame() {
   }
 
   function addLaneMarks() {
-    const markMaterial = new THREE.MeshStandardMaterial({
-      color: 0xf2d34f,
-      roughness: 0.55,
-      emissive: 0x3a3109,
-      emissiveIntensity: 0.05
+    const edgeLineMaterial = new THREE.MeshStandardMaterial({
+      color: 0xf3f5f7,
+      roughness: 0.52,
+      emissive: 0x111111,
+      emissiveIntensity: 0.04
     });
+    const curbRedMaterial = new THREE.MeshStandardMaterial({ color: 0xcf2e2e, roughness: 0.62 });
+    const curbWhiteMaterial = new THREE.MeshStandardMaterial({ color: 0xf6f6f6, roughness: 0.58 });
+    const lineGeometry = new THREE.BoxGeometry(0.18, 0.03, 3.8);
+    const curbGeometry = new THREE.BoxGeometry(0.84, 0.05, 2.7);
+    const halfWidth = trackConfig.width / 2;
+    const lineOffset = halfWidth - 0.4;
+    const curbOffset = halfWidth + 0.18;
 
-    for (let index = 0; index < 92; index += 1) {
-      const sample = sampleTrack(index / 92);
-      const mark = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.035, 3.4), markMaterial);
-      mark.position.set(sample.center.x, 0.08, sample.center.y);
-      mark.rotation.y = sample.heading;
-      mark.receiveShadow = true;
-      scene.add(mark);
+    for (let index = 0; index < 120; index += 1) {
+      const sample = sampleTrack(index / 120);
+      const leftLinePosition = sample.center.clone().add(sample.normal.clone().multiplyScalar(lineOffset));
+      const rightLinePosition = sample.center.clone().add(sample.normal.clone().multiplyScalar(-lineOffset));
+
+      const leftLine = new THREE.Mesh(lineGeometry, edgeLineMaterial);
+      leftLine.position.set(leftLinePosition.x, 0.08, leftLinePosition.y);
+      leftLine.rotation.y = sample.heading;
+      leftLine.receiveShadow = true;
+
+      const rightLine = new THREE.Mesh(lineGeometry, edgeLineMaterial);
+      rightLine.position.set(rightLinePosition.x, 0.08, rightLinePosition.y);
+      rightLine.rotation.y = sample.heading;
+      rightLine.receiveShadow = true;
+
+      const curbMaterial = index % 2 === 0 ? curbRedMaterial : curbWhiteMaterial;
+      const leftCurbPosition = sample.center.clone().add(sample.normal.clone().multiplyScalar(curbOffset));
+      const rightCurbPosition = sample.center.clone().add(sample.normal.clone().multiplyScalar(-curbOffset));
+
+      const leftCurb = new THREE.Mesh(curbGeometry, curbMaterial);
+      leftCurb.position.set(leftCurbPosition.x, 0.07, leftCurbPosition.y);
+      leftCurb.rotation.y = sample.heading;
+      leftCurb.receiveShadow = true;
+      leftCurb.castShadow = true;
+
+      const rightCurb = new THREE.Mesh(curbGeometry, curbMaterial);
+      rightCurb.position.set(rightCurbPosition.x, 0.07, rightCurbPosition.y);
+      rightCurb.rotation.y = sample.heading;
+      rightCurb.receiveShadow = true;
+      rightCurb.castShadow = true;
+
+      scene.add(leftLine, rightLine, leftCurb, rightCurb);
     }
   }
 
@@ -510,7 +582,178 @@ export function createRacingGame() {
     }
   }
 
-  function createCar(color = 0xa81f34) {
+  async function createCar(tint = null) {
+    const template = await loadCarTemplate();
+    if (!template) {
+      return createFallbackCar(tint ?? 0xa81f34);
+    }
+
+    const group = new THREE.Group();
+    const model = template.clone(true);
+    cloneCarMaterials(model);
+    applyCarTint(model, tint);
+    group.add(model);
+
+    const box = new THREE.Box3().setFromObject(model);
+    const size = box.getSize(new THREE.Vector3());
+    const minZ = box.min.z;
+
+    const boostGroup = createBoostGroup(size, minZ);
+    group.userData.boostFlames = boostGroup.userData.flames;
+    group.userData.boostGroup = boostGroup;
+    group.add(boostGroup);
+    return group;
+  }
+
+  async function loadCarTemplate() {
+    if (carTemplatePromise) {
+      return carTemplatePromise;
+    }
+
+    carTemplatePromise = carModelLoader.loadAsync(carModelUrl)
+      .then((gltf) => {
+        const template = (gltf.scene || gltf.scenes?.[0])?.clone(true);
+        if (!template) {
+          throw new Error("race-future.glb does not contain a scene.");
+        }
+
+        normalizeCarModel(template);
+        template.traverse((child) => {
+          if (!child.isMesh) {
+            return;
+          }
+
+          child.castShadow = true;
+          child.receiveShadow = true;
+
+          const materials = Array.isArray(child.material) ? child.material : [child.material];
+          for (const material of materials) {
+            if (material?.map && renderer) {
+              material.map.anisotropy = renderer.capabilities.getMaxAnisotropy();
+            }
+          }
+        });
+        return template;
+      })
+      .catch((error) => {
+        console.warn("Failed to load race-future model, falling back to procedural car.", error);
+        return null;
+      });
+
+    return carTemplatePromise;
+  }
+
+  function normalizeCarModel(model) {
+    model.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(model);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const targetLength = 4.35;
+    const scale = size.z > 0.001 ? targetLength / size.z : 1;
+
+    model.scale.setScalar(scale);
+    model.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale);
+    model.updateMatrixWorld(true);
+  }
+
+  function cloneCarMaterials(model) {
+    model.traverse((child) => {
+      if (!child.isMesh || !child.material) {
+        return;
+      }
+
+      child.material = Array.isArray(child.material)
+        ? child.material.map((material) => material.clone())
+        : child.material.clone();
+    });
+  }
+
+  function applyCarTint(model, tint) {
+    if (!tint) {
+      return;
+    }
+
+    const tintColor = new THREE.Color(tint);
+    model.traverse((child) => {
+      if (!child.isMesh || !child.material || !child.name.toLowerCase().includes("body")) {
+        return;
+      }
+
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const material of materials) {
+        if ("color" in material) {
+          material.color.copy(tintColor);
+        }
+        if ("roughness" in material) {
+          material.roughness = 0.64;
+        }
+        if ("metalness" in material) {
+          material.metalness = 0.12;
+        }
+      }
+    });
+  }
+
+  function createBoostGroup(carSize, rearZ) {
+    const boostGroup = new THREE.Group();
+    boostGroup.position.set(0, carSize.y * 0.54, rearZ - 0.18);
+    boostGroup.visible = false;
+
+    const flameMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff8f36,
+      transparent: true,
+      opacity: 0,
+      depthTest: false,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+    const coreMaterial = new THREE.MeshBasicMaterial({
+      color: 0x8de9ff,
+      transparent: true,
+      opacity: 0,
+      depthTest: false,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+    const glowMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffc15c,
+      transparent: true,
+      opacity: 0,
+      depthTest: false,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+
+    const flameRadius = Math.max(0.18, carSize.x * 0.11);
+    const glowRadius = Math.max(0.28, carSize.x * 0.18);
+    const flameGeometry = new THREE.SphereGeometry(flameRadius, 12, 12);
+    const glowGeometry = new THREE.SphereGeometry(glowRadius, 14, 14);
+    const flameOffsets = [-carSize.x * 0.28, carSize.x * 0.28];
+    const flames = [];
+
+    for (const offsetX of flameOffsets) {
+      const outer = new THREE.Mesh(flameGeometry, flameMaterial.clone());
+      outer.position.set(offsetX, -0.03, -0.38);
+      outer.scale.set(1.35, 1.35, 4.2);
+
+      const core = new THREE.Mesh(flameGeometry, coreMaterial.clone());
+      core.position.set(offsetX, -0.03, -0.22);
+      core.scale.set(0.76, 0.76, 2.8);
+
+      flames.push(outer, core);
+      boostGroup.add(outer, core);
+    }
+
+    const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+    glow.position.set(0, -0.04, -0.3);
+    glow.scale.set(1.95, 1.15, 3.1);
+    flames.push(glow);
+    boostGroup.add(glow);
+    boostGroup.userData.flames = flames;
+    return boostGroup;
+  }
+
+  function createFallbackCar(color = 0xa81f34) {
     const group = new THREE.Group();
     const bodyMaterial = new THREE.MeshStandardMaterial({
       color,
