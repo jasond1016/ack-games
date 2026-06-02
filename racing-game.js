@@ -271,6 +271,7 @@ export function createRacingGame() {
       new THREE.MeshStandardMaterial({ color: 0x6fa35f, roughness: 0.92 })
     );
     grass.rotation.x = -Math.PI / 2;
+    grass.position.y = -0.08;
     grass.receiveShadow = true;
     scene.add(grass);
 
@@ -295,8 +296,8 @@ export function createRacingGame() {
       const left = sample.center.clone().add(sample.normal.clone().multiplyScalar(halfWidth));
       const right = sample.center.clone().add(sample.normal.clone().multiplyScalar(-halfWidth));
 
-      positions.push(left.x, 0.04, left.y);
-      positions.push(right.x, 0.04, right.y);
+      positions.push(left.x, 0.06, left.y);
+      positions.push(right.x, 0.06, right.y);
     }
 
     for (let index = 0; index < trackConfig.samples; index += 1) {
@@ -320,7 +321,11 @@ export function createRacingGame() {
       new THREE.MeshStandardMaterial({
         color: 0x16181c,
         roughness: 0.94,
-        metalness: 0.02
+        metalness: 0.02,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1
       })
     );
   }
@@ -343,7 +348,7 @@ export function createRacingGame() {
       })
     );
     line.rotation.x = -Math.PI / 2;
-    line.position.y = 0.06;
+    line.position.y = 0.1;
 
     const accent = new THREE.Mesh(
       new THREE.BoxGeometry(trackConfig.width + 2.6, 0.2, 0.3),
@@ -419,12 +424,12 @@ export function createRacingGame() {
       const rightLinePosition = sample.center.clone().add(sample.normal.clone().multiplyScalar(-lineOffset));
 
       const leftLine = new THREE.Mesh(lineGeometry, edgeLineMaterial);
-      leftLine.position.set(leftLinePosition.x, 0.08, leftLinePosition.y);
+      leftLine.position.set(leftLinePosition.x, 0.11, leftLinePosition.y);
       leftLine.rotation.y = sample.heading;
       leftLine.receiveShadow = true;
 
       const rightLine = new THREE.Mesh(lineGeometry, edgeLineMaterial);
-      rightLine.position.set(rightLinePosition.x, 0.08, rightLinePosition.y);
+      rightLine.position.set(rightLinePosition.x, 0.11, rightLinePosition.y);
       rightLine.rotation.y = sample.heading;
       rightLine.receiveShadow = true;
 
@@ -433,13 +438,13 @@ export function createRacingGame() {
       const rightCurbPosition = sample.center.clone().add(sample.normal.clone().multiplyScalar(-curbOffset));
 
       const leftCurb = new THREE.Mesh(curbGeometry, curbMaterial);
-      leftCurb.position.set(leftCurbPosition.x, 0.07, leftCurbPosition.y);
+      leftCurb.position.set(leftCurbPosition.x, 0.09, leftCurbPosition.y);
       leftCurb.rotation.y = sample.heading;
       leftCurb.receiveShadow = true;
       leftCurb.castShadow = true;
 
       const rightCurb = new THREE.Mesh(curbGeometry, curbMaterial);
-      rightCurb.position.set(rightCurbPosition.x, 0.07, rightCurbPosition.y);
+      rightCurb.position.set(rightCurbPosition.x, 0.09, rightCurbPosition.y);
       rightCurb.rotation.y = sample.heading;
       rightCurb.receiveShadow = true;
       rightCurb.castShadow = true;
