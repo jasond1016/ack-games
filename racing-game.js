@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/loaders/GLTFLoader.js";
 import RAPIER from "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/+esm";
+import { loadActiveRacingMap, racingTrackShapeConfig } from "./racing-map.js";
 
 const carModelUrl = new URL("./kenney_car-kit/Models/GLB format/race-future.glb", import.meta.url).href;
 const carModelLoader = new GLTFLoader();
@@ -9,6 +10,7 @@ const upAxis = new THREE.Vector3(0, 1, 0);
 const tempQuaternion = new THREE.Quaternion();
 
 export function createRacingGame() {
+  const mapData = loadActiveRacingMap();
   const canvas = document.getElementById("racingCanvas");
   const lapValue = document.getElementById("racingLapValue");
   const placeValue = document.getElementById("racingPlaceValue");
@@ -25,10 +27,11 @@ export function createRacingGame() {
   const resultPlayerLaps = document.getElementById("racingResultPlayerLaps");
   const resultOpponentLaps = document.getElementById("racingResultOpponentLaps");
   const playAgainButton = document.getElementById("racingPlayAgainButton");
+  const handleResetButtonClick = () => resetRace();
 
   const raceConfig = {
     totalLaps: 3,
-    startProgress: 0.02,
+    startProgress: mapData.startProgress,
     lapThreshold: 0.16,
     lapCooldownSeconds: 0.72,
     minForwardTrackSpeed: 2.2,
@@ -44,22 +47,9 @@ export function createRacingGame() {
   };
 
   const trackConfig = {
-    width: 14,
-    samples: 520,
-    controlPoints: [
-      [-78, -54],
-      [-28, -70],
-      [34, -64],
-      [78, -32],
-      [68, 0],
-      [48, 18],
-      [64, 42],
-      [18, 68],
-      [-44, 62],
-      [-82, 24],
-      [-58, 6],
-      [-82, -22]
-    ]
+    width: mapData.track.width,
+    samples: mapData.track.samples,
+    controlPoints: mapData.track.controlPoints.map((point) => [...point])
   };
 
   const railConfig = {
@@ -136,11 +126,7 @@ export function createRacingGame() {
     stepSeconds: 1 / 60
   };
 
-  const trackShapeConfig = {
-    minHalfWidthScale: 0.4,
-    curvatureRadiusFactor: 4,
-    widthSmoothingPasses: 8
-  };
+  const trackShapeConfig = racingTrackShapeConfig;
 
   const keyState = new Set();
   const trackCurve = createTrackCurve();
@@ -250,6 +236,12 @@ export function createRacingGame() {
     }
   }
 
+  function destroy() {
+    stop();
+    resetButton.removeEventListener("click", handleResetButtonClick);
+    playAgainButton.removeEventListener("click", handleResetButtonClick);
+  }
+
   async function initializeScene() {
     if (initialized) return;
     if (initializationPromise) return initializationPromise;
@@ -322,6 +314,7 @@ export function createRacingGame() {
     addFinishLine();
     addLaneMarks();
     addGuardRails();
+    addTrackObstacles();
     addTrees();
     addMountains();
   }
@@ -340,6 +333,7 @@ export function createRacingGame() {
       world,
       eventQueue: new RAPIER.EventQueue(true),
       colliderTags: new Map(),
+      colliderMeta: new Map(),
       playerBody: null,
       playerCollider: null,
       opponentBody: null,
@@ -355,6 +349,7 @@ export function createRacingGame() {
 
     createRailColliders(1);
     createRailColliders(-1);
+    createObstacleColliders();
 
     const playerBodyDesc = RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(0, physicsConfig.fixedHeight, 0)
@@ -392,6 +387,27 @@ export function createRacingGame() {
       physics.opponentBody
     );
     physics.colliderTags.set(physics.opponentCollider.handle, "opponent");
+  }
+
+  function createObstacleColliders() {
+    if (!physics) {
+      return;
+    }
+
+    for (const obstacle of mapData.obstacles) {
+      const collider = physics.world.createCollider(
+        RAPIER.ColliderDesc.cuboid(obstacle.width / 2, obstacle.height / 2, obstacle.depth / 2)
+          .setTranslation(obstacle.x, obstacle.height / 2, obstacle.z)
+          .setRotation(rapierRotationFromYaw(obstacle.rotation))
+          .setFriction(0.18)
+          .setRestitution(0.08)
+      );
+      physics.colliderTags.set(collider.handle, "obstacle");
+      physics.colliderMeta.set(collider.handle, {
+        x: obstacle.x,
+        z: obstacle.z
+      });
+    }
   }
 
   function createRailColliders(side) {
@@ -653,6 +669,54 @@ export function createRacingGame() {
       createRailRun(outerPoints, railMaterial),
       createRailRun(innerPoints, railMaterial)
     );
+  }
+
+  function addTrackObstacles() {
+    for (const obstacle of mapData.obstacles) {
+      const group = new THREE.Group();
+      group.position.set(obstacle.x, 0, obstacle.z);
+      group.rotation.y = obstacle.rotation;
+
+      if (obstacle.type === "cone") {
+        const coneMaterial = new THREE.MeshStandardMaterial({ color: new THREE.Color(obstacle.color), roughness: 0.58 });
+        const stripeMaterial = new THREE.MeshStandardMaterial({ color: 0xf6f6f6, roughness: 0.44 });
+        const offsets = [-obstacle.width * 0.28, 0, obstacle.width * 0.28];
+        for (const offset of offsets) {
+          const cone = new THREE.Mesh(
+            new THREE.ConeGeometry(obstacle.depth * 0.18, obstacle.height, 14),
+            coneMaterial
+          );
+          cone.position.set(offset, obstacle.height / 2, 0);
+          cone.castShadow = true;
+          cone.receiveShadow = true;
+
+          const stripe = new THREE.Mesh(
+            new THREE.CylinderGeometry(obstacle.depth * 0.11, obstacle.depth * 0.11, obstacle.height * 0.16, 12),
+            stripeMaterial
+          );
+          stripe.position.set(offset, obstacle.height * 0.45, 0);
+          stripe.castShadow = true;
+          stripe.receiveShadow = true;
+          group.add(cone, stripe);
+        }
+      } else {
+        const material = new THREE.MeshStandardMaterial({
+          color: new THREE.Color(obstacle.color),
+          roughness: obstacle.type === "barrier" ? 0.32 : 0.68,
+          metalness: obstacle.type === "barrier" ? 0.46 : 0.08
+        });
+        const body = new THREE.Mesh(
+          new THREE.BoxGeometry(obstacle.width, obstacle.height, obstacle.depth),
+          material
+        );
+        body.position.y = obstacle.height / 2;
+        body.castShadow = true;
+        body.receiveShadow = true;
+        group.add(body);
+      }
+
+      scene.add(group);
+    }
   }
 
   function addTrees() {
@@ -1323,6 +1387,19 @@ export function createRacingGame() {
         state.boostSeconds = 0;
         state.drifting = false;
         state.stoppedByImpactSeconds = Math.max(state.stoppedByImpactSeconds, collisionConfig.stopSeconds);
+      } else if (tag === "obstacle") {
+        const impactNormal = currentObstacleImpactNormal(otherHandle);
+        responseVelocity = resolveImpactVelocity(
+          new THREE.Vector2(current.x, current.z),
+          impactNormal,
+          0.28,
+          0.34
+        );
+        separatePlayerFromImpact(impactNormal, 0.22);
+        physics.playerBody.setLinvel({ x: responseVelocity.x, y: current.y, z: responseVelocity.y }, true);
+        state.boostSeconds = 0;
+        state.drifting = false;
+        state.stoppedByImpactSeconds = Math.max(state.stoppedByImpactSeconds, collisionConfig.stopSeconds);
       } else if (tag === "opponent" && raceState.opponentEnabled) {
         const opponentDelta = state.position.clone().sub(opponentState.position).normalize();
         responseVelocity = resolveImpactVelocity(
@@ -1352,6 +1429,20 @@ export function createRacingGame() {
     const delta = state.position.clone().sub(sample.center);
     const side = Math.sign(delta.dot(sample.normal)) || 1;
     return sample.normal.clone().multiplyScalar(side).normalize();
+  }
+
+  function currentObstacleImpactNormal(handle) {
+    const obstacle = physics?.colliderMeta.get(handle);
+    if (!obstacle) {
+      return currentRailImpactNormal();
+    }
+
+    const delta = state.position.clone().sub(new THREE.Vector2(obstacle.x, obstacle.z));
+    if (delta.lengthSq() <= 0.0001) {
+      return forwardVector().multiplyScalar(-1);
+    }
+
+    return delta.normalize();
   }
 
   function resolveRailImpactVelocity(velocity, surfaceNormal) {
@@ -2005,8 +2096,8 @@ export function createRacingGame() {
   }
 
   registerDebugApi();
-  resetButton.addEventListener("click", resetRace);
-  playAgainButton.addEventListener("click", resetRace);
+  resetButton.addEventListener("click", handleResetButtonClick);
+  playAgainButton.addEventListener("click", handleResetButtonClick);
 
-  return { start, stop, reset: resetRace };
+  return { start, stop, reset: resetRace, destroy };
 }

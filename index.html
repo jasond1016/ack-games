@@ -54,6 +54,22 @@
             </span>
           </button>
 
+          <button id="racingEditorCard" class="game-card" type="button">
+            <span class="game-card-art editor-card-art" aria-hidden="true">
+              <span class="editor-grid"></span>
+              <span class="editor-curve"></span>
+              <span class="editor-node editor-node-one"></span>
+              <span class="editor-node editor-node-two"></span>
+              <span class="editor-node editor-node-three"></span>
+              <span class="editor-block"></span>
+            </span>
+            <span class="game-card-copy">
+              <span class="game-state">工具</span>
+              <strong>地图编辑器</strong>
+              <span>拖点改路线，放置障碍后直接试玩</span>
+            </span>
+          </button>
+
           <article class="game-card game-card-disabled" aria-label="更多游戏">
             <span class="game-card-art empty-art" aria-hidden="true">
               <span></span>
@@ -108,9 +124,12 @@
             ‹
           </button>
           <h1>3D 赛车</h1>
-          <button id="racingResetButton" class="icon-button" type="button" aria-label="重开比赛" title="重开比赛">
-            ↻
-          </button>
+          <div class="topbar-actions">
+            <button id="racingEditorButton" class="secondary-button" type="button">编辑地图</button>
+            <button id="racingResetButton" class="icon-button" type="button" aria-label="重开比赛" title="重开比赛">
+              ↻
+            </button>
+          </div>
         </header>
 
         <section class="hud racing-hud" aria-label="赛车状态">
@@ -158,6 +177,96 @@
               <button id="racingPlayAgainButton" class="race-result-button" type="button">再跑一场</button>
             </div>
           </section>
+        </div>
+      </section>
+
+      <section id="racingEditorView" class="game-view racing-editor-view" aria-label="赛车地图编辑器" hidden>
+        <header class="topbar">
+          <button id="racingEditorHomeButton" class="icon-button" type="button" aria-label="返回首页" title="返回首页">
+            ‹
+          </button>
+          <h1>地图编辑器</h1>
+          <div class="topbar-actions">
+            <button id="racingEditorApplyButton" class="primary-button" type="button">应用并试玩</button>
+            <button id="racingEditorResetButton" class="icon-button" type="button" aria-label="恢复默认地图" title="恢复默认地图">
+              ↺
+            </button>
+          </div>
+        </header>
+
+        <div class="editor-layout">
+          <aside class="editor-sidebar" aria-label="地图编辑面板">
+            <section class="editor-card">
+              <label class="editor-label" for="racingEditorMapName">地图名</label>
+              <input id="racingEditorMapName" class="editor-input" type="text" maxlength="32" value="F1 练习场">
+            </section>
+
+            <section class="editor-card">
+              <p class="editor-label">编辑模式</p>
+              <div class="editor-chip-row">
+                <button class="editor-chip is-active" data-editor-mode="track" type="button">路线</button>
+                <button class="editor-chip" data-editor-mode="obstacle" type="button">障碍</button>
+              </div>
+              <p class="editor-help">`Shift + 点击` 可在线段中插入控制点。</p>
+            </section>
+
+            <section class="editor-card">
+              <p class="editor-label">障碍预设</p>
+              <div class="editor-chip-grid">
+                <button class="editor-chip is-active" data-obstacle-type="crate" type="button">箱子</button>
+                <button class="editor-chip" data-obstacle-type="barrier" type="button">护栏块</button>
+                <button class="editor-chip" data-obstacle-type="cone" type="button">锥桶组</button>
+              </div>
+              <p class="editor-help">障碍模式下点击画布即可放置。</p>
+            </section>
+
+            <section class="editor-card editor-stats">
+              <div>
+                <span>控制点</span>
+                <strong id="racingEditorPointsValue">0 个</strong>
+              </div>
+              <div>
+                <span>障碍</span>
+                <strong id="racingEditorObstaclesValue">0 个</strong>
+              </div>
+              <div>
+                <span>当前选择</span>
+                <strong id="racingEditorSelectionValue">未选中</strong>
+              </div>
+              <div>
+                <span>状态</span>
+                <strong id="racingEditorStatusValue">就绪</strong>
+              </div>
+            </section>
+
+            <section class="editor-card">
+              <p class="editor-label">快捷键</p>
+              <p class="editor-help">`WASD / 方向键` 微调，`Delete` 删除，`Q / E` 旋转障碍，`R / F` 缩放障碍，`Ctrl + D` 复制障碍。</p>
+            </section>
+
+            <section class="editor-card editor-actions">
+              <button id="racingEditorDeleteButton" class="secondary-button" type="button">删除选中</button>
+              <button id="racingEditorDuplicateButton" class="secondary-button" type="button">复制障碍</button>
+              <button id="racingEditorExportButton" class="secondary-button" type="button">复制 JSON</button>
+              <button id="racingEditorImportButton" class="secondary-button" type="button">导入 JSON</button>
+              <input id="racingEditorImportInput" type="file" accept=".json,application/json" hidden>
+            </section>
+
+            <section class="editor-card">
+              <label class="editor-label" for="racingEditorJsonValue">地图 JSON 预览</label>
+              <textarea id="racingEditorJsonValue" class="editor-json" spellcheck="false" readonly></textarea>
+            </section>
+          </aside>
+
+          <div class="editor-stage">
+            <canvas
+              id="racingEditorCanvas"
+              class="editor-canvas"
+              width="1120"
+              height="720"
+              aria-label="赛车地图编辑画布"
+            ></canvas>
+          </div>
         </div>
       </section>
     </main>
