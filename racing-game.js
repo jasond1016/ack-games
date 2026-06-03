@@ -1,7 +1,15 @@
 import * as THREE from "three";
 import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/loaders/GLTFLoader.js";
 import RAPIER from "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/+esm";
-import { loadActiveRacingMap, racingTrackShapeConfig } from "./racing-map.js";
+import { loadActiveRacingMap } from "./racing-map.js";
+import {
+  buildTrackModel,
+  getOpenFinishProgress,
+  getTrackModeForShape,
+  isLoopTrackShape,
+  projectPointOntoTrack,
+  sampleTrackModel
+} from "./racing-track.js";
 
 const carModelUrl = new URL("./kenney_car-kit/Models/GLB format/race-future.glb", import.meta.url).href;
 const carModelLoader = new GLTFLoader();
@@ -12,7 +20,8 @@ const tempQuaternion = new THREE.Quaternion();
 export function createRacingGame() {
   const mapData = loadActiveRacingMap();
   const canvas = document.getElementById("racingCanvas");
-  const lapValue = document.getElementById("racingLapValue");
+  const progressLabel = document.getElementById("racingProgressLabel");
+  const progressValue = document.getElementById("racingProgressValue");
   const placeValue = document.getElementById("racingPlaceValue");
   const speedValue = document.getElementById("racingSpeedValue");
   const boostValue = document.getElementById("racingBoostValue");
@@ -24,16 +33,33 @@ export function createRacingGame() {
   const resultTag = document.getElementById("racingResultTag");
   const resultTitle = document.getElementById("racingResultTitle");
   const resultSummary = document.getElementById("racingResultSummary");
-  const resultPlayerLaps = document.getElementById("racingResultPlayerLaps");
-  const resultOpponentLaps = document.getElementById("racingResultOpponentLaps");
+  const resultPlayerLabel = document.getElementById("racingResultPlayerLabel");
+  const resultPlayerValue = document.getElementById("racingResultPlayerValue");
+  const resultOpponentLabel = document.getElementById("racingResultOpponentLabel");
+  const resultOpponentValue = document.getElementById("racingResultOpponentValue");
   const playAgainButton = document.getElementById("racingPlayAgainButton");
   const handleResetButtonClick = () => resetRace();
 
+  const trackConfig = {
+    shape: mapData.track.shape,
+    width: mapData.track.width,
+    samples: mapData.track.samples,
+    startProgress: isLoopTrackShape(mapData.track.shape) ? mapData.track.startPosition.progress : 0,
+    controlPoints: mapData.track.controlPoints.map((point) => [...point])
+  };
+  const trackModel = buildTrackModel(trackConfig);
+  const trackSamples = trackModel.samples;
+  const trackLength = trackModel.totalLength;
+  const raceMode = getTrackModeForShape(trackConfig.shape);
+
   const raceConfig = {
+    mode: raceMode,
     totalLaps: 3,
-    startProgress: mapData.startProgress,
+    startProgress: trackConfig.startProgress,
+    finishProgress: raceMode === "sprint" ? getOpenFinishProgress(trackModel) : trackConfig.startProgress,
     lapThreshold: 0.16,
     lapCooldownSeconds: 0.72,
+    sprintGlideSeconds: 1.6,
     minForwardTrackSpeed: 2.2,
     lapArmProgressMin: 0.16,
     lapArmProgressMax: 0.84
@@ -44,12 +70,6 @@ export function createRacingGame() {
     durationSeconds: 5,
     topSpeedMultiplier: 2,
     engineForceMultiplier: 2.15
-  };
-
-  const trackConfig = {
-    width: mapData.track.width,
-    samples: mapData.track.samples,
-    controlPoints: mapData.track.controlPoints.map((point) => [...point])
   };
 
   const railConfig = {
@@ -113,7 +133,7 @@ export function createRacingGame() {
   const opponentConfig = {
     speed: Math.min(8.2, 30 / 3.6),
     laneOffset: -2.7,
-    startProgress: raceConfig.startProgress
+    startProgress: raceMode === "lap" ? raceConfig.startProgress : 0
   };
 
   const physicsConfig = {
@@ -126,12 +146,7 @@ export function createRacingGame() {
     stepSeconds: 1 / 60
   };
 
-  const trackShapeConfig = racingTrackShapeConfig;
-
   const keyState = new Set();
-  const trackCurve = createTrackCurve();
-  const trackSamples = createTrackSamples();
-  const trackLength = measureTrackLength();
   const state = {
     position: new THREE.Vector2(),
     velocity: new THREE.Vector2(),
@@ -144,9 +159,12 @@ export function createRacingGame() {
     previousPosition: new THREE.Vector2(),
     previousTrackIndex: 0,
     trackIndex: 0,
-    trackProgress: raceConfig.startProgress,
+    trackProgress: raceMode === "lap" ? raceConfig.startProgress : 0,
     raceProgress: 0,
     lastRaceProgress: 0,
+    maxForwardProgress: 0,
+    maxForwardDistance: 0,
+    finishTimeSeconds: null,
     completedLaps: 0,
     lapLockSeconds: 0,
     lapArmed: false,
@@ -159,18 +177,26 @@ export function createRacingGame() {
     position: new THREE.Vector2(),
     heading: 0,
     laneOffset: opponentConfig.laneOffset,
+    onRoad: true,
     collisionHoldSeconds: 0,
+    currentSpeed: opponentConfig.speed,
     raceProgress: 0,
     lastRaceProgress: 0,
+    maxForwardProgress: 0,
+    maxForwardDistance: 0,
+    finishTimeSeconds: null,
     completedLaps: 0,
     lapLockSeconds: 0,
     lapArmed: false
   };
   const raceState = {
     finished: false,
+    resultVisible: false,
     winner: "",
     playerPlace: 1,
-    opponentEnabled: true
+    opponentEnabled: true,
+    elapsedSeconds: 0,
+    settleSeconds: 0
   };
 
   let renderer;
@@ -311,10 +337,9 @@ export function createRacingGame() {
     road.receiveShadow = true;
     scene.add(road);
 
-    addFinishLine();
+    addStartFinishLines();
     addLaneMarks();
     addGuardRails();
-    addTrackObstacles();
     addTrees();
     addMountains();
   }
@@ -333,7 +358,6 @@ export function createRacingGame() {
       world,
       eventQueue: new RAPIER.EventQueue(true),
       colliderTags: new Map(),
-      colliderMeta: new Map(),
       playerBody: null,
       playerCollider: null,
       opponentBody: null,
@@ -349,7 +373,6 @@ export function createRacingGame() {
 
     createRailColliders(1);
     createRailColliders(-1);
-    createObstacleColliders();
 
     const playerBodyDesc = RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(0, physicsConfig.fixedHeight, 0)
@@ -389,35 +412,15 @@ export function createRacingGame() {
     physics.colliderTags.set(physics.opponentCollider.handle, "opponent");
   }
 
-  function createObstacleColliders() {
-    if (!physics) {
-      return;
-    }
-
-    for (const obstacle of mapData.obstacles) {
-      const collider = physics.world.createCollider(
-        RAPIER.ColliderDesc.cuboid(obstacle.width / 2, obstacle.height / 2, obstacle.depth / 2)
-          .setTranslation(obstacle.x, obstacle.height / 2, obstacle.z)
-          .setRotation(rapierRotationFromYaw(obstacle.rotation))
-          .setFriction(0.18)
-          .setRestitution(0.08)
-      );
-      physics.colliderTags.set(collider.handle, "obstacle");
-      physics.colliderMeta.set(collider.handle, {
-        x: obstacle.x,
-        z: obstacle.z
-      });
-    }
-  }
-
   function createRailColliders(side) {
     if (!physics) {
       return;
     }
 
-    for (let index = 0; index < railConfig.sampleCount; index += 1) {
-      const startSample = trackProfileAtProgress(index / railConfig.sampleCount);
-      const endSample = trackProfileAtProgress((index + 1) / railConfig.sampleCount);
+    const segmentCount = trackModel.closed ? railConfig.sampleCount : railConfig.sampleCount - 1;
+    for (let index = 0; index < segmentCount; index += 1) {
+      const startSample = trackProfileAtProgress(sampleProgressForIndex(index, railConfig.sampleCount));
+      const endSample = trackProfileAtProgress(sampleProgressForIndex(index + 1, railConfig.sampleCount));
       const start = startSample.center.clone().add(startSample.normal.clone().multiplyScalar(startSample.railOffset * side));
       const end = endSample.center.clone().add(endSample.normal.clone().multiplyScalar(endSample.railOffset * side));
       const segment = end.clone().sub(start);
@@ -507,8 +510,8 @@ export function createRacingGame() {
       normals.push(0, 1, 0, 0, 1, 0);
     }
 
-    for (let index = 0; index < trackConfig.samples; index += 1) {
-      const next = (index + 1) % trackConfig.samples;
+    for (let index = 0; index < trackModel.segmentCount; index += 1) {
+      const next = trackModel.closed ? (index + 1) % trackConfig.samples : index + 1;
       const left = index * 2;
       const right = left + 1;
       const nextLeft = next * 2;
@@ -533,8 +536,18 @@ export function createRacingGame() {
     );
   }
 
-  function addFinishLine() {
-    const sample = trackProfileAtProgress(raceConfig.startProgress);
+  function addStartFinishLines() {
+    if (raceConfig.mode === "lap") {
+      addTrackLine(raceConfig.startProgress, 0xd64545, 0xd64545);
+      return;
+    }
+
+    addTrackLine(0, 0x27ae60, 0x27ae60);
+    addTrackLine(raceConfig.finishProgress, 0xd64545, 0xd64545);
+  }
+
+  function addTrackLine(progress, lineColor, accentColor) {
+    const sample = trackProfileAtProgress(progress);
     const group = new THREE.Group();
     group.position.set(sample.center.x, 0, sample.center.y);
     group.rotation.y = sample.heading;
@@ -544,6 +557,7 @@ export function createRacingGame() {
       new THREE.PlaneGeometry(trackConfig.width * 0.92, 2.05),
       new THREE.MeshStandardMaterial({
         map: checkerTexture,
+        color: lineColor,
         transparent: true,
         roughness: 0.56,
         metalness: 0.02,
@@ -555,7 +569,7 @@ export function createRacingGame() {
 
     const accent = new THREE.Mesh(
       new THREE.BoxGeometry(trackConfig.width + 2.6, 0.2, 0.3),
-      new THREE.MeshStandardMaterial({ color: 0xd64545, roughness: 0.44 })
+      new THREE.MeshStandardMaterial({ color: accentColor, roughness: 0.44 })
     );
     accent.position.set(0, 3.18, 0);
     accent.castShadow = true;
@@ -619,7 +633,7 @@ export function createRacingGame() {
     const curbGeometry = new THREE.BoxGeometry(0.84, 0.05, 2.7);
 
     for (let index = 0; index < 120; index += 1) {
-      const sample = trackProfileAtProgress(index / 120);
+      const sample = trackProfileAtProgress(sampleProgressForIndex(index, 120));
       const lineOffset = sample.halfWidth - 0.4;
       const curbOffset = sample.halfWidth + 0.18;
       const leftLinePosition = sample.center.clone().add(sample.normal.clone().multiplyScalar(lineOffset));
@@ -669,54 +683,6 @@ export function createRacingGame() {
       createRailRun(outerPoints, railMaterial),
       createRailRun(innerPoints, railMaterial)
     );
-  }
-
-  function addTrackObstacles() {
-    for (const obstacle of mapData.obstacles) {
-      const group = new THREE.Group();
-      group.position.set(obstacle.x, 0, obstacle.z);
-      group.rotation.y = obstacle.rotation;
-
-      if (obstacle.type === "cone") {
-        const coneMaterial = new THREE.MeshStandardMaterial({ color: new THREE.Color(obstacle.color), roughness: 0.58 });
-        const stripeMaterial = new THREE.MeshStandardMaterial({ color: 0xf6f6f6, roughness: 0.44 });
-        const offsets = [-obstacle.width * 0.28, 0, obstacle.width * 0.28];
-        for (const offset of offsets) {
-          const cone = new THREE.Mesh(
-            new THREE.ConeGeometry(obstacle.depth * 0.18, obstacle.height, 14),
-            coneMaterial
-          );
-          cone.position.set(offset, obstacle.height / 2, 0);
-          cone.castShadow = true;
-          cone.receiveShadow = true;
-
-          const stripe = new THREE.Mesh(
-            new THREE.CylinderGeometry(obstacle.depth * 0.11, obstacle.depth * 0.11, obstacle.height * 0.16, 12),
-            stripeMaterial
-          );
-          stripe.position.set(offset, obstacle.height * 0.45, 0);
-          stripe.castShadow = true;
-          stripe.receiveShadow = true;
-          group.add(cone, stripe);
-        }
-      } else {
-        const material = new THREE.MeshStandardMaterial({
-          color: new THREE.Color(obstacle.color),
-          roughness: obstacle.type === "barrier" ? 0.32 : 0.68,
-          metalness: obstacle.type === "barrier" ? 0.46 : 0.08
-        });
-        const body = new THREE.Mesh(
-          new THREE.BoxGeometry(obstacle.width, obstacle.height, obstacle.depth),
-          material
-        );
-        body.position.y = obstacle.height / 2;
-        body.castShadow = true;
-        body.receiveShadow = true;
-        group.add(body);
-      }
-
-      scene.add(group);
-    }
   }
 
   function addTrees() {
@@ -774,7 +740,7 @@ export function createRacingGame() {
 
   function createRailPoints(side, sampleCount) {
     return Array.from({ length: sampleCount }, (_, index) => {
-      const sample = trackProfileAtProgress(index / sampleCount);
+      const sample = trackProfileAtProgress(sampleProgressForIndex(index, sampleCount));
       const point = sample.center.clone().add(sample.normal.clone().multiplyScalar(sample.railOffset * side));
       return new THREE.Vector3(point.x, railConfig.railHeight, point.y);
     });
@@ -786,9 +752,11 @@ export function createRacingGame() {
     const postGeometry = new THREE.CylinderGeometry(0.07, 0.09, railConfig.postHeight, 8);
     const up = new THREE.Vector3(0, 1, 0);
 
-    for (let index = 0; index < points.length; index += 1) {
+    const segmentCount = trackModel.closed ? points.length : points.length - 1;
+
+    for (let index = 0; index < segmentCount; index += 1) {
       const current = points[index];
-      const next = points[(index + 1) % points.length];
+      const next = trackModel.closed ? points[(index + 1) % points.length] : points[index + 1];
       const direction = next.clone().sub(current);
       const length = direction.length();
 
@@ -813,6 +781,15 @@ export function createRacingGame() {
         post.receiveShadow = true;
         group.add(post);
       }
+    }
+
+    if (!trackModel.closed && points.length > 0) {
+      const finalPoint = points[points.length - 1];
+      const finalPost = new THREE.Mesh(postGeometry, material);
+      finalPost.position.set(finalPoint.x, railConfig.postHeight / 2, finalPoint.z);
+      finalPost.castShadow = true;
+      finalPost.receiveShadow = true;
+      group.add(finalPost);
     }
 
     return group;
@@ -1129,8 +1106,9 @@ export function createRacingGame() {
 
     const deltaSeconds = Math.min((timestamp - lastFrameTime) / 1000, 0.04);
     lastFrameTime = timestamp;
+    const sprintGlide = raceConfig.mode === "sprint" && raceState.finished && !raceState.resultVisible;
 
-    if (!raceState.finished) {
+    if (!raceState.finished || sprintGlide) {
       updateControls();
       updatePhysics(deltaSeconds);
       updateRaceState(deltaSeconds);
@@ -1155,9 +1133,10 @@ export function createRacingGame() {
     const brakePressed = keyState.has("KeyS") || keyState.has("ArrowDown");
     const leftPressed = keyState.has("KeyA") || keyState.has("ArrowLeft");
     const rightPressed = keyState.has("KeyD") || keyState.has("ArrowRight");
+    const sprintGlide = raceConfig.mode === "sprint" && raceState.finished && !raceState.resultVisible;
 
-    state.throttle = throttlePressed ? 1 : 0;
-    state.brake = brakePressed ? 1 : 0;
+    state.throttle = sprintGlide ? 0 : throttlePressed ? 1 : 0;
+    state.brake = sprintGlide ? 0 : brakePressed ? 1 : 0;
 
     const targetSteer = (leftPressed ? 1 : 0) - (rightPressed ? 1 : 0);
     const steeringResponse = targetSteer === 0
@@ -1171,7 +1150,7 @@ export function createRacingGame() {
     const boostGroup = car?.userData.boostGroup;
     if (!flames) return;
 
-    const activeBoost = state.boostSeconds > 0 && !raceState.finished;
+    const activeBoost = state.boostSeconds > 0 && !(raceState.finished && raceConfig.mode === "sprint");
     const moving = state.velocity.length() > 2;
     const active = activeBoost && moving;
     if (boostGroup) {
@@ -1241,11 +1220,21 @@ export function createRacingGame() {
     }
 
     if (opponentState.collisionHoldSeconds === 0) {
-      opponentState.progress = wrapProgress(opponentState.progress + (opponentConfig.speed * deltaSeconds) / trackLength);
+      if (!raceState.finished) {
+        opponentState.currentSpeed = moveToward(opponentState.currentSpeed, opponentConfig.speed, deltaSeconds * 6);
+      } else if (raceConfig.mode === "sprint") {
+        opponentState.currentSpeed = Math.max(0, opponentState.currentSpeed - deltaSeconds * 6.5);
+      } else {
+        opponentState.currentSpeed = 0;
+      }
+
+      const deltaProgress = (opponentState.currentSpeed * deltaSeconds) / Math.max(trackLength, 0.0001);
+      opponentState.progress = raceConfig.mode === "lap"
+        ? wrapProgress(opponentState.progress + deltaProgress)
+        : clamp(opponentState.progress + deltaProgress, 0, 1);
     }
 
     syncOpponentPose();
-    opponentState.raceProgress = relativeRaceProgress(opponentState.progress);
     physics.opponentBody.setNextKinematicTranslation({
       x: opponentState.position.x,
       y: physicsConfig.fixedHeight,
@@ -1387,19 +1376,6 @@ export function createRacingGame() {
         state.boostSeconds = 0;
         state.drifting = false;
         state.stoppedByImpactSeconds = Math.max(state.stoppedByImpactSeconds, collisionConfig.stopSeconds);
-      } else if (tag === "obstacle") {
-        const impactNormal = currentObstacleImpactNormal(otherHandle);
-        responseVelocity = resolveImpactVelocity(
-          new THREE.Vector2(current.x, current.z),
-          impactNormal,
-          0.28,
-          0.34
-        );
-        separatePlayerFromImpact(impactNormal, 0.22);
-        physics.playerBody.setLinvel({ x: responseVelocity.x, y: current.y, z: responseVelocity.y }, true);
-        state.boostSeconds = 0;
-        state.drifting = false;
-        state.stoppedByImpactSeconds = Math.max(state.stoppedByImpactSeconds, collisionConfig.stopSeconds);
       } else if (tag === "opponent" && raceState.opponentEnabled) {
         const opponentDelta = state.position.clone().sub(opponentState.position).normalize();
         responseVelocity = resolveImpactVelocity(
@@ -1429,20 +1405,6 @@ export function createRacingGame() {
     const delta = state.position.clone().sub(sample.center);
     const side = Math.sign(delta.dot(sample.normal)) || 1;
     return sample.normal.clone().multiplyScalar(side).normalize();
-  }
-
-  function currentObstacleImpactNormal(handle) {
-    const obstacle = physics?.colliderMeta.get(handle);
-    if (!obstacle) {
-      return currentRailImpactNormal();
-    }
-
-    const delta = state.position.clone().sub(new THREE.Vector2(obstacle.x, obstacle.z));
-    if (delta.lengthSq() <= 0.0001) {
-      return forwardVector().multiplyScalar(-1);
-    }
-
-    return delta.normalize();
   }
 
   function resolveRailImpactVelocity(velocity, surfaceNormal) {
@@ -1485,22 +1447,59 @@ export function createRacingGame() {
   }
 
   function updateRaceState(deltaSeconds) {
-    state.lapLockSeconds = Math.max(0, state.lapLockSeconds - deltaSeconds);
-    if (raceState.opponentEnabled) {
-      opponentState.lapLockSeconds = Math.max(0, opponentState.lapLockSeconds - deltaSeconds);
+    raceState.elapsedSeconds += deltaSeconds;
+
+    if (raceConfig.mode === "lap") {
+      if (raceState.finished) {
+        return;
+      }
+
+      state.lapLockSeconds = Math.max(0, state.lapLockSeconds - deltaSeconds);
+      if (raceState.opponentEnabled) {
+        opponentState.lapLockSeconds = Math.max(0, opponentState.lapLockSeconds - deltaSeconds);
+      }
+
+      advanceLapCounter(state, state.velocity.dot(trackSamples[state.trackIndex].tangent));
+      if (raceState.opponentEnabled) {
+        advanceLapCounter(opponentState, opponentState.currentSpeed);
+      }
+
+      raceState.playerPlace = raceState.opponentEnabled && playerRaceDistance() < opponentRaceDistance() ? 2 : 1;
+
+      if (state.completedLaps >= raceConfig.totalLaps) {
+        finishLapRace("player");
+      } else if (raceState.opponentEnabled && opponentState.completedLaps >= raceConfig.totalLaps) {
+        finishLapRace("opponent");
+      }
+
+      return;
     }
 
-    advanceLapCounter(state, state.velocity.dot(trackSamples[state.trackIndex].tangent));
+    updateSprintDriverProgress(state);
     if (raceState.opponentEnabled) {
-      advanceLapCounter(opponentState, opponentConfig.speed);
+      updateSprintDriverProgress(opponentState);
     }
 
-    raceState.playerPlace = raceState.opponentEnabled && playerRaceDistance() < opponentRaceDistance() ? 2 : 1;
+    raceState.playerPlace = raceState.opponentEnabled && state.maxForwardDistance < opponentState.maxForwardDistance ? 2 : 1;
 
-    if (state.completedLaps >= raceConfig.totalLaps) {
-      finishRace("player");
-    } else if (raceState.opponentEnabled && opponentState.completedLaps >= raceConfig.totalLaps) {
-      finishRace("opponent");
+    const playerTrackSpeed = state.velocity.dot(trackSamples[state.trackIndex].tangent);
+    const playerCrossed = didDriverCrossSprintFinish(state, playerTrackSpeed);
+    const opponentCrossed = raceState.opponentEnabled && didDriverCrossSprintFinish(opponentState, opponentState.currentSpeed);
+
+    if (!raceState.finished && (playerCrossed || opponentCrossed)) {
+      lockSprintFinish(playerCrossed, opponentCrossed);
+    }
+
+    if (raceState.finished && !raceState.resultVisible) {
+      raceState.settleSeconds += deltaSeconds;
+      if (raceState.settleSeconds >= raceConfig.sprintGlideSeconds) {
+        revealSprintResult();
+      }
+    }
+
+    state.lastRaceProgress = state.raceProgress;
+    if (raceState.opponentEnabled) {
+      opponentState.lastRaceProgress = opponentState.raceProgress;
     }
   }
 
@@ -1539,10 +1538,57 @@ export function createRacingGame() {
     driverState.lastRaceProgress = current;
   }
 
-  function finishRace(winner) {
+  function updateSprintDriverProgress(driverState) {
+    driverState.maxForwardProgress = Math.max(driverState.maxForwardProgress, driverState.raceProgress);
+    driverState.maxForwardDistance = Math.max(driverState.maxForwardDistance, driverState.raceProgress * trackLength);
+  }
+
+  function didDriverCrossSprintFinish(driverState, trackSpeed) {
+    if (raceState.finished || driverState.finishTimeSeconds != null) {
+      return false;
+    }
+
+    if (!driverState.onRoad || trackSpeed <= raceConfig.minForwardTrackSpeed) {
+      return false;
+    }
+
+    return driverState.lastRaceProgress < raceConfig.finishProgress
+      && driverState.raceProgress >= raceConfig.finishProgress;
+  }
+
+  function lockSprintFinish(playerCrossed, opponentCrossed) {
+    let winner = "";
+
+    if (playerCrossed && opponentCrossed) {
+      winner = sprintFinishLead(state) >= sprintFinishLead(opponentState) ? "player" : "opponent";
+    } else {
+      winner = playerCrossed ? "player" : "opponent";
+    }
+
+    raceState.finished = true;
+    raceState.winner = winner;
+    raceState.playerPlace = winner === "player" ? 1 : 2;
+    raceState.settleSeconds = 0;
+    state.boostSeconds = 0;
+    state.drifting = false;
+    keyState.delete("KeyW");
+    keyState.delete("ArrowUp");
+    keyState.delete("KeyS");
+    keyState.delete("ArrowDown");
+
+    const winnerState = winner === "player" ? state : opponentState;
+    winnerState.finishTimeSeconds = raceState.elapsedSeconds;
+  }
+
+  function sprintFinishLead(driverState) {
+    return driverState.raceProgress - raceConfig.finishProgress;
+  }
+
+  function finishLapRace(winner) {
     if (raceState.finished) return;
 
     raceState.finished = true;
+    raceState.resultVisible = true;
     raceState.winner = winner;
     raceState.playerPlace = winner === "player" ? 1 : 2;
     state.velocity.set(0, 0);
@@ -1585,7 +1631,10 @@ export function createRacingGame() {
   }
 
   function updateHud() {
-    lapValue.textContent = formatLapDisplay(state.completedLaps);
+    progressLabel.textContent = raceConfig.mode === "lap" ? "圈数" : "剩余";
+    progressValue.textContent = raceConfig.mode === "lap"
+      ? formatLapDisplay(state.completedLaps)
+      : formatDistance(sprintRemainingDistance(state));
     placeValue.textContent = raceState.playerPlace === 1 ? "第1名" : "第2名";
     speedValue.textContent = `${Math.round(state.velocity.length() * 3.6)} km/h`;
     boostValue.textContent = state.boostSeconds > 0
@@ -1596,11 +1645,15 @@ export function createRacingGame() {
 
   function currentStatusLabel() {
     if (raceState.finished) {
+      if (raceConfig.mode === "sprint" && !raceState.resultVisible) {
+        return raceState.winner === "player" ? "冲线滑行" : "败方收尾";
+      }
+
       return raceState.winner === "player" ? "你赢了" : "惜败";
     }
 
     if (!raceState.opponentEnabled) {
-      return "单人跑";
+      return raceConfig.mode === "lap" ? "单人跑" : "单人冲刺";
     }
 
     if (state.stoppedByImpactSeconds > 0) {
@@ -1617,6 +1670,10 @@ export function createRacingGame() {
 
     if (!state.onRoad) {
       return "草地减速";
+    }
+
+    if (raceConfig.mode === "sprint") {
+      return raceState.playerPlace === 1 ? "冲刺领先" : "追赶中";
     }
 
     return raceState.playerPlace === 1 ? "领先" : "追赶中";
@@ -1639,9 +1696,12 @@ export function createRacingGame() {
     state.previousPosition.copy(startPosition);
     state.previousTrackIndex = Math.round(raceConfig.startProgress * trackConfig.samples) % trackConfig.samples;
     state.trackIndex = Math.round(raceConfig.startProgress * trackConfig.samples) % trackConfig.samples;
-    state.trackProgress = raceConfig.startProgress;
+    state.trackProgress = raceMode === "lap" ? raceConfig.startProgress : 0;
     state.raceProgress = 0;
     state.lastRaceProgress = 0;
+    state.maxForwardProgress = 0;
+    state.maxForwardDistance = 0;
+    state.finishTimeSeconds = null;
     state.completedLaps = 0;
     state.lapLockSeconds = 0;
     state.lapArmed = false;
@@ -1651,16 +1711,24 @@ export function createRacingGame() {
 
     opponentState.progress = opponentConfig.startProgress;
     opponentState.laneOffset = opponentConfig.laneOffset;
+    opponentState.onRoad = true;
     opponentState.collisionHoldSeconds = 0;
+    opponentState.currentSpeed = opponentConfig.speed;
     opponentState.raceProgress = 0;
     opponentState.lastRaceProgress = 0;
+    opponentState.maxForwardProgress = 0;
+    opponentState.maxForwardDistance = 0;
+    opponentState.finishTimeSeconds = null;
     opponentState.completedLaps = 0;
     opponentState.lapLockSeconds = 0;
     opponentState.lapArmed = false;
 
     raceState.finished = false;
+    raceState.resultVisible = false;
     raceState.winner = "";
     raceState.playerPlace = 1;
+    raceState.elapsedSeconds = 0;
+    raceState.settleSeconds = 0;
 
     syncPlayerTrackMetrics();
     syncOpponentPose();
@@ -1672,8 +1740,16 @@ export function createRacingGame() {
     syncPlayerPhysicsState(state.trackIndex);
     syncOpponentPhysicsState();
     state.lastRaceProgress = state.raceProgress;
+    if (raceMode === "sprint") {
+      state.maxForwardProgress = state.raceProgress;
+      state.maxForwardDistance = state.raceProgress * trackLength;
+    }
     opponentState.raceProgress = relativeRaceProgress(opponentState.progress);
     opponentState.lastRaceProgress = opponentState.raceProgress;
+    if (raceMode === "sprint") {
+      opponentState.maxForwardProgress = opponentState.raceProgress;
+      opponentState.maxForwardDistance = opponentState.raceProgress * trackLength;
+    }
 
     if (car && camera && renderer) {
       updateCarTransform();
@@ -1692,23 +1768,60 @@ export function createRacingGame() {
     updateHud();
   }
 
+  function revealSprintResult() {
+    if (raceState.resultVisible) {
+      return;
+    }
+
+    raceState.resultVisible = true;
+    showResultOverlay(raceState.winner);
+    updateHud();
+  }
+
   function showResultOverlay(winner) {
     resultCard.classList.toggle("is-win", winner === "player");
     resultCard.classList.toggle("is-loss", winner !== "player");
     resultTag.textContent = winner === "player" ? "率先冲线" : "对手先冲线";
     resultTitle.textContent = winner === "player" ? "你赢了" : "惜败";
-    resultSummary.textContent =
-      winner === "player"
-        ? `你率先完成 ${raceConfig.totalLaps} 圈，先冲过终点线。`
-        : `对手先完成 ${raceConfig.totalLaps} 圈。你还在第 ${currentLapNumber(state.completedLaps)} 圈。`;
-    resultPlayerLaps.textContent = formatLapDisplay(state.completedLaps);
-    resultOpponentLaps.textContent = formatLapDisplay(opponentState.completedLaps);
+
+    if (raceConfig.mode === "lap") {
+      resultSummary.textContent = !raceState.opponentEnabled
+        ? `你完成了 ${raceConfig.totalLaps} 圈。`
+        : winner === "player"
+          ? `你率先完成 ${raceConfig.totalLaps} 圈，先冲过终点线。`
+          : `对手先完成 ${raceConfig.totalLaps} 圈。你还在第 ${currentLapNumber(state.completedLaps)} 圈。`;
+      resultPlayerLabel.textContent = "你的圈数";
+      resultPlayerValue.textContent = formatLapDisplay(state.completedLaps);
+      resultOpponentLabel.textContent = raceState.opponentEnabled ? "对手圈数" : "对手状态";
+      resultOpponentValue.textContent = raceState.opponentEnabled ? formatLapDisplay(opponentState.completedLaps) : "未启用";
+    } else {
+      const playerWon = winner === "player";
+      const winnerTime = playerWon ? state.finishTimeSeconds : opponentState.finishTimeSeconds;
+      const playerRemaining = sprintRemainingDistance(state);
+      const opponentRemaining = sprintRemainingDistance(opponentState);
+
+      resultSummary.textContent = !raceState.opponentEnabled
+        ? `你用时 ${formatTime(state.finishTimeSeconds)} 完成冲刺。`
+        : playerWon
+          ? `你用时 ${formatTime(winnerTime)} 率先通过终点，对手还剩 ${formatDistance(opponentRemaining)}。`
+          : `对手用时 ${formatTime(winnerTime)} 完赛，你还剩 ${formatDistance(playerRemaining)}。`;
+      resultPlayerLabel.textContent = playerWon ? "完赛用时" : "剩余距离";
+      resultPlayerValue.textContent = playerWon ? formatTime(state.finishTimeSeconds) : formatDistance(playerRemaining);
+      resultOpponentLabel.textContent = raceState.opponentEnabled
+        ? playerWon ? "对手剩余" : "完赛用时"
+        : "对手状态";
+      resultOpponentValue.textContent = raceState.opponentEnabled
+        ? playerWon ? formatDistance(opponentRemaining) : formatTime(opponentState.finishTimeSeconds)
+        : "未启用";
+    }
+
     resultOverlay.hidden = false;
   }
 
   function hideResultOverlay() {
     resultOverlay.hidden = true;
     resultCard.classList.remove("is-win", "is-loss");
+    raceState.resultVisible = false;
   }
 
   function activateBoost() {
@@ -1819,91 +1932,8 @@ export function createRacingGame() {
     keyState.clear();
   }
 
-  function createTrackCurve() {
-    const points = trackConfig.controlPoints.map(([x, z]) => new THREE.Vector3(x, 0, z));
-    return new THREE.CatmullRomCurve3(points, true, "centripetal", 0.45);
-  }
-
-  function createTrackSamples() {
-    const baseSamples = Array.from(
-      { length: trackConfig.samples },
-      (_, index) => sampleTrack(index / trackConfig.samples)
-    );
-    const baseHalfWidth = trackConfig.width / 2;
-    const minHalfWidth = baseHalfWidth * trackShapeConfig.minHalfWidthScale;
-    let halfWidths = baseSamples.map((_, index) => {
-      const previous = baseSamples[wrapIndex(index - 1, baseSamples.length)];
-      const next = baseSamples[wrapIndex(index + 1, baseSamples.length)];
-      const dot = clamp(previous.tangent.dot(next.tangent), -1, 1);
-      const turnAngle = Math.acos(dot);
-      const span = previous.center.distanceTo(next.center);
-      const radiusEstimate = turnAngle < 0.0001 ? Number.POSITIVE_INFINITY : span / turnAngle;
-      const widthScale = clamp(
-        radiusEstimate / (baseHalfWidth * trackShapeConfig.curvatureRadiusFactor),
-        trackShapeConfig.minHalfWidthScale,
-        1
-      );
-      return Math.max(minHalfWidth, baseHalfWidth * widthScale);
-    });
-
-    for (let pass = 0; pass < trackShapeConfig.widthSmoothingPasses; pass += 1) {
-      halfWidths = halfWidths.map((width, index) => {
-        const previous = halfWidths[wrapIndex(index - 1, halfWidths.length)];
-        const next = halfWidths[wrapIndex(index + 1, halfWidths.length)];
-        return clamp(previous * 0.25 + width * 0.5 + next * 0.25, minHalfWidth, baseHalfWidth);
-      });
-    }
-
-    return baseSamples.map((sample, index) => {
-      const halfWidth = halfWidths[index];
-      return {
-        ...sample,
-        halfWidth,
-        railOffset: halfWidth + 1.08,
-        roadLimit: Math.max(halfWidth - 0.3, 2.8),
-        railLimit: halfWidth + 1.0
-      };
-    });
-  }
-
-  function measureTrackLength() {
-    let length = 0;
-
-    for (let index = 0; index < trackSamples.length; index += 1) {
-      const current = trackSamples[index].center;
-      const next = trackSamples[(index + 1) % trackSamples.length].center;
-      length += current.distanceTo(next);
-    }
-
-    return length;
-  }
-
-  function sampleTrack(progress) {
-    const wrapped = wrapProgress(progress);
-    const point = trackCurve.getPointAt(wrapped);
-    const tangent3 = trackCurve.getTangentAt(wrapped);
-    const center = new THREE.Vector2(point.x, point.z);
-    const tangent = new THREE.Vector2(tangent3.x, tangent3.z).normalize();
-    const normal = new THREE.Vector2(-tangent.y, tangent.x);
-
-    return {
-      center,
-      tangent,
-      normal,
-      heading: Math.atan2(tangent.x, tangent.y)
-    };
-  }
-
   function trackProfileAtProgress(progress) {
-    const base = sampleTrack(progress);
-    const profile = trackSamples[Math.round(wrapProgress(progress) * trackConfig.samples) % trackConfig.samples];
-    return {
-      ...base,
-      halfWidth: profile.halfWidth,
-      railOffset: profile.railOffset,
-      roadLimit: profile.roadLimit,
-      railLimit: profile.railLimit
-    };
+    return sampleTrackModel(trackModel, progress);
   }
 
   function syncOpponentPose() {
@@ -1917,6 +1947,8 @@ export function createRacingGame() {
 
     opponentState.position.copy(position);
     opponentState.heading = sample.heading;
+    opponentState.onRoad = true;
+    opponentState.raceProgress = relativeRaceProgress(opponentState.progress);
     return sample;
   }
 
@@ -1930,43 +1962,13 @@ export function createRacingGame() {
   }
 
   function closestTrackSample(position, preferredIndex = null) {
-    const localWindow = preferredIndex == null ? trackSamples.length : 26;
-    let bestIndex = 0;
-    let bestDistanceSq = Infinity;
-
-    if (preferredIndex == null) {
-      for (let index = 0; index < trackSamples.length; index += 1) {
-        const distanceSq = position.distanceToSquared(trackSamples[index].center);
-        if (distanceSq < bestDistanceSq) {
-          bestDistanceSq = distanceSq;
-          bestIndex = index;
-        }
-      }
-    } else {
-      for (let offset = -localWindow; offset <= localWindow; offset += 1) {
-        const index = wrapIndex(preferredIndex + offset, trackSamples.length);
-        const distanceSq = position.distanceToSquared(trackSamples[index].center);
-        if (distanceSq < bestDistanceSq) {
-          bestDistanceSq = distanceSq;
-          bestIndex = index;
-        }
-      }
-
-      if (bestDistanceSq > 30 * 30) {
-        return closestTrackSample(position, null);
-      }
-    }
-
+    const projection = projectPointOntoTrack(trackModel, position, preferredIndex);
     return {
-      index: bestIndex,
-      progress: bestIndex / trackConfig.samples,
-      distance: Math.sqrt(bestDistanceSq),
-      sample: trackSamples[bestIndex]
+      index: projection.segmentIndex,
+      progress: projection.progress,
+      distance: projection.distance,
+      sample: projection
     };
-  }
-
-  function trackDistanceFromIndex(position, preferredIndex) {
-    return closestTrackSample(position, preferredIndex).distance;
   }
 
   function nearestRoadDistance(position) {
@@ -1974,7 +1976,9 @@ export function createRacingGame() {
   }
 
   function relativeRaceProgress(progress) {
-    return wrapProgress(progress - raceConfig.startProgress);
+    return raceConfig.mode === "lap"
+      ? wrapProgress(progress - raceConfig.startProgress)
+      : clamp(progress, 0, 1);
   }
 
   function playerRaceDistance() {
@@ -1986,6 +1990,10 @@ export function createRacingGame() {
   }
 
   function raceDistanceFor(driverState) {
+    if (raceConfig.mode === "sprint") {
+      return driverState.maxForwardDistance;
+    }
+
     const progress = driverState.completedLaps > 0 || driverState.lapArmed ? driverState.raceProgress : 0;
     return driverState.completedLaps + progress;
   }
@@ -2000,6 +2008,30 @@ export function createRacingGame() {
 
   function currentLapNumber(completedLaps) {
     return Math.min(raceConfig.totalLaps, completedLaps + 1);
+  }
+
+  function sprintRemainingDistance(driverState) {
+    return Math.max(0, raceConfig.finishProgress * trackLength - driverState.maxForwardDistance);
+  }
+
+  function formatDistance(distance) {
+    return `${Math.max(0, Math.round(distance))} 米`;
+  }
+
+  function formatTime(seconds) {
+    if (!Number.isFinite(seconds)) {
+      return "--";
+    }
+
+    return `${seconds.toFixed(2)} 秒`;
+  }
+
+  function sampleProgressForIndex(index, sampleCount) {
+    if (trackModel.closed) {
+      return index / sampleCount;
+    }
+
+    return sampleCount <= 1 ? 0 : clamp(index / (sampleCount - 1), 0, 1);
   }
 
   function forwardVector() {
@@ -2020,6 +2052,14 @@ export function createRacingGame() {
 
   function randomBetween(min, max) {
     return min + Math.random() * (max - min);
+  }
+
+  function moveToward(current, target, maxDelta) {
+    if (current < target) {
+      return Math.min(current + maxDelta, target);
+    }
+
+    return Math.max(current - maxDelta, target);
   }
 
   function registerDebugApi() {

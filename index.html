@@ -50,7 +50,7 @@
             <span class="game-card-copy">
               <span class="game-state">可玩</span>
               <strong>3D 赛车</strong>
-              <span>三圈竞速对决</span>
+              <span>闭环赛与点到点冲刺赛</span>
             </span>
           </button>
 
@@ -66,7 +66,7 @@
             <span class="game-card-copy">
               <span class="game-state">工具</span>
               <strong>地图编辑器</strong>
-              <span>拖点改路线，放置障碍后直接试玩</span>
+              <span>切换开放或闭环赛道并直接试玩</span>
             </span>
           </button>
 
@@ -134,8 +134,8 @@
 
         <section class="hud racing-hud" aria-label="赛车状态">
           <div>
-            <span>圈数</span>
-            <strong id="racingLapValue">1 / 3</strong>
+            <span id="racingProgressLabel">圈数</span>
+            <strong id="racingProgressValue">1 / 3</strong>
           </div>
           <div>
             <span>名次</span>
@@ -166,12 +166,12 @@
               <p id="racingResultSummary" class="race-result-summary">你率先完成 3 圈。</p>
               <div class="race-result-stats">
                 <div>
-                  <span>你的圈数</span>
-                  <strong id="racingResultPlayerLaps">3 / 3</strong>
+                  <span id="racingResultPlayerLabel">你的圈数</span>
+                  <strong id="racingResultPlayerValue">3 / 3</strong>
                 </div>
                 <div>
-                  <span>对手圈数</span>
-                  <strong id="racingResultOpponentLaps">2 / 3</strong>
+                  <span id="racingResultOpponentLabel">对手圈数</span>
+                  <strong id="racingResultOpponentValue">2 / 3</strong>
                 </div>
               </div>
               <button id="racingPlayAgainButton" class="race-result-button" type="button">再跑一场</button>
@@ -202,22 +202,27 @@
             </section>
 
             <section class="editor-card">
-              <p class="editor-label">编辑模式</p>
+              <p class="editor-label">赛道形态</p>
               <div class="editor-chip-row">
-                <button class="editor-chip is-active" data-editor-mode="track" type="button">路线</button>
-                <button class="editor-chip" data-editor-mode="obstacle" type="button">障碍</button>
+                <button class="editor-chip is-active" data-track-shape="loop" type="button">闭环</button>
+                <button class="editor-chip" data-track-shape="open" type="button">开放</button>
               </div>
-              <p class="editor-help">`Shift + 点击` 可在线段中插入控制点。</p>
+              <p class="editor-help">`Shift + 点击` 在线上新增控制点。开放赛道会自动判断是中间插点，还是从起点端 / 终点端接长。</p>
             </section>
 
             <section class="editor-card">
-              <p class="editor-label">障碍预设</p>
-              <div class="editor-chip-grid">
-                <button class="editor-chip is-active" data-obstacle-type="crate" type="button">箱子</button>
-                <button class="editor-chip" data-obstacle-type="barrier" type="button">护栏块</button>
-                <button class="editor-chip" data-obstacle-type="cone" type="button">锥桶组</button>
+              <p class="editor-label">赛制兼容性</p>
+              <div class="editor-stage-summary">
+                <div>
+                  <span>当前形态</span>
+                  <strong id="racingEditorShapeValue">闭环赛道</strong>
+                </div>
+                <div>
+                  <span>支持赛制</span>
+                  <strong id="racingEditorRaceModeValue">闭环赛</strong>
+                </div>
               </div>
-              <p class="editor-help">障碍模式下点击画布即可放置。</p>
+              <p class="editor-help">开放赛道只支持点到点冲刺赛；闭环赛道只支持闭环赛。</p>
             </section>
 
             <section class="editor-card editor-stats">
@@ -226,27 +231,32 @@
                 <strong id="racingEditorPointsValue">0 个</strong>
               </div>
               <div>
-                <span>障碍</span>
-                <strong id="racingEditorObstaclesValue">0 个</strong>
-              </div>
-              <div>
                 <span>当前选择</span>
                 <strong id="racingEditorSelectionValue">未选中</strong>
               </div>
               <div>
-                <span>状态</span>
-                <strong id="racingEditorStatusValue">就绪</strong>
+                <span>形态</span>
+                <strong id="racingEditorShapeValueMirror">闭环赛道</strong>
+              </div>
+              <div>
+                <span>赛制</span>
+                <strong id="racingEditorRaceModeValueMirror">闭环赛</strong>
               </div>
             </section>
 
             <section class="editor-card">
               <p class="editor-label">快捷键</p>
-              <p class="editor-help">`WASD / 方向键` 微调，`Delete` 删除，`Q / E` 旋转障碍，`R / F` 缩放障碍，`Ctrl + D` 复制障碍。</p>
+              <p class="editor-help">`WASD / 方向键` 微调控制点；选中闭环起跑线后可沿赛道微调起跑位置；`Delete` 删除控制点；`Esc` 取消起跑线选择。</p>
+            </section>
+
+            <section class="editor-card">
+              <p class="editor-label">状态</p>
+              <p id="racingEditorStatusValue" class="editor-help">就绪</p>
             </section>
 
             <section class="editor-card editor-actions">
               <button id="racingEditorDeleteButton" class="secondary-button" type="button">删除选中</button>
-              <button id="racingEditorDuplicateButton" class="secondary-button" type="button">复制障碍</button>
+              <button id="racingEditorReverseButton" class="secondary-button" type="button">反转方向</button>
               <button id="racingEditorExportButton" class="secondary-button" type="button">复制 JSON</button>
               <button id="racingEditorImportButton" class="secondary-button" type="button">导入 JSON</button>
               <input id="racingEditorImportInput" type="file" accept=".json,application/json" hidden>

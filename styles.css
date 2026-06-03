@@ -485,6 +485,14 @@ h1 {
   cursor: pointer;
 }
 
+.primary-button:disabled,
+.secondary-button:disabled,
+.editor-chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+  outline: none;
+}
+
 .primary-button,
 .secondary-button {
   padding: 0 16px;
@@ -629,6 +637,36 @@ h1 {
 .editor-actions {
   display: grid;
   gap: 8px;
+}
+
+.editor-stage-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.editor-stage-summary div {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(15, 139, 141, 0.08);
+  border-radius: 8px;
+  background: rgba(248, 251, 252, 0.88);
+}
+
+.editor-stage-summary span,
+.editor-stage-summary strong {
+  display: block;
+}
+
+.editor-stage-summary span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.editor-stage-summary strong {
+  margin-top: 5px;
+  font-size: 18px;
+  line-height: 1.15;
 }
 
 .editor-chip-row {
@@ -922,7 +960,8 @@ h1 {
 
   .editor-chip-grid,
   .editor-actions,
-  .editor-stats {
+  .editor-stats,
+  .editor-stage-summary {
     grid-template-columns: 1fr;
   }
 
