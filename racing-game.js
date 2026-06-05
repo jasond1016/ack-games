@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/loaders/GLTFLoader.js";
 import { DRACOLoader } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/loaders/DRACOLoader.js";
+import { toCreasedNormals } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/utils/BufferGeometryUtils.js";
 import RAPIER from "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/+esm";
 import { racingCarConfig } from "./racing-car-config.js";
 import { loadActiveRacingMap } from "./racing-map.js";
@@ -388,6 +389,8 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     sun.castShadow = true;
     sun.shadow.mapSize.width = 2048;
     sun.shadow.mapSize.height = 2048;
+    sun.shadow.bias = racingCarConfig.sunShadowBias ?? 0;
+    sun.shadow.normalBias = racingCarConfig.sunShadowNormalBias ?? 0;
     sun.shadow.camera.left = -120;
     sun.shadow.camera.right = 120;
     sun.shadow.camera.top = 120;
@@ -990,15 +993,20 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
         }
 
         normalizeCarModel(template);
+        smoothCarBodyGeometry(template);
         template.traverse((child) => {
           if (!child.isMesh) {
             return;
           }
 
-          child.castShadow = true;
-          child.receiveShadow = true;
-
           const materials = Array.isArray(child.material) ? child.material : [child.material];
+          const isBody = materials.some((material) =>
+            matchesAnyPattern(materialLabelFor(child, material), racingCarConfig.bodyNamePatterns)
+          );
+
+          child.castShadow = true;
+          child.receiveShadow = isBody ? racingCarConfig.bodyReceiveShadow !== false : true;
+
           for (const material of materials) {
             if (material?.map && renderer) {
               material.map.anisotropy = renderer.capabilities.getMaxAnisotropy();
@@ -1029,6 +1037,37 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     model.updateMatrixWorld(true);
   }
 
+  function smoothCarBodyGeometry(model) {
+    if (racingCarConfig.smoothBodyGeometry === false) {
+      return;
+    }
+
+    const smoothingPatterns = racingCarConfig.bodySmoothingNamePatterns ?? racingCarConfig.bodyNamePatterns;
+    const creaseAngleDegrees = racingCarConfig.bodySmoothingCreaseAngleDegrees ?? 60;
+    const creaseAngle = THREE.MathUtils.degToRad(creaseAngleDegrees);
+
+    model.traverse((child) => {
+      if (!child.isMesh || !child.geometry) {
+        return;
+      }
+
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      const shouldSmooth = materials.some((material) => {
+        const label = materialLabelFor(child, material);
+        return matchesAnyPattern(label, smoothingPatterns);
+      });
+
+      if (!shouldSmooth) {
+        return;
+      }
+
+      const smoothedGeometry = toCreasedNormals(child.geometry, creaseAngle);
+      smoothedGeometry.computeBoundingBox();
+      smoothedGeometry.computeBoundingSphere();
+      child.geometry = smoothedGeometry;
+    });
+  }
+
   function cloneCarMaterials(model) {
     model.traverse((child) => {
       if (!child.isMesh || !child.material) {
@@ -1052,6 +1091,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
         const label = materialLabelFor(child, material);
         const isGlass = matchesAnyPattern(label, racingCarConfig.glassNamePatterns);
         const isBody = matchesAnyPattern(label, racingCarConfig.bodyNamePatterns);
+        const preserveBodyMaterialProperties = racingCarConfig.preserveBodyMaterialProperties !== false;
 
         if (material?.map && renderer) {
           material.map.anisotropy = renderer.capabilities.getMaxAnisotropy();
@@ -1061,37 +1101,39 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
           if (isGlass) {
             material.envMapIntensity = racingCarConfig.glassEnvMapIntensity;
           } else if (isBody) {
-            material.envMapIntensity = racingCarConfig.bodyEnvMapIntensity;
-          } else {
+            if (!preserveBodyMaterialProperties && racingCarConfig.bodyEnvMapIntensity != null) {
+              material.envMapIntensity = racingCarConfig.bodyEnvMapIntensity;
+            }
+          } else if (racingCarConfig.detailEnvMapIntensity != null) {
             material.envMapIntensity = racingCarConfig.detailEnvMapIntensity;
           }
         }
 
         if ("roughness" in material) {
           if (isGlass) {
-            material.roughness = Math.max(
-              material.roughness ?? 0.12,
-              racingCarConfig.glassRoughnessFloor ?? 0.16
-            );
-          } else if (isBody) {
-            material.roughness = Math.max(
-              material.roughness ?? 0.6,
-              racingCarConfig.bodyRoughnessFloor ?? 0.68
-            );
+            const roughnessFloor = racingCarConfig.glassRoughnessFloor;
+            if (roughnessFloor != null) {
+              material.roughness = Math.max(material.roughness ?? roughnessFloor, roughnessFloor);
+            }
+          } else if (isBody && !preserveBodyMaterialProperties) {
+            const roughnessFloor = racingCarConfig.bodyRoughnessFloor;
+            if (roughnessFloor != null) {
+              material.roughness = Math.max(material.roughness ?? roughnessFloor, roughnessFloor);
+            }
           }
         }
 
         if ("metalness" in material) {
           if (isGlass) {
-            material.metalness = Math.min(
-              material.metalness ?? 0.04,
-              racingCarConfig.glassMetalnessCeiling ?? 0.04
-            );
-          } else if (isBody) {
-            material.metalness = Math.min(
-              material.metalness ?? 0.1,
-              racingCarConfig.bodyMetalnessCeiling ?? 0.1
-            );
+            const metalnessCeiling = racingCarConfig.glassMetalnessCeiling;
+            if (metalnessCeiling != null) {
+              material.metalness = Math.min(material.metalness ?? metalnessCeiling, metalnessCeiling);
+            }
+          } else if (isBody && !preserveBodyMaterialProperties) {
+            const metalnessCeiling = racingCarConfig.bodyMetalnessCeiling;
+            if (metalnessCeiling != null) {
+              material.metalness = Math.min(material.metalness ?? metalnessCeiling, metalnessCeiling);
+            }
           }
         }
 
