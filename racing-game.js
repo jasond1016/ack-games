@@ -183,8 +183,15 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   const roadsidePropsConfig = environmentConfig.roadsideProps ?? {};
   const sceneBounds = computeTrackBounds(trackSamples);
   const sceneCenter = sceneBounds.center;
+  const environmentScale = Math.max(1, trackLength / 650);
+  const nearFieldPadding = 56;
+  const farFieldPadding = 118;
+  const nearFieldWidth = Math.max(groundConfig.nearFieldSize ?? 320, sceneBounds.width + nearFieldPadding * 2);
+  const nearFieldDepth = Math.max(groundConfig.nearFieldSize ?? 320, sceneBounds.depth + nearFieldPadding * 2);
+  const farFieldWidth = Math.max(groundConfig.farFieldSize ?? 460, sceneBounds.width + farFieldPadding * 2);
+  const farFieldDepth = Math.max(groundConfig.farFieldSize ?? 460, sceneBounds.depth + farFieldPadding * 2);
   const groundRadius = Math.max(
-    groundConfig.farFieldSize ? groundConfig.farFieldSize / 2 : 0,
+    Math.hypot(farFieldWidth * 0.5, farFieldDepth * 0.5),
     sceneBounds.radius + 88
   );
 
@@ -439,9 +446,6 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     }
     if (selectedCarPreviewRenderer) {
       selectedCarPreviewRenderer.dispose();
-      if (typeof selectedCarPreviewRenderer.forceContextLoss === "function") {
-        selectedCarPreviewRenderer.forceContextLoss();
-      }
       selectedCarPreviewRenderer = null;
     }
     selectedCarPreviewScene = null;
@@ -968,8 +972,8 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
 
   function addGroundLayers() {
     const nearField = createTerrainPlane({
-      width: groundConfig.nearFieldSize ?? 320,
-      depth: groundConfig.nearFieldSize ?? 320,
+      width: nearFieldWidth,
+      depth: nearFieldDepth,
       segmentsX: groundConfig.nearFieldSegments ?? 28,
       segmentsZ: groundConfig.nearFieldSegments ?? 28,
       y: -0.18,
@@ -987,8 +991,8 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     scene.add(nearField);
 
     const farField = createTerrainPlane({
-      width: groundConfig.farFieldSize ?? 460,
-      depth: groundConfig.farFieldSize ?? 460,
+      width: farFieldWidth,
+      depth: farFieldDepth,
       segmentsX: groundConfig.farFieldSegments ?? 16,
       segmentsZ: groundConfig.farFieldSegments ?? 16,
       y: -0.34,
@@ -1638,7 +1642,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
       metalness: 0.04,
       side: THREE.DoubleSide
     });
-    const placements = buildTracksidePlacements(roadsidePropsConfig.sponsorBoardCount ?? 8, {
+    const placements = buildTracksidePlacements(scaleEnvironmentCount(roadsidePropsConfig.sponsorBoardCount ?? 8, 0.8), {
       minOffset: 17,
       maxOffset: 22,
       minSpacing: 26,
@@ -1670,7 +1674,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   }
 
   function addTireStacks() {
-    const placements = buildTracksidePlacements(roadsidePropsConfig.tireStackCount ?? 8, {
+    const placements = buildTracksidePlacements(scaleEnvironmentCount(roadsidePropsConfig.tireStackCount ?? 8, 0.8), {
       minOffset: 9,
       maxOffset: 14,
       minSpacing: 18,
@@ -1738,7 +1742,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   }
 
   function addFoliage() {
-    const nearTrees = buildTracksidePlacements(foliageConfig.nearTreeCount ?? 30, {
+    const nearTrees = buildTracksidePlacements(scaleEnvironmentCount(foliageConfig.nearTreeCount ?? 30, 0.95), {
       minOffset: foliageConfig.nearTreeBandMin ?? 18,
       maxOffset: foliageConfig.nearTreeBandMax ?? 42,
       minSpacing: foliageConfig.nearTreeMinSpacing ?? 11,
@@ -1748,7 +1752,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
       height: randomBetween(5.2, 8.4),
       variant: index % 2
     }));
-    const farTrees = buildTracksidePlacements(foliageConfig.farTreeCount ?? 120, {
+    const farTrees = buildTracksidePlacements(scaleEnvironmentCount(foliageConfig.farTreeCount ?? 120, 1), {
       minOffset: foliageConfig.farTreeBandMin ?? 36,
       maxOffset: foliageConfig.farTreeBandMax ?? 112,
       minSpacing: foliageConfig.farTreeMinSpacing ?? 8,
@@ -1757,7 +1761,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
       ...placement,
       height: randomBetween(8, 15)
     }));
-    const shrubs = buildTracksidePlacements(foliageConfig.shrubCount ?? 68, {
+    const shrubs = buildTracksidePlacements(scaleEnvironmentCount(foliageConfig.shrubCount ?? 68, 0.9), {
       minOffset: foliageConfig.shrubBandMin ?? 8,
       maxOffset: foliageConfig.shrubBandMax ?? 18,
       minSpacing: foliageConfig.shrubMinSpacing ?? 4.6,
@@ -1771,6 +1775,11 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     addNearTreeInstances(nearTrees);
     addBillboardTreeInstances(farTrees, 0x90a98e);
     addShrubInstances(shrubs);
+  }
+
+  function scaleEnvironmentCount(baseCount, capMultiplier = 1) {
+    const scale = Math.min(capMultiplier + 2, environmentScale * capMultiplier);
+    return Math.max(baseCount, Math.round(baseCount * scale));
   }
 
   function addNearTreeInstances(placements) {
@@ -1999,10 +2008,16 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   }
 
   function addBackdrop() {
-    const ridgeRadius = Math.max(sceneBounds.radius + (backdropConfig.radiusPadding ?? 78), groundRadius - 24);
+    const ridgeInset = backdropConfig.radiusPadding ?? 78;
+    const ridgeBounds = {
+      minX: sceneBounds.minX - ridgeInset,
+      maxX: sceneBounds.maxX + ridgeInset,
+      minZ: sceneBounds.minZ - ridgeInset,
+      maxZ: sceneBounds.maxZ + ridgeInset
+    };
     scene.add(
       createBackdropRidge({
-        radius: ridgeRadius,
+        bounds: ridgeBounds,
         depth: 32,
         segments: backdropConfig.ridgeSegments ?? 36,
         minHeight: backdropConfig.ridgeHeightMin ?? 16,
@@ -2010,7 +2025,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
         color: 0x7d8e8f
       }),
       createBackdropRidge({
-        radius: ridgeRadius + 18,
+        bounds: expandBounds(ridgeBounds, 18),
         depth: 48,
         segments: Math.max(20, Math.floor((backdropConfig.ridgeSegments ?? 36) * 0.7)),
         minHeight: 22,
@@ -2019,42 +2034,44 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
       })
     );
 
-    const innerBackdropTrees = Array.from({ length: backdropConfig.innerTreeCount ?? 36 }, (_, index) => {
-      const count = backdropConfig.innerTreeCount ?? 36;
-      const angle = (index / Math.max(1, count)) * Math.PI * 2;
-      const radius = ridgeRadius - 18 + Math.sin(index * 1.9) * 6;
-      return {
-        position: new THREE.Vector2(
-          sceneCenter.x + Math.cos(angle) * radius,
-          sceneCenter.y + Math.sin(angle) * radius
-        ),
-        height: randomBetween(
-          backdropConfig.innerTreeHeightMin ?? 14,
-          backdropConfig.innerTreeHeightMax ?? 28
-        )
-      };
-    });
+    const innerBackdropTrees = buildBackdropTreePlacements(
+      backdropConfig.innerTreeCount ?? 36,
+      insetBounds(ridgeBounds, 20),
+      10
+    ).map((placement) => ({
+      ...placement,
+      height: randomBetween(
+        backdropConfig.innerTreeHeightMin ?? 14,
+        backdropConfig.innerTreeHeightMax ?? 28
+      )
+    }));
     addBillboardTreeInstances(innerBackdropTrees, 0x738572);
   }
 
-  function createBackdropRidge({ radius, depth, segments, minHeight, maxHeight, color }) {
+  function createBackdropRidge({ bounds, depth, segments, minHeight, maxHeight, color }) {
     const positions = [];
     const indices = [];
 
-    for (let index = 0; index <= segments; index += 1) {
-      const angle = (index / segments) * Math.PI * 2;
+    const outline = buildRectPerimeterPoints(bounds, segments);
+    const outlineCenter = new THREE.Vector2((bounds.minX + bounds.maxX) / 2, (bounds.minZ + bounds.maxZ) / 2);
+
+    for (let index = 0; index < outline.length; index += 1) {
+      const point = outline[index];
+      const angle = (index / Math.max(1, outline.length - 1)) * Math.PI * 2;
       const localNoise = 0.5 + 0.5 * Math.sin(angle * 3.2 + Math.cos(angle * 5.4));
       const height = THREE.MathUtils.lerp(minHeight, maxHeight, localNoise);
-      const radiusOffset = Math.sin(angle * 2.1) * 5 + Math.cos(angle * 4.3) * 3;
-      const x = sceneCenter.x + Math.cos(angle) * (radius + radiusOffset);
-      const z = sceneCenter.y + Math.sin(angle) * (radius + radiusOffset);
-      const backX = sceneCenter.x + Math.cos(angle) * (radius + depth + radiusOffset);
-      const backZ = sceneCenter.y + Math.sin(angle) * (radius + depth + radiusOffset);
+      const outward = point.clone().sub(outlineCenter).normalize();
+      const backPoint = point.clone().add(outward.multiplyScalar(depth));
 
-      positions.push(x, 0, z, x, height, z, backX, 0, backZ, backX, height * 0.78, backZ);
+      positions.push(
+        point.x, 0, point.y,
+        point.x, height, point.y,
+        backPoint.x, 0, backPoint.y,
+        backPoint.x, height * 0.78, backPoint.y
+      );
     }
 
-    for (let index = 0; index < segments; index += 1) {
+    for (let index = 0; index < outline.length - 1; index += 1) {
       const stride = index * 4;
       const nextStride = (index + 1) * 4;
       indices.push(stride, nextStride, stride + 1, stride + 1, nextStride, nextStride + 1);
@@ -2078,6 +2095,70 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
         side: THREE.DoubleSide
       })
     );
+  }
+
+  function buildBackdropTreePlacements(count, bounds, jitter = 0) {
+    const placements = [];
+    const perimeterPoints = buildRectPerimeterPoints(bounds, count);
+
+    for (let index = 0; index < count; index += 1) {
+      const point = perimeterPoints[index];
+      placements.push({
+        position: new THREE.Vector2(
+          point.x + randomBetween(-jitter, jitter),
+          point.y + randomBetween(-jitter, jitter)
+        )
+      });
+    }
+
+    return placements;
+  }
+
+  function buildRectPerimeterPoints(bounds, count) {
+    const points = [];
+    const spanX = Math.max(1, bounds.maxX - bounds.minX);
+    const spanZ = Math.max(1, bounds.maxZ - bounds.minZ);
+    const perimeter = spanX * 2 + spanZ * 2;
+
+    for (let index = 0; index <= count; index += 1) {
+      let distance = (index / Math.max(1, count)) * perimeter;
+      if (distance <= spanX) {
+        points.push(new THREE.Vector2(bounds.minX + distance, bounds.minZ));
+        continue;
+      }
+      distance -= spanX;
+      if (distance <= spanZ) {
+        points.push(new THREE.Vector2(bounds.maxX, bounds.minZ + distance));
+        continue;
+      }
+      distance -= spanZ;
+      if (distance <= spanX) {
+        points.push(new THREE.Vector2(bounds.maxX - distance, bounds.maxZ));
+        continue;
+      }
+      distance -= spanX;
+      points.push(new THREE.Vector2(bounds.minX, bounds.maxZ - Math.min(distance, spanZ)));
+    }
+
+    return points;
+  }
+
+  function expandBounds(bounds, amount) {
+    return {
+      minX: bounds.minX - amount,
+      maxX: bounds.maxX + amount,
+      minZ: bounds.minZ - amount,
+      maxZ: bounds.maxZ + amount
+    };
+  }
+
+  function insetBounds(bounds, amount) {
+    return {
+      minX: bounds.minX + amount,
+      maxX: bounds.maxX - amount,
+      minZ: bounds.minZ + amount,
+      maxZ: bounds.maxZ - amount
+    };
   }
 
   function createSponsorBoardTexture() {
@@ -3528,11 +3609,13 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     const maxX = Math.max(...xs);
     const minZ = Math.min(...zs);
     const maxZ = Math.max(...zs);
+    const width = maxX - minX;
+    const depth = maxZ - minZ;
     const center = new THREE.Vector2((minX + maxX) / 2, (minZ + maxZ) / 2);
     const radius = samples.reduce((maxRadius, sample) => {
       return Math.max(maxRadius, sample.center.distanceTo(center) + sample.railOffset);
     }, 0);
-    return { center, radius, minX, maxX, minZ, maxZ };
+    return { center, radius, minX, maxX, minZ, maxZ, width, depth };
   }
 
   function trackProfileAtProgress(progress) {
