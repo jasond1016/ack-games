@@ -2,6 +2,7 @@ import { createRacingGame } from "./racing-game.js";
 import { createRacingEditor } from "./racing-editor.js";
 import { createVacuumGame } from "./vacuum-game.js";
 
+const body = document.body;
 const homeView = document.getElementById("homeView");
 const vacuumView = document.getElementById("vacuumView");
 const racingView = document.getElementById("racingView");
@@ -10,9 +11,7 @@ const vacuumGameCard = document.getElementById("vacuumGameCard");
 const racingGameCard = document.getElementById("racingGameCard");
 const racingEditorCard = document.getElementById("racingEditorCard");
 const vacuumHomeButton = document.getElementById("vacuumHomeButton");
-const racingHomeButton = document.getElementById("racingHomeButton");
 const racingEditorHomeButton = document.getElementById("racingEditorHomeButton");
-const racingEditorButton = document.getElementById("racingEditorButton");
 
 const games = {
   vacuum: {
@@ -24,7 +23,10 @@ const games = {
   racing: {
     title: "3D 赛车 - ACK Games",
     view: racingView,
-    create: () => createRacingGame(),
+    create: () => createRacingGame({
+      onHome: () => showHome(),
+      onEditMap: () => startGame("racing-editor")
+    }),
     instance: null
   },
   "racing-editor": {
@@ -50,6 +52,7 @@ function showHome(updateHistory = true) {
     candidate.view.hidden = true;
   }
   document.title = "ACK Games";
+  body.dataset.activeView = "home";
 
   if (updateHistory) {
     history.pushState({ view: "home" }, "", location.pathname);
@@ -72,6 +75,7 @@ function startGame(gameId, updateHistory = true) {
   }
 
   document.title = game.title;
+  body.dataset.activeView = gameId;
   getGameInstance(gameId).start();
 
   if (updateHistory) {
@@ -127,8 +131,6 @@ vacuumGameCard.addEventListener("click", () => startGame("vacuum"));
 racingGameCard.addEventListener("click", () => startGame("racing"));
 racingEditorCard.addEventListener("click", () => startGame("racing-editor"));
 vacuumHomeButton.addEventListener("click", () => showHome());
-racingHomeButton.addEventListener("click", () => showHome());
 racingEditorHomeButton.addEventListener("click", () => showHome());
-racingEditorButton.addEventListener("click", () => startGame("racing-editor"));
 
 routeFromHash(false);

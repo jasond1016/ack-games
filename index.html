@@ -119,44 +119,46 @@
       </section>
 
       <section id="racingView" class="game-view racing-view" aria-label="3D 赛车" hidden>
-        <header class="topbar">
-          <button id="racingHomeButton" class="icon-button" type="button" aria-label="返回首页" title="返回首页">
-            ‹
-          </button>
-          <h1>3D 赛车</h1>
-          <div class="topbar-actions">
-            <button id="racingEditorButton" class="secondary-button" type="button">编辑地图</button>
-            <button id="racingResetButton" class="icon-button" type="button" aria-label="重开比赛" title="重开比赛">
-              ↻
-            </button>
-          </div>
-        </header>
-
-        <section class="hud racing-hud" aria-label="赛车状态">
-          <div>
-            <span id="racingProgressLabel">圈数</span>
-            <strong id="racingProgressValue">1 / 3</strong>
-          </div>
-          <div>
-            <span>名次</span>
-            <strong id="racingPlaceValue">第1名</strong>
-          </div>
-          <div>
-            <span>速度</span>
-            <strong id="racingSpeedValue">0 km/h</strong>
-          </div>
-          <div>
-            <span>加速</span>
-            <strong id="racingBoostValue">剩3次</strong>
-          </div>
-          <div>
-            <span>状态</span>
-            <strong id="racingStatusValue">比赛中</strong>
-          </div>
-        </section>
-
         <div class="racing-stage">
           <canvas id="racingCanvas" class="racing-canvas" width="960" height="620" aria-label="3D 赛车游戏画面"></canvas>
+
+          <section class="race-hud-overlay" aria-label="比赛 HUD">
+            <div class="race-hud-panel race-hud-panel-top-left">
+              <span id="racingProgressLabel" class="race-hud-label">LAP</span>
+              <strong id="racingProgressValue" class="race-hud-value">1 / 3</strong>
+            </div>
+
+            <div class="race-hud-panel race-hud-panel-top-right">
+              <span class="race-hud-label">POS</span>
+              <strong id="racingPlaceValue" class="race-hud-value">1 / 2</strong>
+            </div>
+
+            <div class="race-hud-panel race-hud-panel-bottom-left race-boost-panel">
+              <span class="race-hud-label">BOOST</span>
+              <strong id="racingBoostValue" class="race-hud-value">x5</strong>
+            </div>
+
+            <div class="race-hud-panel race-hud-panel-bottom-right race-speed-panel">
+              <span class="race-speed-unit">KM/H</span>
+              <strong id="racingSpeedValue" class="race-speed-value">0</strong>
+            </div>
+          </section>
+
+          <section id="racingPauseOverlay" class="race-pause-overlay" aria-label="暂停菜单" hidden>
+            <div class="race-pause-card">
+              <p class="race-pause-tag">比赛暂停</p>
+              <h2 class="race-pause-title">暂停菜单</h2>
+              <p class="race-pause-copy">按 ESC 可直接继续比赛。</p>
+              <div class="race-pause-actions">
+                <button id="racingResumeButton" class="primary-button" type="button">继续比赛</button>
+                <button id="racingPauseResetButton" class="secondary-button" type="button">重开比赛</button>
+              </div>
+              <div class="race-pause-actions race-pause-actions-secondary">
+                <button id="racingPauseEditorButton" class="secondary-button" type="button">编辑地图</button>
+                <button id="racingPauseHomeButton" class="secondary-button" type="button">返回首页</button>
+              </div>
+            </div>
+          </section>
 
           <section id="racingResultOverlay" class="race-result-overlay" aria-label="比赛结果" hidden>
             <div id="racingResultCard" class="race-result-card">

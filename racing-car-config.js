@@ -1,16 +1,22 @@
 const defaultCarModelUrl = new URL(
-  "./assets/cars/2008-aston-martin-009-aston-martin-racing-dbr9/source/2008 Aston Martin 009 Aston Martin Racing DBR9.glb",
+  "./assets/cars/lamborghini_aventador_lp720-4_50th_anniversary/lamborghini_aventador_lp720-4_50th_anniversary.glb",
   import.meta.url
 ).href;
 
 export const racingCarConfig = {
   // Replace this with your own high-detail GLB/GLTF once it lives in the repo.
   modelUrl: defaultCarModelUrl,
-  targetLength: 4.72,
+  targetLength: 4.78,
   visualScale: 2,
   collisionScale: 2,
   trackWidthOverride: 24,
-  modelRotationDegrees: 180,
+  cameraFov: 54,
+  cameraFollowDistance: 10.6,
+  cameraHeight: 5.7,
+  cameraLookAhead: 4.8,
+  cameraTargetHeight: 1.45,
+  cameraFollowTightness: 4.8,
+  modelRotationDegrees: 0,
   groundOffset: 0.02,
   allowTint: false,
   toneMappingExposure: 0.78,

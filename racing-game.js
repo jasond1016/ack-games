@@ -46,7 +46,7 @@ function createCarModelLoader() {
   return loader;
 }
 
-export function createRacingGame() {
+export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {}) {
   const mapData = loadActiveRacingMap();
   const canvas = document.getElementById("racingCanvas");
   const progressLabel = document.getElementById("racingProgressLabel");
@@ -54,8 +54,11 @@ export function createRacingGame() {
   const placeValue = document.getElementById("racingPlaceValue");
   const speedValue = document.getElementById("racingSpeedValue");
   const boostValue = document.getElementById("racingBoostValue");
-  const statusValue = document.getElementById("racingStatusValue");
-  const resetButton = document.getElementById("racingResetButton");
+  const pauseOverlay = document.getElementById("racingPauseOverlay");
+  const resumeButton = document.getElementById("racingResumeButton");
+  const pauseResetButton = document.getElementById("racingPauseResetButton");
+  const pauseEditorButton = document.getElementById("racingPauseEditorButton");
+  const pauseHomeButton = document.getElementById("racingPauseHomeButton");
   const resultOverlay = document.getElementById("racingResultOverlay");
   const resultCard = document.getElementById("racingResultCard");
   const confetti = document.getElementById("racingConfetti");
@@ -67,11 +70,35 @@ export function createRacingGame() {
   const resultOpponentLabel = document.getElementById("racingResultOpponentLabel");
   const resultOpponentValue = document.getElementById("racingResultOpponentValue");
   const playAgainButton = document.getElementById("racingPlayAgainButton");
-  const handleResetButtonClick = () => resetRace();
+  const handleResumeButtonClick = () => setPaused(false);
+  const handlePauseResetButtonClick = () => {
+    setPaused(false);
+    resetRace();
+  };
+  const handlePauseEditorButtonClick = () => {
+    setPaused(false);
+    onEditMap();
+  };
+  const handlePauseHomeButtonClick = () => {
+    setPaused(false);
+    onHome();
+  };
+  const handleResetButtonClick = () => {
+    setPaused(false);
+    resetRace();
+  };
 
   const visualScale = racingCarConfig.visualScale || 1;
   const collisionScale = racingCarConfig.collisionScale || visualScale;
   const trackWidth = racingCarConfig.trackWidthOverride ?? mapData.track.width;
+  const cameraConfig = {
+    fov: racingCarConfig.cameraFov ?? 58,
+    followDistance: racingCarConfig.cameraFollowDistance ?? 11.8,
+    height: racingCarConfig.cameraHeight ?? 6.4,
+    lookAhead: racingCarConfig.cameraLookAhead ?? 4.2,
+    targetHeight: racingCarConfig.cameraTargetHeight ?? 1.1,
+    followTightness: racingCarConfig.cameraFollowTightness ?? 5.2
+  };
 
   const trackConfig = {
     shape: mapData.track.shape,
@@ -228,6 +255,7 @@ export function createRacingGame() {
     winner: "",
     playerPlace: 1,
     opponentEnabled: true,
+    paused: false,
     elapsedSeconds: 0,
     settleSeconds: 0
   };
@@ -250,10 +278,10 @@ export function createRacingGame() {
   function start() {
     prepareConfetti();
     keyState.clear();
+    setPaused(false);
     addListeners();
     active = true;
     const requestId = ++startRequestId;
-    statusValue.textContent = "载入赛车";
 
     initializeScene()
       .then(() => {
@@ -279,7 +307,6 @@ export function createRacingGame() {
 
         active = false;
         removeListeners();
-        statusValue.textContent = "赛车加载失败";
       });
   }
 
@@ -287,6 +314,7 @@ export function createRacingGame() {
     active = false;
     startRequestId += 1;
     keyState.clear();
+    setPaused(false);
     removeListeners();
 
     if (animationFrameId) {
@@ -297,7 +325,10 @@ export function createRacingGame() {
 
   function destroy() {
     stop();
-    resetButton.removeEventListener("click", handleResetButtonClick);
+    resumeButton.removeEventListener("click", handleResumeButtonClick);
+    pauseResetButton.removeEventListener("click", handlePauseResetButtonClick);
+    pauseEditorButton.removeEventListener("click", handlePauseEditorButtonClick);
+    pauseHomeButton.removeEventListener("click", handlePauseHomeButtonClick);
     playAgainButton.removeEventListener("click", handleResetButtonClick);
   }
 
@@ -318,7 +349,7 @@ export function createRacingGame() {
       scene.background = new THREE.Color(racingCarConfig.backgroundColor ?? 0x9fc9f3);
       scene.fog = new THREE.Fog(racingCarConfig.fogColor ?? racingCarConfig.backgroundColor ?? 0x9fc9f3, 150, 260);
 
-      camera = new THREE.PerspectiveCamera(58, 1, 0.1, 500);
+      camera = new THREE.PerspectiveCamera(cameraConfig.fov, 1, 0.1, 500);
 
       applySceneEnvironment();
       createLights();
@@ -1323,26 +1354,56 @@ export function createRacingGame() {
 
     const deltaSeconds = Math.min((timestamp - lastFrameTime) / 1000, 0.04);
     lastFrameTime = timestamp;
-    const sprintGlide = raceConfig.mode === "sprint" && raceState.finished && !raceState.resultVisible;
+    if (!raceState.paused) {
+      const sprintGlide = raceConfig.mode === "sprint" && raceState.finished && !raceState.resultVisible;
 
-    if (!raceState.finished || sprintGlide) {
-      updateControls();
-      updatePhysics(deltaSeconds);
-      updateRaceState(deltaSeconds);
-    } else {
-      state.throttle = 0;
-      state.brake = 0;
-      state.steering += (0 - state.steering) * 0.18;
+      if (!raceState.finished || sprintGlide) {
+        updateControls();
+        updatePhysics(deltaSeconds);
+        updateRaceState(deltaSeconds);
+      } else {
+        state.throttle = 0;
+        state.brake = 0;
+        state.steering += (0 - state.steering) * 0.18;
+      }
+
+      updateCarTransform();
+      updateBoostEffect(timestamp);
+      updateOpponentTransform();
+      updateCamera(deltaSeconds);
     }
 
-    updateCarTransform();
-    updateBoostEffect(timestamp);
-    updateOpponentTransform();
-    updateCamera(deltaSeconds);
     updateHud();
     renderer.render(scene, camera);
 
     animationFrameId = requestAnimationFrame(loop);
+  }
+
+  function setPaused(nextPaused) {
+    if (!active && nextPaused) {
+      return false;
+    }
+
+    if (nextPaused && raceState.resultVisible) {
+      return false;
+    }
+
+    if (raceState.paused === nextPaused) {
+      return raceState.paused;
+    }
+
+    raceState.paused = nextPaused;
+    keyState.clear();
+    pauseOverlay.hidden = !nextPaused;
+
+    if (nextPaused) {
+      resumeButton.focus({ preventScroll: true });
+    } else if (document.activeElement instanceof HTMLElement && pauseOverlay.contains(document.activeElement)) {
+      document.activeElement.blur();
+    }
+
+    updateHud();
+    return raceState.paused;
   }
 
   function updateControls() {
@@ -1847,27 +1908,27 @@ export function createRacingGame() {
 
   function updateCamera(deltaSeconds) {
     const forward = new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading));
-    const target = new THREE.Vector3(state.position.x, 1.1, state.position.y).addScaledVector(forward, 4.2);
+    const target = new THREE.Vector3(state.position.x, cameraConfig.targetHeight, state.position.y)
+      .addScaledVector(forward, cameraConfig.lookAhead);
     const desired = new THREE.Vector3(state.position.x, 0, state.position.y)
-      .addScaledVector(forward, -11.8)
-      .add(new THREE.Vector3(0, 6.4, 0));
+      .addScaledVector(forward, -cameraConfig.followDistance)
+      .add(new THREE.Vector3(0, cameraConfig.height, 0));
 
-    const follow = 1 - Math.exp(-deltaSeconds * 5.2);
+    const follow = 1 - Math.exp(-deltaSeconds * cameraConfig.followTightness);
     camera.position.lerp(desired, follow);
     camera.lookAt(target);
   }
 
   function updateHud() {
-    progressLabel.textContent = raceConfig.mode === "lap" ? "圈数" : "剩余";
+    progressLabel.textContent = raceConfig.mode === "lap" ? "LAP" : "LEFT";
     progressValue.textContent = raceConfig.mode === "lap"
       ? formatLapDisplay(state.completedLaps)
-      : formatDistance(sprintRemainingDistance(state));
-    placeValue.textContent = raceState.playerPlace === 1 ? "第1名" : "第2名";
-    speedValue.textContent = `${Math.round(state.velocity.length() * 3.6)} km/h`;
+      : formatDistanceHud(sprintRemainingDistance(state));
+    placeValue.textContent = `${raceState.playerPlace} / ${raceState.opponentEnabled ? 2 : 1}`;
+    speedValue.textContent = `${Math.round(state.velocity.length() * 3.6)}`;
     boostValue.textContent = state.boostSeconds > 0
-      ? `${state.boostSeconds.toFixed(1)}秒`
-      : `剩${state.boostCharges}次`;
-    statusValue.textContent = currentStatusLabel();
+      ? `${state.boostSeconds.toFixed(1)}S`
+      : `x${state.boostCharges}`;
   }
 
   function currentStatusLabel() {
@@ -1908,6 +1969,7 @@ export function createRacingGame() {
 
   function resetRace() {
     hideResultOverlay();
+    pauseOverlay.hidden = true;
 
     const start = trackProfileAtProgress(raceConfig.startProgress);
     const startPosition = start.center.clone().add(start.normal.clone().multiplyScalar(2.8));
@@ -1954,6 +2016,7 @@ export function createRacingGame() {
     raceState.resultVisible = false;
     raceState.winner = "";
     raceState.playerPlace = 1;
+    raceState.paused = false;
     raceState.elapsedSeconds = 0;
     raceState.settleSeconds = 0;
 
@@ -1985,10 +2048,13 @@ export function createRacingGame() {
       const forward = new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading));
       camera.position.copy(
         new THREE.Vector3(state.position.x, 0, state.position.y)
-          .addScaledVector(forward, -11.8)
-          .add(new THREE.Vector3(0, 6.4, 0))
+          .addScaledVector(forward, -cameraConfig.followDistance)
+          .add(new THREE.Vector3(0, cameraConfig.height, 0))
       );
-      camera.lookAt(new THREE.Vector3(state.position.x, 1.1, state.position.y).addScaledVector(forward, 4.2));
+      camera.lookAt(
+        new THREE.Vector3(state.position.x, cameraConfig.targetHeight, state.position.y)
+          .addScaledVector(forward, cameraConfig.lookAhead)
+      );
       renderer.render(scene, camera);
     }
 
@@ -2006,6 +2072,8 @@ export function createRacingGame() {
   }
 
   function showResultOverlay(winner) {
+    raceState.paused = false;
+    pauseOverlay.hidden = true;
     resultCard.classList.toggle("is-win", winner === "player");
     resultCard.classList.toggle("is-loss", winner !== "player");
     resultTag.textContent = winner === "player" ? "率先冲线" : "对手先冲线";
@@ -2130,8 +2198,17 @@ export function createRacingGame() {
   }
 
   function handleKeyDown(event) {
-    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "KeyW", "KeyA", "KeyS", "KeyD", "KeyE", "KeyH", "KeyR"].includes(event.code)) {
+    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "KeyW", "KeyA", "KeyS", "KeyD", "KeyE", "KeyH", "KeyR", "Escape"].includes(event.code)) {
       event.preventDefault();
+    }
+
+    if (event.code === "Escape" && !event.repeat) {
+      setPaused(!raceState.paused);
+      return;
+    }
+
+    if (raceState.paused) {
+      return;
     }
 
     if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "KeyW", "KeyA", "KeyS", "KeyD"].includes(event.code)) {
@@ -2146,7 +2223,7 @@ export function createRacingGame() {
       toggleOpponent();
     }
 
-    if (event.code === "KeyR") {
+    if (event.code === "KeyR" && !event.repeat) {
       resetRace();
     }
   }
@@ -2245,6 +2322,10 @@ export function createRacingGame() {
     return `${Math.max(0, Math.round(distance))} 米`;
   }
 
+  function formatDistanceHud(distance) {
+    return `${Math.max(0, Math.round(distance))} M`;
+  }
+
   function formatTime(seconds) {
     if (!Number.isFinite(seconds)) {
       return "--";
@@ -2306,6 +2387,7 @@ export function createRacingGame() {
         speedKmh: Math.round(state.velocity.length() * 3.6),
         playerMaxForwardSpeed: playerMaxForwardSpeed(),
         status: currentStatusLabel(),
+        paused: raceState.paused,
         opponentEnabled: raceState.opponentEnabled,
         playerPosition: { x: Number(state.position.x.toFixed(2)), y: Number(state.position.y.toFixed(2)) },
         opponentPosition: {
@@ -2371,7 +2453,10 @@ export function createRacingGame() {
   }
 
   registerDebugApi();
-  resetButton.addEventListener("click", handleResetButtonClick);
+  resumeButton.addEventListener("click", handleResumeButtonClick);
+  pauseResetButton.addEventListener("click", handlePauseResetButtonClick);
+  pauseEditorButton.addEventListener("click", handlePauseEditorButtonClick);
+  pauseHomeButton.addEventListener("click", handlePauseHomeButtonClick);
   playAgainButton.addEventListener("click", handleResetButtonClick);
 
   return { start, stop, reset: resetRace, destroy };
