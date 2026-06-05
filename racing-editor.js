@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { racingCarConfig } from "./racing-car-config.js";
+import { racingSceneConfig } from "./racing-car-config.js";
 import {
   cloneRacingMap,
   createLoopStartPosition,
@@ -27,7 +27,7 @@ import {
 const pointRadius = 8;
 const nudgeStep = 0.8;
 const startLineHitPadding = 2.6;
-const trackWidthOverride = racingCarConfig.trackWidthOverride ?? null;
+const trackWidthOverride = racingSceneConfig.trackWidthOverride ?? null;
 
 function buildEditorPreviewModel(track) {
   return buildTrackModel({

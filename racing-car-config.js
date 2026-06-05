@@ -1,12 +1,8 @@
-const defaultCarModelUrl = new URL(
-  "./assets/cars/lamborghini_aventador_lp720-4_50th_anniversary/lamborghini_aventador_lp720-4_50th_anniversary.glb",
-  import.meta.url
-).href;
+function createCarModelUrl(relativePath) {
+  return new URL(relativePath, import.meta.url).href;
+}
 
-export const racingCarConfig = {
-  // Replace this with your own high-detail GLB/GLTF once it lives in the repo.
-  modelUrl: defaultCarModelUrl,
-  targetLength: 4.78,
+export const racingSceneConfig = {
   visualScale: 2,
   collisionScale: 2,
   trackWidthOverride: 24,
@@ -16,7 +12,6 @@ export const racingCarConfig = {
   cameraLookAhead: 4.8,
   cameraTargetHeight: 1.45,
   cameraFollowTightness: 4.8,
-  modelRotationDegrees: 0,
   groundOffset: 0.02,
   allowTint: false,
   toneMappingExposure: 0.78,
@@ -40,4 +35,48 @@ export const racingCarConfig = {
   bodyMetalnessCeiling: null,
   glassRoughnessFloor: 0.24,
   glassMetalnessCeiling: 0.04
+};
+
+export const defaultRacingCarId = "aventador";
+
+export const racingCarCatalog = [
+  {
+    id: "aventador",
+    make: "Lamborghini",
+    name: "Aventador LP720-4 50th",
+    tag: "中置超跑",
+    summary: "线条低矮的公路超跑，作为当前默认参赛车提供。",
+    accentColor: "#d64545",
+    modelUrl: createCarModelUrl(
+      "./assets/cars/lamborghini_aventador_lp720-4_50th_anniversary/lamborghini_aventador_lp720-4_50th_anniversary.glb"
+    ),
+    targetLength: 4.78,
+    modelRotationDegrees: 0
+  },
+  {
+    id: "dbr9",
+    make: "Aston Martin Racing",
+    name: "DBR9",
+    tag: "GT 赛道车",
+    summary: "耐力赛风格的 GT 赛车，用来和默认参赛车形成明确外观差异。",
+    accentColor: "#0f8b8d",
+    modelUrl: createCarModelUrl(
+      "./assets/cars/2008-aston-martin-009-aston-martin-racing-dbr9/source/2008 Aston Martin 009 Aston Martin Racing DBR9.glb"
+    ),
+    targetLength: 4.72,
+    modelRotationDegrees: 180
+  }
+];
+
+export function getRacingCarById(carId) {
+  return racingCarCatalog.find((car) => car.id === carId) ?? racingCarCatalog[0];
+}
+
+export function getDefaultOpponentRacingCarId(playerCarId) {
+  return racingCarCatalog.find((car) => car.id !== playerCarId)?.id ?? getRacingCarById(playerCarId).id;
+}
+
+export const racingCarConfig = {
+  ...racingSceneConfig,
+  ...getRacingCarById(defaultRacingCarId)
 };

@@ -67,6 +67,9 @@ function startGame(gameId, updateHistory = true) {
   }
 
   stopActiveGame();
+  if (gameId === "racing") {
+    invalidateGame(gameId);
+  }
   activeGameId = gameId;
   homeView.hidden = true;
 
