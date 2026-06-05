@@ -34,7 +34,54 @@ export const racingSceneConfig = {
   bodyRoughnessFloor: null,
   bodyMetalnessCeiling: null,
   glassRoughnessFloor: 0.24,
-  glassMetalnessCeiling: 0.04
+  glassMetalnessCeiling: 0.04,
+  environment: {
+    ground: {
+      nearFieldSize: 320,
+      farFieldSize: 460,
+      nearFieldSegments: 28,
+      farFieldSegments: 16,
+      shoulderInnerOffset: 1.8,
+      shoulderOuterOffset: 6.4,
+      nearFieldColor: 0x6f9d57,
+      farFieldColor: 0x90aa77,
+      shoulderColor: 0xa48d63,
+      soilColor: 0x8a7351,
+      nearUndulation: 0.55,
+      farUndulation: 1.1
+    },
+    foliage: {
+      placementSamples: 96,
+      nearTreeCount: 30,
+      farTreeCount: 120,
+      shrubCount: 68,
+      nearTreeBandMin: 18,
+      nearTreeBandMax: 42,
+      farTreeBandMin: 36,
+      farTreeBandMax: 112,
+      shrubBandMin: 8,
+      shrubBandMax: 18,
+      placementJitter: 7,
+      nearTreeMinSpacing: 11,
+      farTreeMinSpacing: 8,
+      shrubMinSpacing: 4.6,
+      maxAttempts: 1400
+    },
+    backdrop: {
+      radiusPadding: 78,
+      ridgeSegments: 36,
+      ridgeHeightMin: 16,
+      ridgeHeightMax: 36,
+      innerTreeCount: 36,
+      innerTreeHeightMin: 14,
+      innerTreeHeightMax: 28
+    },
+    roadsideProps: {
+      reflectorSpacing: 5,
+      sponsorBoardCount: 8,
+      tireStackCount: 8
+    }
+  }
 };
 
 export const defaultRacingCarId = "aventador";
