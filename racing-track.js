@@ -21,6 +21,8 @@ export const TRACK_MIN_CONTROL_POINTS = Object.freeze({
 });
 
 export const TRACK_MIN_POINT_SPACING = 6;
+export const TRACK_MIN_WIDTH = 10;
+export const TRACK_MAX_WIDTH = 28;
 
 export const OPEN_TRACK_FINISH_BUFFER = 12;
 
@@ -310,7 +312,7 @@ export function validateRacingMap(map) {
     if (track.controlPoints.length >= minimumPoints) {
       const trackModel = buildTrackModel({
         shape,
-        width: clampNumber(track?.width, 10, 18, 14),
+        width: clampNumber(track?.width, TRACK_MIN_WIDTH, TRACK_MAX_WIDTH, 14),
         samples: clampInt(track?.samples, 240, 720, 520),
         controlPoints: normalizedPoints
       });

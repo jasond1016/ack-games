@@ -33,12 +33,13 @@ body {
 }
 
 .app-shell {
-  width: min(100%, 1240px);
-  margin: 0 auto;
+  width: 100%;
 }
 
 .home-view {
+  width: min(100%, 1240px);
   min-height: calc(100vh - 48px);
+  margin: 0 auto;
   display: grid;
   align-content: center;
   gap: 22px;
@@ -411,7 +412,8 @@ body {
 }
 
 .racing-view {
-  width: min(100%, 1020px);
+  width: 100%;
+  min-height: calc(100dvh - 48px);
 }
 
 .racing-editor-view {
@@ -420,6 +422,7 @@ body {
 
 .racing-stage {
   position: relative;
+  min-height: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
   overflow: hidden;
@@ -580,8 +583,8 @@ h1 {
 
 .racing-canvas {
   width: 100%;
-  height: min(68vh, 620px);
-  min-height: 420px;
+  height: clamp(480px, calc(100dvh - 220px), 80dvh);
+  min-height: 480px;
   display: block;
   background: #9fc9f3;
   border: 0;

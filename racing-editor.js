@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { racingCarConfig } from "./racing-car-config.js";
 import {
   cloneRacingMap,
   createLoopStartPosition,
@@ -26,6 +27,14 @@ import {
 const pointRadius = 8;
 const nudgeStep = 0.8;
 const startLineHitPadding = 2.6;
+const trackWidthOverride = racingCarConfig.trackWidthOverride ?? null;
+
+function buildEditorPreviewModel(track) {
+  return buildTrackModel({
+    ...track,
+    width: trackWidthOverride ?? track.width
+  });
+}
 
 export function createRacingEditor({ onPlay, onMapChanged } = {}) {
   const canvas = document.getElementById("racingEditorCanvas");
@@ -52,7 +61,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
   let listening = false;
   let mapData = getDefaultRacingMap();
   let lastValidMap = cloneRacingMap(mapData);
-  let previewModel = buildTrackModel(mapData.track);
+  let previewModel = buildEditorPreviewModel(mapData.track);
   let viewport = null;
   let selectedPointIndex = 0;
   let startLineSelected = false;
@@ -62,7 +71,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
     active = true;
     mapData = loadActiveRacingMap();
     lastValidMap = cloneRacingMap(mapData);
-    previewModel = buildTrackModel(mapData.track);
+    previewModel = buildEditorPreviewModel(mapData.track);
     selectedPointIndex = 0;
     startLineSelected = false;
     dragState = null;
@@ -219,7 +228,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
   function handleReset() {
     mapData = resetActiveRacingMap();
     lastValidMap = cloneRacingMap(mapData);
-    previewModel = buildTrackModel(mapData.track);
+    previewModel = buildEditorPreviewModel(mapData.track);
     selectedPointIndex = 0;
     startLineSelected = false;
     dragState = null;
@@ -255,7 +264,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
       const imported = importRacingMap(await file.text());
       mapData = saveActiveRacingMap(imported);
       lastValidMap = cloneRacingMap(mapData);
-      previewModel = buildTrackModel(mapData.track);
+      previewModel = buildEditorPreviewModel(mapData.track);
       selectedPointIndex = 0;
       startLineSelected = false;
       dragState = null;
@@ -312,7 +321,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
         0,
         [roundCoordinate(world.x), roundCoordinate(world.z)]
       );
-      previewModel = buildTrackModel(mapData.track);
+      previewModel = buildEditorPreviewModel(mapData.track);
       selectedPointIndex = insertion.index;
       startLineSelected = false;
       dragState = {
@@ -347,7 +356,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
       target[0] = roundCoordinate(world.x);
       target[1] = roundCoordinate(world.z);
       selectedPointIndex = dragState.index;
-      previewModel = buildTrackModel(mapData.track);
+      previewModel = buildEditorPreviewModel(mapData.track);
       startLineSelected = false;
       syncUiState(false);
       render();
@@ -441,7 +450,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
       const saved = saveActiveRacingMap(candidateMap);
       mapData = saved;
       lastValidMap = cloneRacingMap(saved);
-      previewModel = buildTrackModel(saved.track);
+      previewModel = buildEditorPreviewModel(saved.track);
       selectedPointIndex = clampPointSelection(selectedPointIndex);
       syncUiState();
       render();
@@ -458,7 +467,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
 
   function restoreLastValidMap() {
     mapData = cloneRacingMap(lastValidMap);
-    previewModel = buildTrackModel(mapData.track);
+    previewModel = buildEditorPreviewModel(mapData.track);
     selectedPointIndex = clampPointSelection(selectedPointIndex);
     dragState = null;
     syncUiState();
@@ -612,7 +621,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
       return;
     }
 
-    previewModel = buildTrackModel(mapData.track);
+    previewModel = buildEditorPreviewModel(mapData.track);
     viewport = computeViewport(previewModel);
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);

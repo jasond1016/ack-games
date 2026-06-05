@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/loaders/GLTFLoader.js";
+import { DRACOLoader } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/loaders/DRACOLoader.js";
 import RAPIER from "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/+esm";
+import { racingCarConfig } from "./racing-car-config.js";
 import { loadActiveRacingMap } from "./racing-map.js";
 import {
   buildTrackModel,
@@ -11,11 +13,38 @@ import {
   sampleTrackModel
 } from "./racing-track.js";
 
-const carModelUrl = new URL("./kenney_car-kit/Models/GLB format/race-future.glb", import.meta.url).href;
-const carModelLoader = new GLTFLoader();
+const dracoDecoderPath = "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/libs/draco/";
+const carSurfaceExclusionPatterns = [
+  "wheel",
+  "tire",
+  "tyre",
+  "rim",
+  "interior",
+  "seat",
+  "trim",
+  "light",
+  "lamp",
+  "mirror",
+  "disc",
+  "brake",
+  "caliper",
+  "badge",
+  "logo",
+  "grille",
+  "grill"
+];
+const carModelLoader = createCarModelLoader();
 const rapierReadyPromise = RAPIER.init();
 const upAxis = new THREE.Vector3(0, 1, 0);
 const tempQuaternion = new THREE.Quaternion();
+
+function createCarModelLoader() {
+  const loader = new GLTFLoader();
+  const dracoLoader = new DRACOLoader();
+  dracoLoader.setDecoderPath(dracoDecoderPath);
+  loader.setDRACOLoader(dracoLoader);
+  return loader;
+}
 
 export function createRacingGame() {
   const mapData = loadActiveRacingMap();
@@ -40,9 +69,13 @@ export function createRacingGame() {
   const playAgainButton = document.getElementById("racingPlayAgainButton");
   const handleResetButtonClick = () => resetRace();
 
+  const visualScale = racingCarConfig.visualScale || 1;
+  const collisionScale = racingCarConfig.collisionScale || visualScale;
+  const trackWidth = racingCarConfig.trackWidthOverride ?? mapData.track.width;
+
   const trackConfig = {
     shape: mapData.track.shape,
-    width: mapData.track.width,
+    width: trackWidth,
     samples: mapData.track.samples,
     startProgress: isLoopTrackShape(mapData.track.shape) ? mapData.track.startPosition.progress : 0,
     controlPoints: mapData.track.controlPoints.map((point) => [...point])
@@ -137,10 +170,10 @@ export function createRacingGame() {
   };
 
   const physicsConfig = {
-    fixedHeight: 0.34,
-    carHalfWidth: 0.9,
-    carHalfHeight: 0.34,
-    carHalfLength: 1.55,
+    fixedHeight: 0.34 * collisionScale,
+    carHalfWidth: 0.9 * collisionScale,
+    carHalfHeight: 0.34 * collisionScale,
+    carHalfLength: 1.55 * collisionScale,
     railHalfHeight: 0.56,
     railHalfDepth: 0.34,
     stepSeconds: 1 / 60
@@ -274,16 +307,20 @@ export function createRacingGame() {
 
     initializationPromise = (async () => {
       renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
-      renderer.setClearColor(0x9fc9f3);
+      renderer.setClearColor(racingCarConfig.backgroundColor ?? 0x9fc9f3);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = racingCarConfig.toneMappingExposure ?? 1;
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFShadowMap;
 
       scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x9fc9f3);
-      scene.fog = new THREE.Fog(0x9fc9f3, 150, 260);
+      scene.background = new THREE.Color(racingCarConfig.backgroundColor ?? 0x9fc9f3);
+      scene.fog = new THREE.Fog(racingCarConfig.fogColor ?? racingCarConfig.backgroundColor ?? 0x9fc9f3, 150, 260);
 
       camera = new THREE.PerspectiveCamera(58, 1, 0.1, 500);
 
+      applySceneEnvironment();
       createLights();
       createWorld();
       await initializePhysics();
@@ -308,10 +345,14 @@ export function createRacingGame() {
   }
 
   function createLights() {
-    const hemisphere = new THREE.HemisphereLight(0xb9dcff, 0x587044, 1.5);
+    const hemisphere = new THREE.HemisphereLight(
+      0xb9dcff,
+      0x587044,
+      racingCarConfig.hemisphereIntensity ?? 1.2
+    );
     scene.add(hemisphere);
 
-    const sun = new THREE.DirectionalLight(0xfff0d0, 2.8);
+    const sun = new THREE.DirectionalLight(0xfff0d0, racingCarConfig.sunIntensity ?? 2.4);
     sun.position.set(-55, 82, 42);
     sun.castShadow = true;
     sun.shadow.mapSize.width = 2048;
@@ -321,6 +362,68 @@ export function createRacingGame() {
     sun.shadow.camera.top = 120;
     sun.shadow.camera.bottom = -120;
     scene.add(sun);
+  }
+
+  function applySceneEnvironment() {
+    if (!renderer || !scene) {
+      return;
+    }
+
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    const environmentTexture = createTrackEnvironmentTexture();
+    scene.environment = pmremGenerator.fromEquirectangular(environmentTexture).texture;
+    environmentTexture.dispose();
+    pmremGenerator.dispose();
+  }
+
+  function createTrackEnvironmentTexture() {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1024;
+    canvas.height = 512;
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      const fallback = new THREE.CanvasTexture(canvas);
+      fallback.colorSpace = THREE.SRGBColorSpace;
+      fallback.mapping = THREE.EquirectangularReflectionMapping;
+      return fallback;
+    }
+
+    const skyGradient = context.createLinearGradient(0, 0, 0, canvas.height);
+    skyGradient.addColorStop(0, "#6489b3");
+    skyGradient.addColorStop(0.34, "#86a7c6");
+    skyGradient.addColorStop(0.48, "#acbcc8");
+    skyGradient.addColorStop(0.5, "#8b949e");
+    skyGradient.addColorStop(0.62, "#505864");
+    skyGradient.addColorStop(1, "#2b3037");
+    context.fillStyle = skyGradient;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    const sunGlow = context.createRadialGradient(
+      canvas.width * 0.26,
+      canvas.height * 0.18,
+      0,
+      canvas.width * 0.26,
+      canvas.height * 0.18,
+      canvas.height * 0.22
+    );
+    sunGlow.addColorStop(0, "rgba(255, 246, 220, 0.22)");
+    sunGlow.addColorStop(0.5, "rgba(255, 246, 220, 0.09)");
+    sunGlow.addColorStop(1, "rgba(255, 246, 220, 0)");
+    context.fillStyle = sunGlow;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    const horizonGlow = context.createLinearGradient(0, canvas.height * 0.42, 0, canvas.height * 0.58);
+    horizonGlow.addColorStop(0, "rgba(210, 220, 228, 0)");
+    horizonGlow.addColorStop(0.5, "rgba(210, 220, 228, 0.12)");
+    horizonGlow.addColorStop(1, "rgba(210, 220, 228, 0)");
+    context.fillStyle = horizonGlow;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.mapping = THREE.EquirectangularReflectionMapping;
+    return texture;
   }
 
   function createWorld() {
@@ -821,19 +924,25 @@ export function createRacingGame() {
     }
 
     const group = new THREE.Group();
+    const visualRoot = new THREE.Group();
     const model = template.clone(true);
     cloneCarMaterials(model);
+    configureCarMaterials(model);
     applyCarTint(model, tint);
-    group.add(model);
+    visualRoot.add(model);
 
     const box = new THREE.Box3().setFromObject(model);
     const size = box.getSize(new THREE.Vector3());
     const minZ = box.min.z;
 
     const boostGroup = createBoostGroup(size, minZ);
+    visualRoot.position.y = racingCarConfig.groundOffset;
+    group.userData.visualRoot = visualRoot;
+    group.userData.model = model;
     group.userData.boostFlames = boostGroup.userData.flames;
     group.userData.boostGroup = boostGroup;
-    group.add(boostGroup);
+    visualRoot.add(boostGroup);
+    group.add(visualRoot);
     return group;
   }
 
@@ -842,11 +951,11 @@ export function createRacingGame() {
       return carTemplatePromise;
     }
 
-    carTemplatePromise = carModelLoader.loadAsync(carModelUrl)
+    carTemplatePromise = carModelLoader.loadAsync(racingCarConfig.modelUrl)
       .then((gltf) => {
         const template = (gltf.scene || gltf.scenes?.[0])?.clone(true);
         if (!template) {
-          throw new Error("race-future.glb does not contain a scene.");
+          throw new Error("Configured car model does not contain a scene.");
         }
 
         normalizeCarModel(template);
@@ -868,7 +977,7 @@ export function createRacingGame() {
         return template;
       })
       .catch((error) => {
-        console.warn("Failed to load race-future model, falling back to procedural car.", error);
+        console.warn(`Failed to load ${racingCarConfig.modelUrl}, falling back to procedural car.`, error);
         return null;
       });
 
@@ -876,12 +985,13 @@ export function createRacingGame() {
   }
 
   function normalizeCarModel(model) {
+    model.rotation.y = THREE.MathUtils.degToRad(racingCarConfig.modelRotationDegrees || 0);
     model.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(model);
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
-    const targetLength = 4.35;
-    const scale = size.z > 0.001 ? targetLength / size.z : 1;
+    const targetLength = racingCarConfig.targetLength || 4.35;
+    const scale = size.z > 0.001 ? (targetLength / size.z) * visualScale : visualScale;
 
     model.scale.setScalar(scale);
     model.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale);
@@ -900,30 +1010,133 @@ export function createRacingGame() {
     });
   }
 
-  function applyCarTint(model, tint) {
-    if (!tint) {
-      return;
-    }
-
-    const tintColor = new THREE.Color(tint);
+  function configureCarMaterials(model) {
     model.traverse((child) => {
-      if (!child.isMesh || !child.material || !child.name.toLowerCase().includes("body")) {
+      if (!child.isMesh || !child.material) {
         return;
       }
 
       const materials = Array.isArray(child.material) ? child.material : [child.material];
       for (const material of materials) {
-        if ("color" in material) {
-          material.color.copy(tintColor);
+        const label = materialLabelFor(child, material);
+        const isGlass = matchesAnyPattern(label, racingCarConfig.glassNamePatterns);
+        const isBody = matchesAnyPattern(label, racingCarConfig.bodyNamePatterns);
+
+        if (material?.map && renderer) {
+          material.map.anisotropy = renderer.capabilities.getMaxAnisotropy();
         }
+
+        if ("envMapIntensity" in material) {
+          if (isGlass) {
+            material.envMapIntensity = racingCarConfig.glassEnvMapIntensity;
+          } else if (isBody) {
+            material.envMapIntensity = racingCarConfig.bodyEnvMapIntensity;
+          } else {
+            material.envMapIntensity = racingCarConfig.detailEnvMapIntensity;
+          }
+        }
+
         if ("roughness" in material) {
-          material.roughness = 0.64;
+          if (isGlass) {
+            material.roughness = Math.max(
+              material.roughness ?? 0.12,
+              racingCarConfig.glassRoughnessFloor ?? 0.16
+            );
+          } else if (isBody) {
+            material.roughness = Math.max(
+              material.roughness ?? 0.6,
+              racingCarConfig.bodyRoughnessFloor ?? 0.68
+            );
+          }
         }
+
         if ("metalness" in material) {
-          material.metalness = 0.12;
+          if (isGlass) {
+            material.metalness = Math.min(
+              material.metalness ?? 0.04,
+              racingCarConfig.glassMetalnessCeiling ?? 0.04
+            );
+          } else if (isBody) {
+            material.metalness = Math.min(
+              material.metalness ?? 0.1,
+              racingCarConfig.bodyMetalnessCeiling ?? 0.1
+            );
+          }
+        }
+
+        material.needsUpdate = true;
+      }
+    });
+  }
+
+  function applyCarTint(model, tint) {
+    if (!tint || racingCarConfig.allowTint === false) {
+      return;
+    }
+
+    const tintColor = new THREE.Color(tint);
+    for (const material of tintTargetMaterialsFor(model)) {
+      if ("color" in material) {
+        material.color.copy(tintColor);
+      }
+      if ("roughness" in material) {
+        material.roughness = Math.min(material.roughness ?? 0.58, 0.54);
+      }
+      if ("metalness" in material) {
+        material.metalness = Math.max(material.metalness ?? 0.22, 0.22);
+      }
+      material.needsUpdate = true;
+    }
+  }
+
+  function tintTargetMaterialsFor(model) {
+    const exactMatches = [];
+    const fallbackMatches = [];
+
+    model.traverse((child) => {
+      if (!child.isMesh || !child.material) {
+        return;
+      }
+
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const material of materials) {
+        if (!("color" in material) || !material.color) {
+          continue;
+        }
+
+        const label = materialLabelFor(child, material);
+        if (matchesAnyPattern(label, racingCarConfig.glassNamePatterns) || matchesAnyPattern(label, carSurfaceExclusionPatterns)) {
+          continue;
+        }
+
+        if (matchesAnyPattern(label, racingCarConfig.bodyNamePatterns)) {
+          exactMatches.push(material);
+          continue;
+        }
+
+        const colorEnergy = material.color.r + material.color.g + material.color.b;
+        if (!material.transparent && colorEnergy > 0.24) {
+          fallbackMatches.push(material);
         }
       }
     });
+
+    return [...new Set(exactMatches.length > 0 ? exactMatches : fallbackMatches)];
+  }
+
+  function materialLabelFor(child, material) {
+    return [
+      child.name,
+      child.parent?.name,
+      material?.name
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+  }
+
+  function matchesAnyPattern(label, patterns) {
+    return patterns.some((pattern) => label.includes(pattern));
   }
 
   function createBoostGroup(carSize, rearZ) {
@@ -987,6 +1200,7 @@ export function createRacingGame() {
 
   function createFallbackCar(color = 0xa81f34) {
     const group = new THREE.Group();
+    const visualRoot = new THREE.Group();
     const bodyMaterial = new THREE.MeshStandardMaterial({
       color,
       metalness: 0.55,
@@ -1038,7 +1252,7 @@ export function createRacingGame() {
       wheel.position.set(x, y, z);
       wheel.rotation.z = Math.PI / 2;
       wheel.castShadow = true;
-      group.add(wheel);
+      visualRoot.add(wheel);
     }
 
     const boostGroup = new THREE.Group();
@@ -1094,10 +1308,13 @@ export function createRacingGame() {
     flames.push(glow);
     boostGroup.add(glow);
 
+    visualRoot.position.y = racingCarConfig.groundOffset;
     group.userData.boostFlames = flames;
     group.userData.boostGroup = boostGroup;
-    group.add(body, hood, cabin, rear, frontLightLeft, frontLightRight);
-    group.add(boostGroup);
+    group.userData.visualRoot = visualRoot;
+    visualRoot.add(body, hood, cabin, rear, frontLightLeft, frontLightRight);
+    visualRoot.add(boostGroup);
+    group.add(visualRoot);
     return group;
   }
 
@@ -1603,8 +1820,13 @@ export function createRacingGame() {
 
   function updateCarTransform() {
     car.position.set(state.position.x, 0, state.position.y);
-    car.rotation.y = state.heading;
-    car.rotation.z = -state.steering * Math.min(0.12, state.velocity.length() * 0.004);
+    car.rotation.set(0, state.heading, 0);
+
+    const visualRoot = car.userData.visualRoot;
+    if (visualRoot) {
+      visualRoot.rotation.x = (state.brake - state.throttle * 0.45) * 0.03;
+      visualRoot.rotation.z = -state.steering * Math.min(0.12, state.velocity.length() * 0.004);
+    }
   }
 
   function updateOpponentTransform() {
@@ -1614,8 +1836,13 @@ export function createRacingGame() {
     }
 
     opponentCar.position.set(opponentState.position.x, 0, opponentState.position.y);
-    opponentCar.rotation.y = opponentState.heading;
-    opponentCar.rotation.z = 0;
+    opponentCar.rotation.set(0, opponentState.heading, 0);
+
+    const visualRoot = opponentCar.userData.visualRoot;
+    if (visualRoot) {
+      visualRoot.rotation.x = 0;
+      visualRoot.rotation.z = 0;
+    }
   }
 
   function updateCamera(deltaSeconds) {
@@ -2087,6 +2314,14 @@ export function createRacingGame() {
         },
         opponentHoldSeconds: Number(opponentState.collisionHoldSeconds.toFixed(2)),
         carDistance: Number(state.position.distanceTo(opponentState.position).toFixed(2)),
+        visualScale,
+        collisionScale,
+        trackWidth: trackConfig.width,
+        collider: {
+          halfWidth: Number(physicsConfig.carHalfWidth.toFixed(2)),
+          halfHeight: Number(physicsConfig.carHalfHeight.toFixed(2)),
+          halfLength: Number(physicsConfig.carHalfLength.toFixed(2))
+        },
         flameStates: (car?.userData.boostFlames || []).map((flame) => ({
           visible: flame.visible,
           opacity: Number((flame.material.opacity || 0).toFixed(2))

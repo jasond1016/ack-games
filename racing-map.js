@@ -1,4 +1,6 @@
 import {
+  TRACK_MAX_WIDTH,
+  TRACK_MIN_WIDTH,
   TRACK_SHAPES,
   clampInt,
   clampNumber,
@@ -139,7 +141,7 @@ export function normalizeRacingMap(rawMap) {
       : defaultMap.name,
     track: {
       shape,
-      width: clampNumber(rawTrack.width, 10, 18, defaultMap.track.width),
+      width: clampNumber(rawTrack.width, TRACK_MIN_WIDTH, TRACK_MAX_WIDTH, defaultMap.track.width),
       samples: clampInt(rawTrack.samples, 240, 720, defaultMap.track.samples),
       controlPoints
     }
