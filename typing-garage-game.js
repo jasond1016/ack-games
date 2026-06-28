@@ -128,6 +128,10 @@ export function createTypingGarageGame() {
   const cards = document.getElementById("typingGarageCards");
   const count = document.getElementById("typingGarageCount");
   const keyboard = document.getElementById("typingGarageKeyboard");
+  const libraryButton = document.getElementById("typingGarageLibraryButton");
+  const libraryBackdrop = document.getElementById("typingGarageLibraryBackdrop");
+  const libraryCloseButton = document.getElementById("typingGarageLibraryCloseButton");
+  const libraryPanel = document.querySelector(".typing-garage-sidebar");
   const nextButton = document.getElementById("typingGarageNextButton");
   const replayButton = document.getElementById("typingGarageReplayButton");
   const resetButton = document.getElementById("typingGarageResetButton");
@@ -144,6 +148,9 @@ export function createTypingGarageGame() {
     renderKeyboard();
     window.addEventListener("keydown", handleKeydown);
     keyboard.addEventListener("pointerdown", handleKeyboardPointer);
+    libraryButton.addEventListener("click", openLibrary);
+    libraryBackdrop.addEventListener("click", closeLibrary);
+    libraryCloseButton.addEventListener("click", closeLibrary);
     nextButton.addEventListener("click", goNext);
     replayButton.addEventListener("click", replayCurrent);
     resetButton.addEventListener("click", resetCollection);
@@ -155,9 +162,13 @@ export function createTypingGarageGame() {
     isActive = false;
     window.removeEventListener("keydown", handleKeydown);
     keyboard.removeEventListener("pointerdown", handleKeyboardPointer);
+    libraryButton.removeEventListener("click", openLibrary);
+    libraryBackdrop.removeEventListener("click", closeLibrary);
+    libraryCloseButton.removeEventListener("click", closeLibrary);
     nextButton.removeEventListener("click", goNext);
     replayButton.removeEventListener("click", replayCurrent);
     resetButton.removeEventListener("click", resetCollection);
+    closeLibrary();
   }
 
   function handleKeydown(event) {
@@ -200,6 +211,7 @@ export function createTypingGarageGame() {
         messageIndex += 1;
         stage.classList.add("is-complete");
         restartAnimation(flash, "is-flashing");
+        celebrateUnlock(level);
       } else {
         message.textContent = "继续找下一个键";
       }
@@ -223,12 +235,14 @@ export function createTypingGarageGame() {
     currentIndex = (currentIndex + 1) % LEVELS.length;
     typed = unlocked.has(getCurrentLevel().id) ? getCurrentLevel().code : "";
     message.textContent = "按键开始解锁";
+    closeLibrary();
     render();
   }
 
   function replayCurrent() {
     typed = "";
     message.textContent = "再来一次";
+    closeLibrary();
     render();
   }
 
@@ -237,6 +251,7 @@ export function createTypingGarageGame() {
     typed = "";
     currentIndex = 0;
     message.textContent = "车库已清空";
+    closeLibrary();
     render();
   }
 
@@ -260,9 +275,10 @@ export function createTypingGarageGame() {
     photo.classList.toggle("has-photo-asset", Boolean(level.imageUrl));
     cover.style.transform = `translateX(${reveal * 100}%)`;
     badge.textContent = `${level.maker} · ${currentIndex + 1} / ${LEVELS.length}`;
-    target.textContent = level.code;
+    renderTarget(level, isComplete);
     nextKey.textContent = level.code[typed.length] || "✓";
     count.textContent = `${unlocked.size} / ${LEVELS.length}`;
+    libraryButton.textContent = `图鉴 ${unlocked.size}/${LEVELS.length}`;
     updateKeyboard(level);
 
     progress.replaceChildren(...level.code.split("").map((letter, index) => {
@@ -275,6 +291,17 @@ export function createTypingGarageGame() {
     }));
 
     renderCards();
+  }
+
+  function renderTarget(level, isComplete) {
+    target.replaceChildren(...level.code.split("").map((letter, index) => {
+      const character = document.createElement("span");
+      character.className = "typing-target-letter";
+      character.textContent = letter;
+      character.classList.toggle("is-typed", index < typed.length);
+      character.classList.toggle("is-current", index === typed.length && !isComplete);
+      return character;
+    }));
   }
 
   function renderKeyboard() {
@@ -340,10 +367,42 @@ export function createTypingGarageGame() {
         currentIndex = index;
         typed = isUnlocked ? level.code : typed;
         message.textContent = isUnlocked ? "图鉴已解锁" : "继续这一辆";
+        closeLibrary();
         render();
       });
       return card;
     }));
+  }
+
+  function openLibrary() {
+    libraryPanel.classList.add("is-open");
+    libraryBackdrop.hidden = false;
+    libraryBackdrop.classList.add("is-open");
+  }
+
+  function closeLibrary() {
+    libraryPanel.classList.remove("is-open");
+    libraryBackdrop.classList.remove("is-open");
+    libraryBackdrop.hidden = true;
+  }
+
+  function celebrateUnlock(level) {
+    if (navigator.vibrate) {
+      navigator.vibrate([35, 35, 55]);
+    }
+
+    restartAnimation(libraryButton, "is-pulsing");
+    const flyCard = document.createElement("div");
+    flyCard.className = "typing-unlock-card-fly";
+    flyCard.innerHTML = `
+      <span class="typing-unlock-card-fly-thumb"></span>
+      <strong>${level.name}</strong>
+      <span>${level.maker}</span>
+    `;
+    const thumb = flyCard.querySelector(".typing-unlock-card-fly-thumb");
+    thumb.style.backgroundImage = `url("${level.imageUrl}")`;
+    stage.append(flyCard);
+    window.setTimeout(() => flyCard.remove(), 980);
   }
 
   function getCurrentLevel() {

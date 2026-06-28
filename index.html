@@ -108,6 +108,7 @@
           </button>
           <h1>超跑图鉴解锁</h1>
           <div class="topbar-actions">
+            <button id="typingGarageLibraryButton" class="secondary-button typing-garage-library-button" type="button">图鉴</button>
             <button id="typingGarageReplayButton" class="secondary-button" type="button">再玩一次</button>
             <button id="typingGarageResetButton" class="secondary-button" type="button">重置收藏</button>
             <button id="typingGarageNextButton" class="primary-button" type="button">下一辆</button>
@@ -150,10 +151,12 @@
             <div id="typingGarageKeyboard" class="typing-garage-keyboard" aria-label="屏幕键盘"></div>
           </section>
 
+          <button id="typingGarageLibraryBackdrop" class="typing-garage-backdrop" type="button" aria-label="关闭图鉴" hidden></button>
           <aside class="typing-garage-sidebar" aria-label="车库收藏册">
             <div class="typing-garage-sidebar-header">
               <h2>车库</h2>
               <strong id="typingGarageCount">0 / 10</strong>
+              <button id="typingGarageLibraryCloseButton" class="typing-garage-close-button" type="button" aria-label="关闭图鉴">×</button>
             </div>
             <div id="typingGarageCards" class="typing-garage-cards"></div>
           </aside>

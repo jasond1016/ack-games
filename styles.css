@@ -643,6 +643,7 @@ h1 {
 }
 
 .typing-garage-stage {
+  position: relative;
   min-height: 620px;
   display: grid;
   grid-template-rows: minmax(320px, 1fr) auto;
@@ -943,7 +944,7 @@ h1 {
   border-color: #f2b705;
   background: linear-gradient(180deg, #fff8d8, #ffe89b);
   color: #172033;
-  transform: translateY(-3px);
+  animation: typing-target-key-pulse 1050ms ease-in-out infinite;
   box-shadow:
     inset 0 -5px 0 rgba(172, 116, 0, 0.14),
     0 0 0 5px rgba(242, 183, 5, 0.18),
@@ -952,6 +953,10 @@ h1 {
 
 .typing-garage-keyboard.is-mistake {
   animation: typing-soft-shake 240ms ease;
+}
+
+.typing-garage-library-button.is-pulsing {
+  animation: typing-library-pulse 820ms ease-out;
 }
 
 .typing-target-row {
@@ -965,11 +970,35 @@ h1 {
 }
 
 .typing-target-word {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   color: #172033;
   font-size: clamp(46px, 8vw, 84px);
   font-weight: 900;
   letter-spacing: 0;
   line-height: 1;
+}
+
+.typing-target-letter {
+  min-width: 0.75em;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 8px;
+  opacity: 0.38;
+}
+
+.typing-target-letter.is-typed {
+  color: var(--accent-dark);
+  opacity: 1;
+}
+
+.typing-target-letter.is-current {
+  background: rgba(242, 183, 5, 0.22);
+  color: #172033;
+  opacity: 1;
+  animation: typing-target-letter-pulse 1050ms ease-in-out infinite;
 }
 
 .typing-progress-row {
@@ -1065,6 +1094,22 @@ h1 {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+}
+
+.typing-garage-close-button {
+  display: none;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid rgba(31, 41, 51, 0.12);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #172033;
+  font: inherit;
+  font-size: 24px;
+  font-weight: 900;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .typing-garage-sidebar-header h2 {
@@ -1177,12 +1222,63 @@ h1 {
   font-weight: 800;
 }
 
+.typing-garage-backdrop {
+  display: none;
+}
+
+.typing-unlock-card-fly {
+  position: absolute;
+  right: 18px;
+  bottom: 132px;
+  z-index: 6;
+  width: 156px;
+  display: grid;
+  gap: 6px;
+  padding: 9px;
+  border: 1px solid rgba(242, 183, 5, 0.72);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #172033;
+  box-shadow: 0 22px 44px rgba(31, 41, 51, 0.2);
+  pointer-events: none;
+  animation: typing-card-fly 960ms cubic-bezier(0.22, 0.9, 0.2, 1) forwards;
+}
+
+.typing-unlock-card-fly-thumb {
+  height: 74px;
+  border-radius: 7px;
+  background-position: center;
+  background-size: cover;
+}
+
+.typing-unlock-card-fly strong,
+.typing-unlock-card-fly span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.typing-unlock-card-fly strong {
+  font-size: 19px;
+  line-height: 1;
+}
+
+.typing-unlock-card-fly span {
+  color: var(--accent-dark);
+  font-size: 13px;
+  font-weight: 900;
+}
+
 .typing-garage-stage.is-mistake {
   animation: typing-soft-shake 240ms ease;
 }
 
 .typing-garage-stage.is-complete .typing-garage-car-visual {
   animation: typing-engine 560ms ease;
+}
+
+.typing-garage-stage.is-complete .typing-garage-photo {
+  animation: typing-photo-celebrate 640ms ease-out;
 }
 
 @keyframes typing-soft-shake {
@@ -1208,6 +1304,93 @@ h1 {
 
   45% {
     transform: translateY(-5px);
+  }
+}
+
+@keyframes typing-photo-celebrate {
+  0%,
+  100% {
+    filter: brightness(1);
+    transform: translateX(0);
+  }
+
+  20% {
+    filter: brightness(1.22);
+    transform: translateX(-2px);
+  }
+
+  46% {
+    filter: brightness(1.04);
+    transform: translateX(2px);
+  }
+
+  72% {
+    filter: brightness(1.16);
+    transform: translateX(0);
+  }
+}
+
+@keyframes typing-target-key-pulse {
+  0%,
+  100% {
+    filter: brightness(1);
+    box-shadow:
+      inset 0 -5px 0 rgba(172, 116, 0, 0.14),
+      0 0 0 4px rgba(242, 183, 5, 0.18),
+      0 13px 22px rgba(172, 116, 0, 0.16);
+  }
+
+  50% {
+    filter: brightness(1.08);
+    box-shadow:
+      inset 0 -5px 0 rgba(172, 116, 0, 0.14),
+      0 0 0 9px rgba(242, 183, 5, 0.08),
+      0 16px 26px rgba(172, 116, 0, 0.2);
+  }
+}
+
+@keyframes typing-target-letter-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(242, 183, 5, 0.26);
+    transform: translateY(0);
+  }
+
+  50% {
+    box-shadow: 0 0 0 8px rgba(242, 183, 5, 0);
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes typing-library-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  35% {
+    transform: scale(1.08);
+    box-shadow: 0 0 0 8px rgba(242, 183, 5, 0.2);
+  }
+}
+
+@keyframes typing-card-fly {
+  0% {
+    opacity: 0;
+    transform: translate3d(-40px, 28px, 0) scale(0.72) rotate(-5deg);
+  }
+
+  18% {
+    opacity: 1;
+  }
+
+  72% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate3d(58px, -132px, 0) scale(0.58) rotate(5deg);
   }
 }
 
@@ -2353,8 +2536,29 @@ h1 {
 }
 
 @media (max-width: 700px) {
+  body[data-active-view="typing-garage"] {
+    padding: 8px 8px 0;
+  }
+
+  .typing-garage-view {
+    width: 100%;
+    min-height: 100dvh;
+  }
+
+  .typing-garage-layout {
+    display: block;
+  }
+
+  .typing-garage-stage {
+    min-height: auto;
+    grid-template-rows: auto auto auto;
+    gap: 10px;
+  }
+
   .typing-garage-play-panel {
     grid-template-columns: 1fr;
+    gap: 9px;
+    padding: 10px;
   }
 
   .typing-target-row,
@@ -2362,9 +2566,40 @@ h1 {
     min-height: 82px;
   }
 
+  .typing-key-hint {
+    display: none;
+  }
+
+  .typing-target-word {
+    font-size: clamp(42px, 15vw, 66px);
+  }
+
+  .typing-progress-cell {
+    width: clamp(40px, 13vw, 54px);
+    height: clamp(48px, 14vw, 62px);
+  }
+
   .typing-garage-photo-shell,
   .typing-garage-photo {
-    min-height: 320px;
+    min-height: min(36dvh, 310px);
+  }
+
+  .typing-garage-badge {
+    left: 10px;
+    top: 10px;
+  }
+
+  .typing-garage-keyboard {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    margin: 0 -8px;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 12px 12px 0 0;
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 -10px 30px rgba(31, 41, 51, 0.14);
   }
 
   .typing-garage-car-visual {
@@ -2372,8 +2607,50 @@ h1 {
     bottom: 58px;
   }
 
+  .typing-garage-backdrop.is-open {
+    position: fixed;
+    inset: 0;
+    z-index: 19;
+    display: block;
+    border: 0;
+    background: rgba(17, 24, 39, 0.44);
+  }
+
+  .typing-garage-sidebar {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 20;
+    max-height: 72dvh;
+    min-height: 0;
+    padding: 14px 14px max(14px, env(safe-area-inset-bottom));
+    border-radius: 14px 14px 0 0;
+    transform: translateY(110%);
+    transition: transform 220ms ease;
+  }
+
+  .typing-garage-sidebar.is-open {
+    transform: translateY(0);
+  }
+
+  .typing-garage-sidebar-header {
+    grid-template-columns: auto 1fr auto;
+  }
+
+  .typing-garage-close-button {
+    display: grid;
+  }
+
   .typing-garage-cards {
     grid-template-columns: 1fr;
+    overflow: auto;
+  }
+
+  .typing-unlock-card-fly {
+    right: 14px;
+    bottom: 240px;
+    width: 140px;
   }
 }
 
