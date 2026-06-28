@@ -10,7 +10,7 @@ import {
   racingSceneConfig
 } from "./racing-car-config.js";
 import { loadActiveRacingStartConfig, saveActiveRacingStartConfig } from "./racing-start-config.js";
-import { loadActiveRacingMap } from "./racing-map.js";
+import { TRACK_SURFACES, loadSelectedRacingMap } from "./racing-map.js";
 import {
   buildTrackModel,
   getOpenFinishProgress,
@@ -19,6 +19,13 @@ import {
   projectPointOntoTrack,
   sampleTrackModel
 } from "./racing-track.js";
+import {
+  disposeObject3DTree,
+  disposePhysicsState,
+  disposeRenderer,
+  disposeSceneResources,
+  markMaterialsOnlyDispose
+} from "./racing-resource-cleanup.mjs";
 
 const dracoDecoderPath = "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/libs/draco/";
 const carSurfaceExclusionPatterns = [
@@ -55,7 +62,7 @@ function createCarModelLoader() {
 }
 
 export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {}) {
-  const mapData = loadActiveRacingMap();
+  const mapData = loadSelectedRacingMap();
   const startConfig = loadActiveRacingStartConfig();
   const canvas = document.getElementById("racingCanvas");
   const hudOverlay = document.getElementById("racingHudOverlay");
@@ -126,6 +133,8 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   const visualScale = racingSceneConfig.visualScale || 1;
   const collisionScale = racingSceneConfig.collisionScale || visualScale;
   const trackWidth = racingSceneConfig.trackWidthOverride ?? mapData.track.width;
+  const trackSurface = mapData.track.surface;
+  const isGravelSurface = trackSurface === TRACK_SURFACES.GRAVEL;
   const cameraConfig = {
     fov: racingSceneConfig.cameraFov ?? 58,
     followDistance: racingSceneConfig.cameraFollowDistance ?? 11.8,
@@ -137,6 +146,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
 
   const trackConfig = {
     shape: mapData.track.shape,
+    surface: trackSurface,
     width: trackWidth,
     samples: mapData.track.samples,
     startProgress: isLoopTrackShape(mapData.track.shape) ? mapData.track.startPosition.progress : 0,
@@ -196,16 +206,16 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   );
 
   const carConfig = {
-    maxForwardSpeed: 46,
-    maxReverseSpeed: 11,
+    maxForwardSpeed: 50,
+    maxReverseSpeed: 40 / 3.6,
     engineForce: 35,
-    brakeForce: 40,
+    brakeForce: isGravelSurface ? 31 : 40,
     reverseForce: 15,
     drag: 0.028,
     rollingResistance: 0.76,
-    roadGrip: 9.4,
+    roadGrip: isGravelSurface ? 6.4 : 9.4,
     grassGrip: 2.9,
-    maxSteerRate: 1.82
+    maxSteerRate: isGravelSurface ? 1.68 : 1.82
   };
 
   const handlingConfig = {
@@ -214,15 +224,15 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     lowSpeedSteerBoost: 1.42,
     highSpeedSteerStart: 18,
     highSpeedSteerEnd: 42,
-    highSpeedSteerMin: 0.58,
-    steerFactorFloor: 0.48,
-    driftEntrySpeed: 9,
-    driftSustainSpeed: 6.5,
-    driftSteerThreshold: 0.22,
-    driftGripMultiplier: 0.2,
+    highSpeedSteerMin: isGravelSurface ? 0.52 : 0.58,
+    steerFactorFloor: isGravelSurface ? 0.42 : 0.48,
+    driftEntrySpeed: isGravelSurface ? 7.4 : 9,
+    driftSustainSpeed: isGravelSurface ? 5.8 : 6.5,
+    driftSteerThreshold: isGravelSurface ? 0.18 : 0.22,
+    driftGripMultiplier: isGravelSurface ? 0.16 : 0.2,
     driftBrakeMultiplier: 0.26,
-    driftTurnMultiplier: 1.48,
-    driftYawAssist: 0.62,
+    driftTurnMultiplier: isGravelSurface ? 1.58 : 1.48,
+    driftYawAssist: isGravelSurface ? 0.74 : 0.62,
     launchBoostThreshold: 12,
     launchForceMultiplier: 1.18,
     grassTopSpeedMultiplier: 0.66,
@@ -236,7 +246,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   };
 
   const opponentConfig = {
-    speed: Math.min(8.2, 30 / 3.6),
+    speed: isGravelSurface ? Math.min(7.1, 26 / 3.6) : Math.min(8.2, 30 / 3.6),
     laneOffset: -2.7,
     startProgress: raceMode === "lap" ? raceConfig.startProgress : 0
   };
@@ -319,6 +329,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   let startRequestId = 0;
   let raceStarting = false;
   let physics = null;
+  let runtimeToken = 0;
   let carPreviewRenderGeneration = 0;
   const carThumbnailUrls = new Map();
   const carThumbnailPromises = new Map();
@@ -336,6 +347,46 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   let selectedCarPreviewPointerId = null;
   let selectedCarPreviewLastPointerX = 0;
   let selectedCarPreviewLastPointerTime = 0;
+  const debugApi = {
+    activateBoost,
+    resetRace,
+    placeCollisionScenario,
+    toggleOpponent,
+    getState: () => ({
+      lapText: formatLapDisplay(state.completedLaps),
+      completedLaps: state.completedLaps,
+      lapArmed: state.lapArmed,
+      boostSeconds: Number(state.boostSeconds.toFixed(2)),
+      boostCharges: state.boostCharges,
+      drifting: state.drifting,
+      speedKmh: Math.round(state.velocity.length() * 3.6),
+      playerMaxForwardSpeed: playerMaxForwardSpeed(),
+      status: currentStatusLabel(),
+      paused: raceState.paused,
+      opponentEnabled: raceState.opponentEnabled,
+      playerPosition: { x: Number(state.position.x.toFixed(2)), y: Number(state.position.y.toFixed(2)) },
+      opponentPosition: {
+        x: Number(opponentState.position.x.toFixed(2)),
+        y: Number(opponentState.position.y.toFixed(2))
+      },
+      opponentHoldSeconds: Number(opponentState.collisionHoldSeconds.toFixed(2)),
+      carDistance: Number(state.position.distanceTo(opponentState.position).toFixed(2)),
+      playerCar: formatCarLabel(selectedCar()),
+      opponentCar: formatCarLabel(opponentCarSelection()),
+      visualScale,
+      collisionScale,
+      trackWidth: trackConfig.width,
+      collider: {
+        halfWidth: Number(physicsConfig.carHalfWidth.toFixed(2)),
+        halfHeight: Number(physicsConfig.carHalfHeight.toFixed(2)),
+        halfLength: Number(physicsConfig.carHalfLength.toFixed(2))
+      },
+      flameStates: (car?.userData.boostFlames || []).map((flame) => ({
+        visible: flame.visible,
+        opacity: Number((flame.material.opacity || 0).toFixed(2))
+      }))
+    })
+  };
 
   function start() {
     prepareConfetti();
@@ -363,11 +414,12 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
       cancelAnimationFrame(animationFrameId);
       animationFrameId = 0;
     }
+
+    invalidateRuntime();
   }
 
   function destroy() {
     stop();
-    disposeCarOptionPreviews();
     startRaceButton.removeEventListener("click", handleStartRaceButtonClick);
     startEditorButton.removeEventListener("click", handleStartEditorButtonClick);
     startHomeButton.removeEventListener("click", handleStartHomeButtonClick);
@@ -376,6 +428,9 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     pauseEditorButton.removeEventListener("click", handlePauseEditorButtonClick);
     pauseHomeButton.removeEventListener("click", handlePauseHomeButtonClick);
     playAgainButton.removeEventListener("click", handleResetButtonClick);
+    if (globalThis.__ackGamesDebug?.racing === debugApi) {
+      delete globalThis.__ackGamesDebug.racing;
+    }
   }
 
   function selectedCar() {
@@ -444,15 +499,16 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
       cancelAnimationFrame(selectedCarPreviewFrameId);
       selectedCarPreviewFrameId = 0;
     }
+    disposeSelectedCarPreviewCar();
+    disposeCarThumbnailCache();
     if (selectedCarPreviewRenderer) {
-      selectedCarPreviewRenderer.dispose();
+      disposeSceneResources(selectedCarPreviewScene);
+      disposeRenderer(selectedCarPreviewRenderer);
       selectedCarPreviewRenderer = null;
     }
     selectedCarPreviewScene = null;
     selectedCarPreviewCamera = null;
     selectedCarPreviewShadowDisc = null;
-    selectedCarPreviewCar = null;
-    selectedCarPreviewMetrics = null;
     selectedCarPreviewLastFrameTime = 0;
   }
 
@@ -483,14 +539,24 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
       cancelAnimationFrame(selectedCarPreviewFrameId);
       selectedCarPreviewFrameId = 0;
     }
-    if (selectedCarPreviewCar && selectedCarPreviewScene) {
-      selectedCarPreviewScene.remove(selectedCarPreviewCar);
-    }
-    selectedCarPreviewCar = null;
-    selectedCarPreviewMetrics = null;
+    disposeSelectedCarPreviewCar();
     selectedCarPreviewLastFrameTime = 0;
     selectedCarPreviewSpinVelocity = 0;
     selectedCarPreviewAngle = THREE.MathUtils.degToRad(-30);
+  }
+
+  function disposeSelectedCarPreviewCar() {
+    if (selectedCarPreviewCar) {
+      disposeObject3DTree(selectedCarPreviewCar);
+    }
+    selectedCarPreviewCar = null;
+    selectedCarPreviewMetrics = null;
+  }
+
+  function disposeCarThumbnailCache() {
+    carThumbnailUrls.clear();
+    carThumbnailPromises.clear();
+    carThumbnailQueue = Promise.resolve();
   }
 
   function ensureSelectedCarPreviewRenderer() {
@@ -704,10 +770,8 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     previewRenderer.render(previewScene, previewCamera);
 
     const thumbnailUrl = previewCanvas.toDataURL("image/png");
-    previewRenderer.dispose();
-    if (typeof previewRenderer.forceContextLoss === "function") {
-      previewRenderer.forceContextLoss();
-    }
+    disposeSceneResources(previewScene);
+    disposeRenderer(previewRenderer, { loseContext: true });
     return thumbnailUrl;
   }
 
@@ -723,6 +787,9 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     const previewVisualRoot = new THREE.Group();
     const previewModel = template.clone(true);
 
+    cloneCarMaterials(previewModel);
+    markMaterialsOnlyDispose(previewModel);
+    applyConfiguredCarTint(previewModel, template.userData?.carSpec ?? null);
     previewVisualRoot.add(previewModel);
     previewVisualRoot.position.y = racingSceneConfig.groundOffset;
     previewCar.add(previewVisualRoot);
@@ -806,8 +873,9 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     if (initialized) return;
     if (initializationPromise) return initializationPromise;
 
+    const initializationToken = runtimeToken;
     initializationPromise = (async () => {
-      renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+      renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
       renderer.setClearColor(racingSceneConfig.backgroundColor ?? 0x9fc9f3);
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -829,11 +897,19 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
       createLights();
       createWorld();
       await initializePhysics();
+      if (initializationToken !== runtimeToken) {
+        disposeRuntimeResources();
+        return;
+      }
 
       [car, opponentCar] = await Promise.all([
         createCar(selectedCar(), 0xd40000),
         createCar(opponentCarSelection(), 0x88a5ff)
       ]);
+      if (initializationToken !== runtimeToken) {
+        disposeRuntimeResources();
+        return;
+      }
 
       scene.add(car);
       scene.add(opponentCar);
@@ -846,6 +922,41 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     } catch (error) {
       initializationPromise = null;
       throw error;
+    } finally {
+      if (initializationToken === runtimeToken) {
+        initializationPromise = null;
+      }
+    }
+  }
+
+  function invalidateRuntime() {
+    runtimeToken += 1;
+    initialized = false;
+    initializationPromise = null;
+    disposeRuntimeResources();
+  }
+
+  function disposeRuntimeResources() {
+    if (car) {
+      disposeObject3DTree(car);
+      car = null;
+    }
+    if (opponentCar) {
+      disposeObject3DTree(opponentCar);
+      opponentCar = null;
+    }
+    if (scene) {
+      disposeSceneResources(scene);
+      scene = null;
+    }
+    camera = null;
+    if (renderer) {
+      disposeRenderer(renderer);
+      renderer = null;
+    }
+    if (physics) {
+      disposePhysicsState(physics);
+      physics = null;
     }
   }
 
@@ -860,8 +971,8 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     const sun = new THREE.DirectionalLight(0xfff0d0, racingSceneConfig.sunIntensity ?? 2.4);
     sun.position.set(-55, 82, 42);
     sun.castShadow = true;
-    sun.shadow.mapSize.width = 2048;
-    sun.shadow.mapSize.height = 2048;
+    sun.shadow.mapSize.width = isGravelSurface ? 1024 : 2048;
+    sun.shadow.mapSize.height = isGravelSurface ? 1024 : 2048;
     sun.shadow.bias = racingSceneConfig.sunShadowBias ?? 0;
     sun.shadow.normalBias = racingSceneConfig.sunShadowNormalBias ?? 0;
     sun.shadow.camera.left = -120;
@@ -1227,7 +1338,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     const normals = [];
     const uvs = [];
     const indices = [];
-    const roadTexture = createRoadTexture();
+    const roadTexture = createRoadTexture(trackSurface);
 
     for (const sample of trackSamples) {
       const left = sample.center.clone().add(sample.normal.clone().multiplyScalar(sample.halfWidth));
@@ -1395,7 +1506,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     return texture;
   }
 
-  function createRoadTexture() {
+  function createRoadTexture(surface) {
     const canvas = document.createElement("canvas");
     canvas.width = 512;
     canvas.height = 512;
@@ -1403,6 +1514,35 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
 
     if (!context) {
       return null;
+    }
+
+    if (surface === TRACK_SURFACES.GRAVEL) {
+      context.fillStyle = "#9c845d";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+
+      for (let index = 0; index < 2400; index += 1) {
+        const warm = 128 + Math.floor(Math.random() * 48);
+        const cool = 102 + Math.floor(Math.random() * 34);
+        context.fillStyle = `rgba(${warm}, ${cool}, ${74 + Math.floor(Math.random() * 24)}, ${0.12 + Math.random() * 0.16})`;
+        const size = 1 + Math.random() * 4.4;
+        context.beginPath();
+        context.arc(Math.random() * canvas.width, Math.random() * canvas.height, size, 0, Math.PI * 2);
+        context.fill();
+      }
+
+      for (let streak = 0; streak < 7; streak += 1) {
+        context.strokeStyle = `rgba(120, 98, 70, ${0.12 + streak * 0.025})`;
+        context.lineWidth = 18 - streak * 2;
+        context.beginPath();
+        context.moveTo(canvas.width * (0.12 + streak * 0.11), 0);
+        context.lineTo(canvas.width * (0.18 + streak * 0.1), canvas.height);
+        context.stroke();
+      }
+
+      context.fillStyle = "rgba(160, 137, 104, 0.24)";
+      context.fillRect(0, 0, 26, canvas.height);
+      context.fillRect(canvas.width - 26, 0, 26, canvas.height);
+      return finalizeCanvasTexture(canvas);
     }
 
     context.fillStyle = "#2a2c30";
@@ -1742,7 +1882,10 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   }
 
   function addFoliage() {
-    const nearTrees = buildTracksidePlacements(scaleEnvironmentCount(foliageConfig.nearTreeCount ?? 30, 0.95), {
+    const nearTreeBaseCount = Math.round((foliageConfig.nearTreeCount ?? 30) * (isGravelSurface ? 0.58 : 1));
+    const farTreeBaseCount = Math.round((foliageConfig.farTreeCount ?? 120) * (isGravelSurface ? 0.72 : 1));
+    const shrubBaseCount = Math.round((foliageConfig.shrubCount ?? 68) * (isGravelSurface ? 0.82 : 1));
+    const nearTrees = buildTracksidePlacements(scaleEnvironmentCount(nearTreeBaseCount, 0.95), {
       minOffset: foliageConfig.nearTreeBandMin ?? 18,
       maxOffset: foliageConfig.nearTreeBandMax ?? 42,
       minSpacing: foliageConfig.nearTreeMinSpacing ?? 11,
@@ -1752,7 +1895,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
       height: randomBetween(5.2, 8.4),
       variant: index % 2
     }));
-    const farTrees = buildTracksidePlacements(scaleEnvironmentCount(foliageConfig.farTreeCount ?? 120, 1), {
+    const farTrees = buildTracksidePlacements(scaleEnvironmentCount(farTreeBaseCount, 1), {
       minOffset: foliageConfig.farTreeBandMin ?? 36,
       maxOffset: foliageConfig.farTreeBandMax ?? 112,
       minSpacing: foliageConfig.farTreeMinSpacing ?? 8,
@@ -1761,7 +1904,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
       ...placement,
       height: randomBetween(8, 15)
     }));
-    const shrubs = buildTracksidePlacements(scaleEnvironmentCount(foliageConfig.shrubCount ?? 68, 0.9), {
+    const shrubs = buildTracksidePlacements(scaleEnvironmentCount(shrubBaseCount, 0.9), {
       minOffset: foliageConfig.shrubBandMin ?? 8,
       maxOffset: foliageConfig.shrubBandMax ?? 18,
       minSpacing: foliageConfig.shrubMinSpacing ?? 4.6,
@@ -1785,6 +1928,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   function addNearTreeInstances(placements) {
     const slender = placements.filter((placement) => placement.variant === 0);
     const layered = placements.filter((placement) => placement.variant === 1);
+    const castTreeShadows = !isGravelSurface;
     const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x745336, roughness: 0.92 });
     const foliageMaterial = new THREE.MeshStandardMaterial({
       color: 0x356b41,
@@ -1795,8 +1939,8 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
 
     const slenderTrunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.22, 0.3, 1, 6), trunkMaterial, slender.length);
     const slenderCrowns = new THREE.InstancedMesh(new THREE.ConeGeometry(0.92, 1.9, 7), foliageMaterial, slender.length);
-    slenderTrunks.castShadow = true;
-    slenderCrowns.castShadow = true;
+    slenderTrunks.castShadow = castTreeShadows;
+    slenderCrowns.castShadow = castTreeShadows;
 
     slender.forEach((tree, index) => {
       const trunkHeight = tree.height * 0.42;
@@ -1817,9 +1961,9 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     const layeredTrunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.2, 0.28, 1, 6), trunkMaterial, layered.length);
     const layeredLower = new THREE.InstancedMesh(new THREE.ConeGeometry(1.02, 1.42, 7), foliageMaterial, layered.length);
     const layeredUpper = new THREE.InstancedMesh(new THREE.ConeGeometry(0.78, 1.1, 7), foliageMaterial, layered.length);
-    layeredTrunks.castShadow = true;
-    layeredLower.castShadow = true;
-    layeredUpper.castShadow = true;
+    layeredTrunks.castShadow = castTreeShadows;
+    layeredLower.castShadow = castTreeShadows;
+    layeredUpper.castShadow = castTreeShadows;
 
     layered.forEach((tree, index) => {
       const yaw = randomBetween(0, Math.PI * 2);
@@ -2203,8 +2347,9 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     const visualRoot = new THREE.Group();
     const model = template.clone(true);
     cloneCarMaterials(model);
+    markMaterialsOnlyDispose(model);
     configureCarMaterials(model);
-    applyCarTint(model, tint);
+    applyConfiguredCarTint(model, carSpec, tint);
     visualRoot.add(model);
 
     const box = new THREE.Box3().setFromObject(model);
@@ -2236,6 +2381,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
 
         normalizeCarModel(template, carSpec);
         smoothCarBodyGeometry(template);
+        template.userData.carSpec = carSpec;
         template.traverse((child) => {
           if (!child.isMesh) {
             return;
@@ -2385,13 +2531,22 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     });
   }
 
-  function applyCarTint(model, tint) {
-    if (!tint || racingSceneConfig.allowTint === false) {
+  function applyConfiguredCarTint(model, carSpec, tint = null) {
+    const defaultPaintColor = carSpec?.defaultPaintColor
+      ? Number.parseInt(carSpec.defaultPaintColor.replace("#", ""), 16)
+      : null;
+    const resolvedTint = defaultPaintColor ?? tint;
+    const forceTint = defaultPaintColor != null;
+    applyCarTint(model, resolvedTint, forceTint, carSpec?.tintIncludePatterns ?? null);
+  }
+
+  function applyCarTint(model, tint, force = false, includePatterns = null) {
+    if (!tint || (!force && racingSceneConfig.allowTint === false)) {
       return;
     }
 
     const tintColor = new THREE.Color(tint);
-    for (const material of tintTargetMaterialsFor(model)) {
+    for (const material of tintTargetMaterialsFor(model, includePatterns)) {
       if ("color" in material) {
         material.color.copy(tintColor);
       }
@@ -2405,9 +2560,10 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     }
   }
 
-  function tintTargetMaterialsFor(model) {
+  function tintTargetMaterialsFor(model, includePatterns = null) {
     const exactMatches = [];
     const fallbackMatches = [];
+    const targetPatterns = includePatterns?.length ? includePatterns : racingSceneConfig.bodyNamePatterns;
 
     model.traverse((child) => {
       if (!child.isMesh || !child.material) {
@@ -2425,7 +2581,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
           continue;
         }
 
-        if (matchesAnyPattern(label, racingSceneConfig.bodyNamePatterns)) {
+        if (matchesAnyPattern(label, targetPatterns)) {
           exactMatches.push(material);
           continue;
         }
@@ -3344,7 +3500,6 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
         new THREE.Vector3(state.position.x, cameraConfig.targetHeight, state.position.y)
           .addScaledVector(forward, cameraConfig.lookAhead)
       );
-      renderer.render(scene, camera);
     }
 
     updateHud();
@@ -3754,46 +3909,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
 
   function registerDebugApi() {
     globalThis.__ackGamesDebug = globalThis.__ackGamesDebug || {};
-    globalThis.__ackGamesDebug.racing = {
-      activateBoost,
-      resetRace,
-      placeCollisionScenario,
-      toggleOpponent,
-      getState: () => ({
-        lapText: formatLapDisplay(state.completedLaps),
-        completedLaps: state.completedLaps,
-        lapArmed: state.lapArmed,
-        boostSeconds: Number(state.boostSeconds.toFixed(2)),
-        boostCharges: state.boostCharges,
-        drifting: state.drifting,
-        speedKmh: Math.round(state.velocity.length() * 3.6),
-        playerMaxForwardSpeed: playerMaxForwardSpeed(),
-        status: currentStatusLabel(),
-        paused: raceState.paused,
-        opponentEnabled: raceState.opponentEnabled,
-        playerPosition: { x: Number(state.position.x.toFixed(2)), y: Number(state.position.y.toFixed(2)) },
-        opponentPosition: {
-          x: Number(opponentState.position.x.toFixed(2)),
-          y: Number(opponentState.position.y.toFixed(2))
-        },
-        opponentHoldSeconds: Number(opponentState.collisionHoldSeconds.toFixed(2)),
-        carDistance: Number(state.position.distanceTo(opponentState.position).toFixed(2)),
-        playerCar: formatCarLabel(selectedCar()),
-        opponentCar: formatCarLabel(opponentCarSelection()),
-        visualScale,
-        collisionScale,
-        trackWidth: trackConfig.width,
-        collider: {
-          halfWidth: Number(physicsConfig.carHalfWidth.toFixed(2)),
-          halfHeight: Number(physicsConfig.carHalfHeight.toFixed(2)),
-          halfLength: Number(physicsConfig.carHalfLength.toFixed(2))
-        },
-        flameStates: (car?.userData.boostFlames || []).map((flame) => ({
-          visible: flame.visible,
-          opacity: Number((flame.material.opacity || 0).toFixed(2))
-        }))
-      })
-    };
+    globalThis.__ackGamesDebug.racing = debugApi;
   }
 
   function placeCollisionScenario() {

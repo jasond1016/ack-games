@@ -3,12 +3,12 @@ import { racingSceneConfig } from "./racing-car-config.js";
 import {
   cloneRacingMap,
   createLoopStartPosition,
+  duplicateSelectedRacingMap,
+  ensureSelectedRacingMapIsEditable,
   exportRacingMap,
-  getDefaultRacingMap,
+  getTrackSurfaceLabel,
   importRacingMap,
-  loadActiveRacingMap,
-  resetActiveRacingMap,
-  saveActiveRacingMap
+  saveSelectedRacingMap
 } from "./racing-map.js";
 import {
   buildTrackModel,
@@ -46,12 +46,14 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
   const raceModeValue = document.getElementById("racingEditorRaceModeValue");
   const shapeValueMirror = document.getElementById("racingEditorShapeValueMirror");
   const raceModeValueMirror = document.getElementById("racingEditorRaceModeValueMirror");
+  const surfaceValue = document.getElementById("racingEditorSurfaceValue");
   const selectionValue = document.getElementById("racingEditorSelectionValue");
   const shapeButtons = Array.from(document.querySelectorAll("[data-track-shape]"));
+  const surfaceButtons = Array.from(document.querySelectorAll("[data-track-surface]"));
   const reverseButton = document.getElementById("racingEditorReverseButton");
   const deleteButton = document.getElementById("racingEditorDeleteButton");
   const applyButton = document.getElementById("racingEditorApplyButton");
-  const resetButton = document.getElementById("racingEditorResetButton");
+  const duplicateButton = document.getElementById("racingEditorDuplicateButton");
   const exportButton = document.getElementById("racingEditorExportButton");
   const importButton = document.getElementById("racingEditorImportButton");
   const importInput = document.getElementById("racingEditorImportInput");
@@ -59,7 +61,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
 
   let active = false;
   let listening = false;
-  let mapData = getDefaultRacingMap();
+  let mapData = ensureSelectedRacingMapIsEditable().map;
   let lastValidMap = cloneRacingMap(mapData);
   let previewModel = buildEditorPreviewModel(mapData.track);
   let viewport = null;
@@ -69,7 +71,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
 
   function start() {
     active = true;
-    mapData = loadActiveRacingMap();
+    mapData = ensureSelectedRacingMapIsEditable().map;
     lastValidMap = cloneRacingMap(mapData);
     previewModel = buildEditorPreviewModel(mapData.track);
     selectedPointIndex = 0;
@@ -106,13 +108,16 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
     reverseButton.addEventListener("click", handleReverseDirection);
     deleteButton.addEventListener("click", handleDelete);
     applyButton.addEventListener("click", handleApply);
-    resetButton.addEventListener("click", handleReset);
+    duplicateButton.addEventListener("click", handleDuplicate);
     exportButton.addEventListener("click", handleExport);
     importButton.addEventListener("click", handleImportClick);
     importInput.addEventListener("change", handleImportFile);
 
     for (const button of shapeButtons) {
       button.addEventListener("click", handleShapeClick);
+    }
+    for (const button of surfaceButtons) {
+      button.addEventListener("click", handleSurfaceClick);
     }
 
     listening = true;
@@ -133,13 +138,16 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
     reverseButton.removeEventListener("click", handleReverseDirection);
     deleteButton.removeEventListener("click", handleDelete);
     applyButton.removeEventListener("click", handleApply);
-    resetButton.removeEventListener("click", handleReset);
+    duplicateButton.removeEventListener("click", handleDuplicate);
     exportButton.removeEventListener("click", handleExport);
     importButton.removeEventListener("click", handleImportClick);
     importInput.removeEventListener("change", handleImportFile);
 
     for (const button of shapeButtons) {
       button.removeEventListener("click", handleShapeClick);
+    }
+    for (const button of surfaceButtons) {
+      button.removeEventListener("click", handleSurfaceClick);
     }
 
     listening = false;
@@ -193,6 +201,17 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
     );
   }
 
+  function handleSurfaceClick(event) {
+    const nextSurface = event.currentTarget.dataset.trackSurface;
+    if (!nextSurface || nextSurface === mapData.track.surface) {
+      return;
+    }
+
+    const candidate = cloneRacingMap(mapData);
+    candidate.track.surface = nextSurface;
+    commitCandidate(candidate, `已切换为${getTrackSurfaceLabel(nextSurface)}。`);
+  }
+
   function handleReverseDirection() {
     if (isLoopTrackShape(mapData.track.shape)) {
       setStatus("只有开放赛道可以反转方向。");
@@ -221,12 +240,13 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
       return;
     }
 
-    commitCandidate(mapData, "已应用到赛车。");
+    commitCandidate(mapData, "已切换到当前地图。");
     onPlay?.();
   }
 
-  function handleReset() {
-    mapData = resetActiveRacingMap();
+  function handleDuplicate() {
+    const duplicated = duplicateSelectedRacingMap();
+    mapData = duplicated.map;
     lastValidMap = cloneRacingMap(mapData);
     previewModel = buildEditorPreviewModel(mapData.track);
     selectedPointIndex = 0;
@@ -234,7 +254,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
     dragState = null;
     syncControlsFromMap();
     onMapChanged?.();
-    setStatus("已恢复默认地图。");
+    setStatus(`已复制为 ${duplicated.map.name}。`);
   }
 
   async function handleExport() {
@@ -262,7 +282,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
 
     try {
       const imported = importRacingMap(await file.text());
-      mapData = saveActiveRacingMap(imported);
+      mapData = saveSelectedRacingMap(imported);
       lastValidMap = cloneRacingMap(mapData);
       previewModel = buildEditorPreviewModel(mapData.track);
       selectedPointIndex = 0;
@@ -431,12 +451,16 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
     for (const button of shapeButtons) {
       button.classList.toggle("is-active", button.dataset.trackShape === mapData.track.shape);
     }
+    for (const button of surfaceButtons) {
+      button.classList.toggle("is-active", button.dataset.trackSurface === mapData.track.surface);
+    }
 
     pointsValue.textContent = `${mapData.track.controlPoints.length} 个`;
     shapeValue.textContent = getTrackShapeLabel(mapData.track.shape);
     raceModeValue.textContent = getTrackModeLabel(mapData.track.shape);
     shapeValueMirror.textContent = shapeValue.textContent;
     raceModeValueMirror.textContent = raceModeValue.textContent;
+    surfaceValue.textContent = getTrackSurfaceLabel(mapData.track.surface);
     selectionValue.textContent = currentSelectionLabel();
     reverseButton.disabled = isLoopTrackShape(mapData.track.shape);
 
@@ -447,7 +471,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
 
   function commitCandidate(candidateMap, successMessage, invalidMessage = "") {
     try {
-      const saved = saveActiveRacingMap(candidateMap);
+      const saved = saveSelectedRacingMap(candidateMap);
       mapData = saved;
       lastValidMap = cloneRacingMap(saved);
       previewModel = buildEditorPreviewModel(saved.track);

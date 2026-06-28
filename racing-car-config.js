@@ -101,6 +101,45 @@ export const racingCarCatalog = [
     modelRotationDegrees: 0
   },
   {
+    id: "urus-se",
+    make: "Lamborghini",
+    name: "Urus SE",
+    tag: "高性能 SUV",
+    summary: "插混高性能 SUV，车身更高更重，提供与超跑完全不同的视觉轮廓。",
+    accentColor: "#b66a2d",
+    modelUrl: createCarModelUrl(
+      "./assets/cars/2025_lamborghini_urus_se.glb"
+    ),
+    targetLength: 5.12,
+    modelRotationDegrees: 0
+  },
+  {
+    id: "miura-p400",
+    make: "Lamborghini",
+    name: "Miura P400",
+    tag: "经典超跑",
+    summary: "60 年代中置经典，车身低平，用来补充现有车库的年代层次。",
+    accentColor: "#c08b2f",
+    modelUrl: createCarModelUrl(
+      "./assets/cars/1968_lamborghini_miura_p400.glb"
+    ),
+    targetLength: 4.37,
+    modelRotationDegrees: 0
+  },
+  {
+    id: "countach-lpi-800-4",
+    make: "Lamborghini",
+    name: "Countach LPI 800-4",
+    tag: "复古新生代",
+    summary: "现代化 Countach 复刻，棱角轮廓鲜明，适合作为高辨识度公路超跑。",
+    accentColor: "#d1d5db",
+    modelUrl: createCarModelUrl(
+      "./assets/cars/2022_lamborghini_countach_lpi_800-4.optimized.glb"
+    ),
+    targetLength: 4.87,
+    modelRotationDegrees: 0
+  },
+  {
     id: "dbr9",
     make: "Aston Martin Racing",
     name: "DBR9",
@@ -112,6 +151,99 @@ export const racingCarCatalog = [
     ),
     targetLength: 4.72,
     modelRotationDegrees: 180
+  },
+  {
+    id: "bolide",
+    make: "Bugatti",
+    name: "Bolide",
+    tag: "赛道原型车",
+    summary: "极端低矮的赛道机器，适合作为高阶参赛车补充现有车库。",
+    accentColor: "#2f72d6",
+    defaultPaintColor: "#2f72d6",
+    tintIncludePatterns: ["paint", "material", "rimcolor"],
+    modelUrl: createCarModelUrl(
+      "./assets/cars/bugatti_bolide.glb"
+    ),
+    targetLength: 4.76,
+    modelRotationDegrees: 0
+  },
+  {
+    id: "revuelto",
+    make: "Lamborghini",
+    name: "Revuelto",
+    tag: "旗舰混动",
+    summary: "新一代 V12 旗舰超跑，适合作为当前兰博基尼车系的顶级公路车型。",
+    accentColor: "#63b64d",
+    modelUrl: createCarModelUrl(
+      "./assets/cars/free_lamborghini_revuelto.glb"
+    ),
+    targetLength: 4.95,
+    modelRotationDegrees: 0
+  },
+  {
+    id: "aventador-classic",
+    make: "Lamborghini",
+    name: "Aventador",
+    tag: "V12 超跑",
+    summary: "标准版 Aventador，作为现有 50th 纪念版之外的另一种 V12 轮廓选择。",
+    accentColor: "#ef7d33",
+    modelUrl: createCarModelUrl(
+      "./assets/cars/lamborghini_aventador.glb"
+    ),
+    targetLength: 4.78,
+    modelRotationDegrees: 0
+  },
+  {
+    id: "countach-5000qv",
+    make: "Lamborghini",
+    name: "Countach 5000 QV",
+    tag: "经典楔形",
+    summary: "80 年代楔形超跑代表，适合补充更纯粹的复古兰博基尼风格。",
+    accentColor: "#f5f0e8",
+    modelUrl: createCarModelUrl(
+      "./assets/cars/lamborghini_countach_5000qv__www.vecarz.com.glb"
+    ),
+    targetLength: 4.14,
+    modelRotationDegrees: 0
+  },
+  {
+    id: "huracan-sto",
+    make: "Lamborghini",
+    name: "Huracan STO",
+    tag: "赛道街车",
+    summary: "更偏赛道取向的 Huracan 版本，用来填补 GT 赛车和公路超跑之间的视觉区间。",
+    accentColor: "#2d8dbf",
+    modelUrl: createCarModelUrl(
+      "./assets/cars/lamborghini_huracan_sto_2020.glb"
+    ),
+    targetLength: 4.55,
+    modelRotationDegrees: 0
+  },
+  {
+    id: "terzo-millennio",
+    make: "Lamborghini",
+    name: "Terzo Millennio",
+    tag: "概念车",
+    summary: "未来感极强的概念车型，用来提供与量产车完全不同的造型语言。",
+    accentColor: "#4ab3c3",
+    modelUrl: createCarModelUrl(
+      "./assets/cars/lamborghini_terzo.glb"
+    ),
+    targetLength: 4.73,
+    modelRotationDegrees: 0
+  },
+  {
+    id: "veneno",
+    make: "Lamborghini",
+    name: "Veneno",
+    tag: "极端超跑",
+    summary: "夸张空气动力学外观的限量超跑，适合作为车库里的视觉焦点车型。",
+    accentColor: "#9aa3ad",
+    modelUrl: createCarModelUrl(
+      "./assets/cars/lamborghini_venevo.glb"
+    ),
+    targetLength: 5.02,
+    modelRotationDegrees: 0
   }
 ];
 

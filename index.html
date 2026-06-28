@@ -23,6 +23,22 @@
         </header>
 
         <section class="game-grid" aria-label="游戏列表">
+          <button id="typingGarageCard" class="game-card" type="button">
+            <span class="game-card-art typing-garage-card-art" aria-hidden="true">
+              <span class="garage-card-floor"></span>
+              <span class="garage-card-light garage-card-light-one"></span>
+              <span class="garage-card-light garage-card-light-two"></span>
+              <span class="garage-card-car"></span>
+              <span class="garage-card-key">A</span>
+              <span class="garage-card-key garage-card-key-alt">B</span>
+            </span>
+            <span class="game-card-copy">
+              <span class="game-state">新原型</span>
+              <strong>超跑图鉴解锁</strong>
+              <span>按字母解锁车图和车库卡片</span>
+            </span>
+          </button>
+
           <button id="vacuumGameCard" class="game-card" type="button">
             <span class="game-card-art" aria-hidden="true">
               <span class="mini-pipe"></span>
@@ -85,6 +101,65 @@
         </section>
       </section>
 
+      <section id="typingGarageView" class="game-view typing-garage-view" aria-label="超跑图鉴解锁" hidden>
+        <header class="topbar typing-garage-topbar">
+          <button id="typingGarageHomeButton" class="icon-button" type="button" aria-label="返回首页" title="返回首页">
+            ‹
+          </button>
+          <h1>超跑图鉴解锁</h1>
+          <div class="topbar-actions">
+            <button id="typingGarageReplayButton" class="secondary-button" type="button">再玩一次</button>
+            <button id="typingGarageResetButton" class="secondary-button" type="button">重置收藏</button>
+            <button id="typingGarageNextButton" class="primary-button" type="button">下一辆</button>
+          </div>
+        </header>
+
+        <div class="typing-garage-layout">
+          <section id="typingGarageStage" class="typing-garage-stage" aria-label="当前车辆">
+            <div class="typing-garage-photo-shell">
+              <div id="typingGaragePhoto" class="typing-garage-photo" aria-hidden="true">
+                <div class="typing-garage-lights"></div>
+                <div class="typing-garage-car-visual">
+                  <span class="typing-car-shadow"></span>
+                  <span class="typing-car-body"></span>
+                  <span class="typing-car-roof"></span>
+                  <span class="typing-car-window typing-car-window-left"></span>
+                  <span class="typing-car-window typing-car-window-right"></span>
+                  <span class="typing-car-light typing-car-light-left"></span>
+                  <span class="typing-car-light typing-car-light-right"></span>
+                  <span class="typing-car-wheel typing-car-wheel-left"></span>
+                  <span class="typing-car-wheel typing-car-wheel-right"></span>
+                </div>
+                <div id="typingGarageCover" class="typing-garage-cover"></div>
+                <div id="typingGarageFlash" class="typing-garage-flash"></div>
+              </div>
+              <div id="typingGarageBadge" class="typing-garage-badge">第 1 辆</div>
+            </div>
+
+            <div class="typing-garage-play-panel">
+              <div class="typing-target-row" aria-label="目标词">
+                <span id="typingGarageTarget" class="typing-target-word"></span>
+              </div>
+              <div id="typingGarageProgress" class="typing-progress-row" aria-label="输入进度"></div>
+              <div class="typing-key-hint" aria-label="下一个按键">
+                <span>下一个键</span>
+                <strong id="typingGarageNextKey">A</strong>
+              </div>
+              <p id="typingGarageMessage" class="typing-garage-message" aria-live="polite">按键开始解锁</p>
+            </div>
+            <div id="typingGarageKeyboard" class="typing-garage-keyboard" aria-label="屏幕键盘"></div>
+          </section>
+
+          <aside class="typing-garage-sidebar" aria-label="车库收藏册">
+            <div class="typing-garage-sidebar-header">
+              <h2>车库</h2>
+              <strong id="typingGarageCount">0 / 10</strong>
+            </div>
+            <div id="typingGarageCards" class="typing-garage-cards"></div>
+          </aside>
+        </div>
+      </section>
+
       <section id="vacuumView" class="game-view vacuum-view" aria-label="吸尘器接管道" hidden>
         <header class="topbar">
           <button id="vacuumHomeButton" class="icon-button" type="button" aria-label="返回首页" title="返回首页">
@@ -116,6 +191,44 @@
         </section>
 
         <canvas id="vacuumCanvas" class="game-canvas vacuum-canvas" width="640" height="760" aria-label="吸尘器接管道游戏画面"></canvas>
+      </section>
+
+      <section id="racingMapSelectView" class="game-view racing-map-select-view" aria-label="赛车地图选择" hidden>
+        <header class="topbar">
+          <button id="racingMapSelectHomeButton" class="icon-button" type="button" aria-label="返回首页" title="返回首页">
+            ‹
+          </button>
+          <h1>地图选择</h1>
+          <div class="topbar-actions">
+            <button id="racingMapSelectRaceButton" class="primary-button" type="button">开始比赛</button>
+            <button id="racingMapSelectEditButton" class="secondary-button" type="button">编辑地图</button>
+          </div>
+        </header>
+
+        <div class="map-select-layout">
+          <section class="map-select-hero">
+            <p class="map-select-tag">当前选中地图</p>
+            <h2 id="racingMapSelectName" class="map-select-name">F1 练习场</h2>
+            <p id="racingMapSelectMeta" class="map-select-meta">闭环赛道 · 柏油路面</p>
+            <p class="map-select-copy">开始比赛始终使用当前选中地图。编辑预设地图时会自动复制成用户地图后再进入编辑器。</p>
+          </section>
+
+          <section class="map-select-group" aria-labelledby="racingPresetMapsHeading">
+            <div class="map-select-group-header">
+              <h2 id="racingPresetMapsHeading">预设地图</h2>
+            </div>
+            <div id="racingPresetMaps" class="map-select-grid"></div>
+          </section>
+
+          <section class="map-select-group" aria-labelledby="racingUserMapsHeading">
+            <div class="map-select-group-header">
+              <h2 id="racingUserMapsHeading">用户地图</h2>
+              <button id="racingMapSelectNewButton" class="secondary-button" type="button">新建地图</button>
+            </div>
+            <div id="racingUserMaps" class="map-select-grid"></div>
+            <p id="racingUserMapsEmpty" class="map-select-empty" hidden>还没有用户地图，先新建一张。</p>
+          </section>
+        </div>
       </section>
 
       <section id="racingView" class="game-view racing-view" aria-label="3D 赛车" hidden>
@@ -236,15 +349,13 @@
 
       <section id="racingEditorView" class="game-view racing-editor-view" aria-label="赛车地图编辑器" hidden>
         <header class="topbar">
-          <button id="racingEditorHomeButton" class="icon-button" type="button" aria-label="返回首页" title="返回首页">
+          <button id="racingEditorHomeButton" class="icon-button" type="button" aria-label="返回地图选择" title="返回地图选择">
             ‹
           </button>
           <h1>地图编辑器</h1>
           <div class="topbar-actions">
-            <button id="racingEditorApplyButton" class="primary-button" type="button">应用并试玩</button>
-            <button id="racingEditorResetButton" class="icon-button" type="button" aria-label="恢复默认地图" title="恢复默认地图">
-              ↺
-            </button>
+            <button id="racingEditorApplyButton" class="primary-button" type="button">试玩当前地图</button>
+            <button id="racingEditorDuplicateButton" class="secondary-button" type="button">复制地图</button>
           </div>
         </header>
 
@@ -262,6 +373,15 @@
                 <button class="editor-chip" data-track-shape="open" type="button">开放</button>
               </div>
               <p class="editor-help">`Shift + 点击` 在线上新增控制点。开放赛道会自动判断是中间插点，还是从起点端 / 终点端接长。</p>
+            </section>
+
+            <section class="editor-card">
+              <p class="editor-label">赛道路面</p>
+              <div class="editor-chip-row">
+                <button class="editor-chip is-active" data-track-surface="asphalt" type="button">柏油</button>
+                <button class="editor-chip" data-track-surface="gravel" type="button">沙石</button>
+              </div>
+              <p class="editor-help">整张地图只使用一种赛道路面。沙石路面仍属于赛道内，但会有更滑的驾驶手感。</p>
             </section>
 
             <section class="editor-card">
@@ -295,6 +415,10 @@
               <div>
                 <span>赛制</span>
                 <strong id="racingEditorRaceModeValueMirror">闭环赛</strong>
+              </div>
+              <div>
+                <span>路面</span>
+                <strong id="racingEditorSurfaceValue">柏油路面</strong>
               </div>
             </section>
 

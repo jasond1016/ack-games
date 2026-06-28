@@ -1,23 +1,45 @@
 import { createRacingGame } from "./racing-game.js";
 import { createRacingEditor } from "./racing-editor.js";
+import { createRacingMapSelect } from "./racing-map-select.js";
+import { createTypingGarageGame } from "./typing-garage-game.js";
 import { createVacuumGame } from "./vacuum-game.js";
 
 const body = document.body;
 const homeView = document.getElementById("homeView");
+const typingGarageView = document.getElementById("typingGarageView");
 const vacuumView = document.getElementById("vacuumView");
+const racingMapSelectView = document.getElementById("racingMapSelectView");
 const racingView = document.getElementById("racingView");
 const racingEditorView = document.getElementById("racingEditorView");
+const typingGarageCard = document.getElementById("typingGarageCard");
 const vacuumGameCard = document.getElementById("vacuumGameCard");
 const racingGameCard = document.getElementById("racingGameCard");
 const racingEditorCard = document.getElementById("racingEditorCard");
+const typingGarageHomeButton = document.getElementById("typingGarageHomeButton");
 const vacuumHomeButton = document.getElementById("vacuumHomeButton");
 const racingEditorHomeButton = document.getElementById("racingEditorHomeButton");
 
 const games = {
+  "typing-garage": {
+    title: "超跑图鉴解锁 - ACK Games",
+    view: typingGarageView,
+    create: () => createTypingGarageGame(),
+    instance: null
+  },
   vacuum: {
     title: "吸尘器接管道 - ACK Games",
     view: vacuumView,
     create: () => createVacuumGame(),
+    instance: null
+  },
+  "racing-select": {
+    title: "赛车地图选择 - ACK Games",
+    view: racingMapSelectView,
+    create: () => createRacingMapSelect({
+      onHome: () => showHome(),
+      onRace: () => startGame("racing"),
+      onEdit: () => startGame("racing-editor")
+    }),
     instance: null
   },
   racing: {
@@ -130,10 +152,12 @@ function routeFromHash(updateHistory = false) {
 }
 
 window.addEventListener("popstate", () => routeFromHash(false));
+typingGarageCard.addEventListener("click", () => startGame("typing-garage"));
 vacuumGameCard.addEventListener("click", () => startGame("vacuum"));
-racingGameCard.addEventListener("click", () => startGame("racing"));
-racingEditorCard.addEventListener("click", () => startGame("racing-editor"));
+racingGameCard.addEventListener("click", () => startGame("racing-select"));
+racingEditorCard.addEventListener("click", () => startGame("racing-select"));
+typingGarageHomeButton.addEventListener("click", () => showHome());
 vacuumHomeButton.addEventListener("click", () => showHome());
-racingEditorHomeButton.addEventListener("click", () => showHome());
+racingEditorHomeButton.addEventListener("click", () => startGame("racing-select"));
 
 routeFromHash(false);
