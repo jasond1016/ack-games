@@ -52,6 +52,15 @@ const carTemplatePromises = new Map();
 const rapierReadyPromise = RAPIER.init();
 const upAxis = new THREE.Vector3(0, 1, 0);
 const tempQuaternion = new THREE.Quaternion();
+const collisionDebugColors = {
+  player: 0x44ff88,
+  opponent: 0x4da3ff,
+  rail: 0xf4d35e,
+  heading: 0xff5d73,
+  velocity: 0x5fe0ff,
+  response: 0xff9f1c,
+  impact: 0xff4d4d
+};
 const defaultDrivingFeelPresetId = "arcade";
 const drivingFeelPresets = {
   balanced: {
@@ -454,11 +463,24 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   let selectedCarPreviewPointerId = null;
   let selectedCarPreviewLastPointerX = 0;
   let selectedCarPreviewLastPointerTime = 0;
+  const collisionDebug = {
+    enabled: false,
+    group: null,
+    hud: null,
+    playerWire: null,
+    opponentWire: null,
+    headingArrow: null,
+    velocityArrow: null,
+    responseArrow: null,
+    railWiresByHandle: new Map(),
+    lastCollision: null
+  };
   const debugApi = {
     activateBoost,
     resetRace,
     placeCollisionScenario,
     toggleOpponent,
+    toggleCollisionDebug: () => setCollisionDebugEnabled(!collisionDebug.enabled),
     getState: () => ({
       lapText: formatLapDisplay(state.completedLaps),
       completedLaps: state.completedLaps,
@@ -489,6 +511,8 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
         halfHeight: Number(physicsConfig.carHalfHeight.toFixed(2)),
         halfLength: Number(physicsConfig.carHalfLength.toFixed(2))
       },
+      collisionDebugEnabled: collisionDebug.enabled,
+      lastCollision: collisionDebug.lastCollision,
       flameStates: (car?.userData.boostFlames || []).map((flame) => ({
         visible: flame.visible,
         opacity: Number((flame.material.opacity || 0).toFixed(2))
@@ -502,6 +526,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     setPaused(false);
     addListeners();
     active = true;
+    updateCollisionDebugVisibility();
     showStartOverlay();
   }
 
@@ -517,6 +542,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     pauseOverlay.hidden = true;
     resultOverlay.hidden = true;
     hudOverlay.hidden = true;
+    updateCollisionDebugVisibility();
 
     if (animationFrameId) {
       cancelAnimationFrame(animationFrameId);
@@ -536,6 +562,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     pauseEditorButton.removeEventListener("click", handlePauseEditorButtonClick);
     pauseHomeButton.removeEventListener("click", handlePauseHomeButtonClick);
     playAgainButton.removeEventListener("click", handleResetButtonClick);
+    removeCollisionDebugHud();
     if (globalThis.__ackGamesDebug?.racing === debugApi) {
       delete globalThis.__ackGamesDebug.racing;
     }
@@ -929,6 +956,63 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     return !startOverlay.hidden;
   }
 
+  function ensureCollisionDebugHud() {
+    if (collisionDebug.hud) {
+      return collisionDebug.hud;
+    }
+
+    const hud = document.createElement("pre");
+    hud.setAttribute("aria-hidden", "true");
+    hud.style.position = "fixed";
+    hud.style.top = "16px";
+    hud.style.right = "16px";
+    hud.style.zIndex = "40";
+    hud.style.margin = "0";
+    hud.style.padding = "12px 14px";
+    hud.style.minWidth = "260px";
+    hud.style.maxWidth = "360px";
+    hud.style.borderRadius = "12px";
+    hud.style.background = "rgba(7, 10, 16, 0.82)";
+    hud.style.border = "1px solid rgba(255, 255, 255, 0.14)";
+    hud.style.boxShadow = "0 18px 40px rgba(0, 0, 0, 0.28)";
+    hud.style.color = "#dce8f2";
+    hud.style.font = "12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace";
+    hud.style.whiteSpace = "pre-wrap";
+    hud.style.pointerEvents = "none";
+    hud.hidden = true;
+    document.body.append(hud);
+    collisionDebug.hud = hud;
+    return hud;
+  }
+
+  function removeCollisionDebugHud() {
+    collisionDebug.hud?.remove();
+    collisionDebug.hud = null;
+  }
+
+  function setCollisionDebugEnabled(enabled) {
+    collisionDebug.enabled = enabled;
+    if (enabled) {
+      ensureCollisionDebugHud();
+    }
+    updateCollisionDebugVisibility();
+    if (enabled) {
+      ensureCollisionDebugVisuals();
+      updateCollisionDebugVisuals();
+      updateCollisionDebugHud();
+    }
+    return collisionDebug.enabled;
+  }
+
+  function updateCollisionDebugVisibility() {
+    if (collisionDebug.group) {
+      collisionDebug.group.visible = collisionDebug.enabled && Boolean(scene);
+    }
+    if (collisionDebug.hud) {
+      collisionDebug.hud.hidden = !(collisionDebug.enabled && active);
+    }
+  }
+
   function setStartButtonsDisabled(disabled) {
     startRaceButton.disabled = disabled;
     startEditorButton.disabled = disabled;
@@ -1021,6 +1105,9 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
 
       scene.add(car);
       scene.add(opponentCar);
+      ensureCollisionDebugVisuals();
+      updateCollisionDebugVisuals();
+      updateCollisionDebugHud();
 
       initialized = true;
     })();
@@ -1045,6 +1132,14 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   }
 
   function disposeRuntimeResources() {
+    collisionDebug.lastCollision = null;
+    collisionDebug.group = null;
+    collisionDebug.playerWire = null;
+    collisionDebug.opponentWire = null;
+    collisionDebug.headingArrow = null;
+    collisionDebug.velocityArrow = null;
+    collisionDebug.responseArrow = null;
+    collisionDebug.railWiresByHandle.clear();
     if (car) {
       disposeObject3DTree(car);
       car = null;
@@ -1066,6 +1161,77 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
       disposePhysicsState(physics);
       physics = null;
     }
+    updateCollisionDebugVisibility();
+  }
+
+  function ensureCollisionDebugVisuals() {
+    if (!scene || !physics || collisionDebug.group) {
+      return;
+    }
+
+    const group = new THREE.Group();
+    group.name = "collision-debug";
+    collisionDebug.group = group;
+
+    collisionDebug.playerWire = createCollisionWireBox(
+      physicsConfig.carHalfWidth * 2,
+      physicsConfig.carHalfHeight * 2,
+      physicsConfig.carHalfLength * 2,
+      collisionDebugColors.player
+    );
+    collisionDebug.opponentWire = createCollisionWireBox(
+      physicsConfig.carHalfWidth * 2,
+      physicsConfig.carHalfHeight * 2,
+      physicsConfig.carHalfLength * 2,
+      collisionDebugColors.opponent
+    );
+
+    group.add(collisionDebug.playerWire, collisionDebug.opponentWire);
+
+    for (const rail of physics.debugRailColliders) {
+      const wire = createCollisionWireBox(
+        rail.length,
+        physicsConfig.railHalfHeight * 2,
+        physicsConfig.railHalfDepth * 2,
+        collisionDebugColors.rail
+      );
+      wire.position.set(rail.midpoint.x, physicsConfig.railHalfHeight, rail.midpoint.y);
+      wire.rotation.y = rail.yaw;
+      collisionDebug.railWiresByHandle.set(rail.handle, wire);
+      group.add(wire);
+    }
+
+    collisionDebug.headingArrow = createDebugArrow(collisionDebugColors.heading);
+    collisionDebug.velocityArrow = createDebugArrow(collisionDebugColors.velocity);
+    collisionDebug.responseArrow = createDebugArrow(collisionDebugColors.response);
+    group.add(collisionDebug.headingArrow, collisionDebug.velocityArrow, collisionDebug.responseArrow);
+    scene.add(group);
+    updateCollisionDebugVisibility();
+  }
+
+  function createCollisionWireBox(width, height, depth, color) {
+    const geometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(width, height, depth));
+    const material = new THREE.LineBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.94,
+      depthTest: false
+    });
+    const wire = new THREE.LineSegments(geometry, material);
+    wire.renderOrder = 1000;
+    return wire;
+  }
+
+  function createDebugArrow(color) {
+    const arrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(), 1, color, 0.5, 0.28);
+    arrow.visible = false;
+    arrow.line.material.depthTest = false;
+    arrow.line.renderOrder = 1001;
+    if (arrow.cone?.material) {
+      arrow.cone.material.depthTest = false;
+      arrow.cone.renderOrder = 1001;
+    }
+    return arrow;
   }
 
   function createLights() {
@@ -1303,6 +1469,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
       world,
       eventQueue: new RAPIER.EventQueue(true),
       colliderTags: new Map(),
+      debugRailColliders: [],
       playerBody: null,
       playerCollider: null,
       opponentBody: null,
@@ -1385,6 +1552,12 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
           .setRestitution(0.04)
       );
       physics.colliderTags.set(railCollider.handle, "rail");
+      physics.debugRailColliders.push({
+        handle: railCollider.handle,
+        midpoint: midpoint.clone(),
+        yaw,
+        length
+      });
     }
   }
 
@@ -2920,6 +3093,8 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
       updateBoostEffect(timestamp);
       updateOpponentTransform();
       updateCamera(deltaSeconds);
+      updateCollisionDebugVisuals();
+      updateCollisionDebugHud();
     }
 
     updateHud();
@@ -3195,9 +3370,11 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
       const tag = physics.colliderTags.get(otherHandle);
       const current = physics.playerBody.linvel();
       let responseVelocity = null;
+      let impactNormal = null;
+      const headingBeforeImpact = state.heading;
 
       if (tag === "rail") {
-        const impactNormal = currentRailImpactNormal();
+        impactNormal = currentRailImpactNormal();
         responseVelocity = resolveRailImpactVelocity(
           new THREE.Vector2(current.x, current.z),
           impactNormal
@@ -3209,9 +3386,10 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
         state.stoppedByImpactSeconds = Math.max(state.stoppedByImpactSeconds, collisionConfig.stopSeconds);
       } else if (tag === "opponent" && raceState.opponentEnabled) {
         const opponentDelta = state.position.clone().sub(opponentState.position).normalize();
+        impactNormal = opponentDelta.lengthSq() > 0.0001 ? opponentDelta : forwardVector();
         responseVelocity = resolveImpactVelocity(
           new THREE.Vector2(current.x, current.z),
-          opponentDelta.lengthSq() > 0.0001 ? opponentDelta : forwardVector(),
+          impactNormal,
           0.56,
           0.24
         );
@@ -3227,6 +3405,15 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
 
       if (responseVelocity) {
         applyCollisionHeading(responseVelocity);
+        recordCollisionDebug({
+          tag: tag ?? "unknown",
+          handle: otherHandle,
+          currentVelocity: new THREE.Vector2(current.x, current.z),
+          responseVelocity,
+          impactNormal,
+          headingBefore: headingBeforeImpact,
+          headingAfter: state.heading
+        });
       }
     });
   }
@@ -3290,6 +3477,29 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     state.heading = normalizeAngle(
       state.heading + clamp(headingDelta, -collisionConfig.headingCorrectionMax, collisionConfig.headingCorrectionMax)
     );
+  }
+
+  function recordCollisionDebug({
+    tag,
+    handle,
+    currentVelocity,
+    responseVelocity,
+    impactNormal,
+    headingBefore,
+    headingAfter
+  }) {
+    collisionDebug.lastCollision = {
+      tag,
+      handle,
+      timeSeconds: raceState.elapsedSeconds,
+      preSpeed: currentVelocity.length(),
+      postSpeed: responseVelocity.length(),
+      headingDelta: shortestAngleDelta(headingBefore, headingAfter),
+      responseVelocity: responseVelocity.clone(),
+      impactNormalLabel: impactNormal
+        ? `${impactNormal.x.toFixed(2)}, ${impactNormal.y.toFixed(2)}`
+        : "--"
+    };
   }
 
   function resolveImpactVelocity(velocity, surfaceNormal, tangentDamping, bounceFactor) {
@@ -3485,6 +3695,128 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     }
   }
 
+  function updateCollisionDebugVisuals() {
+    if (!collisionDebug.enabled) {
+      updateCollisionDebugVisibility();
+      return;
+    }
+
+    ensureCollisionDebugVisuals();
+    if (!collisionDebug.group || !collisionDebug.playerWire || !collisionDebug.opponentWire) {
+      return;
+    }
+
+    const playerBodyHeight = physicsConfig.fixedHeight;
+    collisionDebug.playerWire.position.set(state.position.x, playerBodyHeight, state.position.y);
+    collisionDebug.playerWire.rotation.set(0, state.heading, 0);
+
+    collisionDebug.opponentWire.visible = raceState.opponentEnabled;
+    if (raceState.opponentEnabled) {
+      collisionDebug.opponentWire.position.set(opponentState.position.x, playerBodyHeight, opponentState.position.y);
+      collisionDebug.opponentWire.rotation.set(0, opponentState.heading, 0);
+    }
+
+    const activeImpactHandle = collisionDebug.lastCollision && raceState.elapsedSeconds - collisionDebug.lastCollision.timeSeconds < 1.25
+      ? collisionDebug.lastCollision.handle
+      : null;
+    setWireColor(collisionDebug.playerWire, collisionDebugColors.player);
+    setWireColor(collisionDebug.opponentWire, activeImpactHandle === physics?.opponentCollider?.handle ? collisionDebugColors.impact : collisionDebugColors.opponent);
+    for (const [handle, wire] of collisionDebug.railWiresByHandle) {
+      setWireColor(wire, handle === activeImpactHandle ? collisionDebugColors.impact : collisionDebugColors.rail);
+    }
+
+    const arrowOrigin = new THREE.Vector3(state.position.x, playerBodyHeight + 0.2, state.position.y);
+    setDebugArrow(
+      collisionDebug.headingArrow,
+      arrowOrigin,
+      new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading)),
+      3.6,
+      true
+    );
+
+    const velocitySpeed = state.velocity.length();
+    setDebugArrow(
+      collisionDebug.velocityArrow,
+      arrowOrigin.clone().add(new THREE.Vector3(0, 0.2, 0)),
+      new THREE.Vector3(state.velocity.x, 0, state.velocity.y),
+      clamp(velocitySpeed * 0.28, 0.8, 5.4),
+      velocitySpeed > 0.08
+    );
+
+    const responseVector = collisionDebug.lastCollision?.responseVelocity;
+    const responseAge = collisionDebug.lastCollision ? raceState.elapsedSeconds - collisionDebug.lastCollision.timeSeconds : Number.POSITIVE_INFINITY;
+    setDebugArrow(
+      collisionDebug.responseArrow,
+      arrowOrigin.clone().add(new THREE.Vector3(0, 0.4, 0)),
+      responseVector ? new THREE.Vector3(responseVector.x, 0, responseVector.y) : new THREE.Vector3(),
+      clamp((responseVector?.length() ?? 0) * 0.28, 0.8, 5.4),
+      Boolean(responseVector) && responseAge < 1.5
+    );
+  }
+
+  function setWireColor(wire, color) {
+    if (!wire?.material?.color) {
+      return;
+    }
+    wire.material.color.setHex(color);
+  }
+
+  function setDebugArrow(arrow, origin, direction, length, visible) {
+    if (!arrow) {
+      return;
+    }
+
+    arrow.visible = visible;
+    if (!visible) {
+      return;
+    }
+
+    const normalized = direction.clone().normalize();
+    if (!Number.isFinite(normalized.x) || direction.lengthSq() < 0.000001) {
+      arrow.visible = false;
+      return;
+    }
+
+    arrow.position.copy(origin);
+    arrow.setDirection(normalized);
+    arrow.setLength(length, 0.5, 0.28);
+  }
+
+  function updateCollisionDebugHud() {
+    if (!collisionDebug.enabled) {
+      updateCollisionDebugVisibility();
+      return;
+    }
+
+    const hud = ensureCollisionDebugHud();
+    const headingDegrees = THREE.MathUtils.radToDeg(state.heading);
+    const velocityHeading = state.velocity.lengthSq() > 0.0001
+      ? THREE.MathUtils.radToDeg(Math.atan2(state.velocity.x, state.velocity.y))
+      : null;
+    const lastCollision = collisionDebug.lastCollision;
+    const lastCollisionLines = lastCollision
+      ? [
+          `last ${lastCollision.tag}  t=${lastCollision.timeSeconds.toFixed(2)}s`,
+          `pre  ${lastCollision.preSpeed.toFixed(2)} m/s`,
+          `post ${lastCollision.postSpeed.toFixed(2)} m/s`,
+          `turn ${THREE.MathUtils.radToDeg(lastCollision.headingDelta).toFixed(1)} deg`,
+          `impact ${lastCollision.impactNormalLabel}`
+        ]
+      : ["last none"];
+
+    hud.textContent = [
+      "Collision Debug  [F2]",
+      `preset ${drivingFeelPreset.id}`,
+      `onRoad ${state.onRoad ? "yes" : "no"}  paused ${raceState.paused ? "yes" : "no"}`,
+      `speed ${(state.velocity.length() * 3.6).toFixed(0)} km/h`,
+      `heading ${headingDegrees.toFixed(1)} deg`,
+      `velocity ${velocityHeading === null ? "--" : velocityHeading.toFixed(1)} deg`,
+      `player box ${(physicsConfig.carHalfWidth * 2).toFixed(2)} x ${(physicsConfig.carHalfHeight * 2).toFixed(2)} x ${(physicsConfig.carHalfLength * 2).toFixed(2)}`,
+      ...lastCollisionLines
+    ].join("\n");
+    updateCollisionDebugVisibility();
+  }
+
   function updateCamera(deltaSeconds) {
     const speedRatio = clamp(state.velocity.length() / Math.max(playerMaxForwardSpeed(), 0.0001), 0, 1);
     const dynamicLookAhead = cameraConfig.lookAhead + cameraConfig.speedLookAheadBoost * speedRatio;
@@ -3559,6 +3891,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   function resetRace() {
     hideResultOverlay();
     pauseOverlay.hidden = true;
+    collisionDebug.lastCollision = null;
 
     const start = trackProfileAtProgress(raceConfig.startProgress);
     const startPosition = start.center.clone().add(start.normal.clone().multiplyScalar(2.8));
@@ -3812,8 +4145,13 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   }
 
   function handleKeyDown(event) {
-    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "KeyW", "KeyA", "KeyS", "KeyD", "KeyE", "KeyH", "KeyR", "Escape"].includes(event.code)) {
+    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "KeyW", "KeyA", "KeyS", "KeyD", "KeyE", "KeyH", "KeyR", "Escape", "F2"].includes(event.code)) {
       event.preventDefault();
+    }
+
+    if (event.code === "F2" && !event.repeat) {
+      setCollisionDebugEnabled(!collisionDebug.enabled);
+      return;
     }
 
     if (isStartOverlayVisible()) {
@@ -4102,6 +4440,8 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
       updateCarTransform();
       updateOpponentTransform();
       updateCamera(1 / 60);
+      updateCollisionDebugVisuals();
+      updateCollisionDebugHud();
       renderer.render(scene, camera);
     }
   }
