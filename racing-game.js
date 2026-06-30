@@ -49,6 +49,7 @@ const carSurfaceExclusionPatterns = [
 ];
 const carModelLoader = createCarModelLoader();
 const carTemplatePromises = new Map();
+const distanceMarkerTextureCache = new Map();
 const rapierReadyPromise = RAPIER.init();
 const upAxis = new THREE.Vector3(0, 1, 0);
 const tempQuaternion = new THREE.Quaternion();
@@ -1348,10 +1349,13 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     road.receiveShadow = true;
     scene.add(road);
 
+    addTrackVerges();
+    addInfieldSurface();
     addStartFinishLines();
     addLaneMarks();
     addGuardRails();
     addRoadsideProps();
+    addVenueCluster();
     addFoliage();
   }
 
@@ -1406,6 +1410,93 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
       shoulder.receiveShadow = false;
       scene.add(shoulder);
     }
+  }
+
+  function addTrackVerges() {
+    const texture = createVergeTexture(trackSurface);
+    const vergeColor = isGravelSurface ? 0x7f7a55 : 0x6f9a4f;
+    const outerOffset = isGravelSurface ? 1.42 : 1.78;
+
+    for (const side of [1, -1]) {
+      const verge = createTrackBandMesh({
+        side,
+        innerOffset: 0.42,
+        outerOffset,
+        height: 0.072,
+        color: vergeColor,
+        texture
+      });
+      verge.receiveShadow = false;
+      scene.add(verge);
+    }
+  }
+
+  function addInfieldSurface() {
+    if (!trackModel.closed || trackSamples.length < 3) {
+      return;
+    }
+
+    const shape = new THREE.Shape();
+    trackSamples.forEach((sample, index) => {
+      if (index === 0) {
+        shape.moveTo(sample.center.x, sample.center.y);
+      } else {
+        shape.lineTo(sample.center.x, sample.center.y);
+      }
+    });
+    shape.closePath();
+
+    const infield = new THREE.Mesh(
+      new THREE.ShapeGeometry(shape),
+      new THREE.MeshStandardMaterial({
+        color: isGravelSurface ? 0x7d8d63 : 0x6d9251,
+        map: createInfieldTexture(trackSurface),
+        roughness: 0.97,
+        metalness: 0,
+        fog: true
+      })
+    );
+    infield.rotation.x = -Math.PI / 2;
+    infield.position.y = 0.028;
+    infield.receiveShadow = false;
+    scene.add(infield);
+
+    addInfieldPads();
+  }
+
+  function addInfieldPads() {
+    const startSample = trackProfileAtProgress(raceConfig.startProgress);
+    const infieldSide = trackModel.closed && startSample.center.clone().sub(sceneCenter).dot(startSample.normal) >= 0 ? -1 : 1;
+    const padCenter = startSample.center
+      .clone()
+      .add(startSample.normal.clone().multiplyScalar(trackConfig.width * 0.24 * infieldSide))
+      .add(startSample.tangent.clone().multiplyScalar(9.5));
+
+    const padGroup = new THREE.Group();
+    padGroup.position.set(padCenter.x, 0.035, padCenter.y);
+    padGroup.rotation.y = startSample.heading;
+
+    const apron = new THREE.Mesh(
+      new THREE.PlaneGeometry(18, 8.4),
+      new THREE.MeshStandardMaterial({
+        color: 0x80878b,
+        map: createServicePadTexture(),
+        roughness: 0.88,
+        metalness: 0.02,
+        side: THREE.DoubleSide
+      })
+    );
+    apron.rotation.x = -Math.PI / 2;
+
+    const stripeMaterial = new THREE.MeshStandardMaterial({ color: 0xf1f4f6, roughness: 0.54 });
+    for (let index = 0; index < 3; index += 1) {
+      const bay = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.02, 6.2), stripeMaterial);
+      bay.position.set(-4.8 + index * 4.8, 0.02, -0.4);
+      padGroup.add(bay);
+    }
+
+    padGroup.add(apron);
+    scene.add(padGroup);
   }
 
   function createTerrainPlane({
@@ -1851,6 +1942,95 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     return finalizeCanvasTexture(canvas);
   }
 
+  function createVergeTexture(surface) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 512;
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      return null;
+    }
+
+    if (surface === TRACK_SURFACES.GRAVEL) {
+      const gradient = context.createLinearGradient(0, 0, canvas.width, 0);
+      gradient.addColorStop(0, "#6e7a55");
+      gradient.addColorStop(0.4, "#897f5a");
+      gradient.addColorStop(1, "#6f6a49");
+      context.fillStyle = gradient;
+      context.fillRect(0, 0, canvas.width, canvas.height);
+
+      for (let index = 0; index < 1100; index += 1) {
+        const tone = 104 + Math.floor(Math.random() * 46);
+        context.fillStyle = `rgba(${tone}, ${tone - 8}, ${76 + Math.floor(Math.random() * 16)}, ${0.08 + Math.random() * 0.1})`;
+        const size = 1 + Math.random() * 3;
+        context.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, size, size);
+      }
+      return finalizeCanvasTexture(canvas);
+    }
+
+    const gradient = context.createLinearGradient(0, 0, canvas.width, 0);
+    gradient.addColorStop(0, "#5a8441");
+    gradient.addColorStop(0.58, "#84a85a");
+    gradient.addColorStop(1, "#5a7b3f");
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let index = 0; index < 14; index += 1) {
+      context.fillStyle = index % 2 === 0 ? "rgba(206, 228, 171, 0.15)" : "rgba(41, 77, 32, 0.1)";
+      context.fillRect((index / 14) * canvas.width, 0, canvas.width / 18, canvas.height);
+    }
+
+    for (let index = 0; index < 520; index += 1) {
+      context.fillStyle = `rgba(${76 + Math.floor(Math.random() * 28)}, ${112 + Math.floor(Math.random() * 40)}, ${56 + Math.floor(Math.random() * 24)}, ${0.05 + Math.random() * 0.08})`;
+      const width = 6 + Math.random() * 22;
+      const height = 2 + Math.random() * 7;
+      context.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, width, height);
+    }
+
+    return finalizeCanvasTexture(canvas);
+  }
+
+  function createInfieldTexture(surface) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 512;
+    canvas.height = 512;
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      return null;
+    }
+
+    const base = surface === TRACK_SURFACES.GRAVEL ? "#72845d" : "#688d4b";
+    const stripeA = surface === TRACK_SURFACES.GRAVEL ? "rgba(140, 148, 109, 0.14)" : "rgba(164, 196, 111, 0.13)";
+    const stripeB = surface === TRACK_SURFACES.GRAVEL ? "rgba(84, 94, 67, 0.12)" : "rgba(56, 92, 41, 0.1)";
+    context.fillStyle = base;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let index = 0; index < 18; index += 1) {
+      context.fillStyle = index % 2 === 0 ? stripeA : stripeB;
+      context.fillRect(0, (index / 18) * canvas.height, canvas.width, canvas.height / 20);
+    }
+
+    for (let index = 0; index < 760; index += 1) {
+      context.fillStyle = `rgba(${92 + Math.floor(Math.random() * 42)}, ${112 + Math.floor(Math.random() * 48)}, ${68 + Math.floor(Math.random() * 28)}, ${0.04 + Math.random() * 0.05})`;
+      const radius = 4 + Math.random() * 18;
+      context.beginPath();
+      context.ellipse(
+        Math.random() * canvas.width,
+        Math.random() * canvas.height,
+        radius,
+        radius * (0.32 + Math.random() * 0.55),
+        Math.random() * Math.PI,
+        0,
+        Math.PI * 2
+      );
+      context.fill();
+    }
+
+    return finalizeCanvasTexture(canvas);
+  }
+
   function createGroundTexture({ base, accent, soil, dry }) {
     const canvas = document.createElement("canvas");
     canvas.width = 512;
@@ -1922,6 +2102,31 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     context.fillRect(canvas.width * 0.08, 0, canvas.width * 0.12, canvas.height);
     context.fillStyle = "rgba(90, 84, 67, 0.2)";
     context.fillRect(canvas.width * 0.82, 0, canvas.width * 0.18, canvas.height);
+    return finalizeCanvasTexture(canvas);
+  }
+
+  function createServicePadTexture() {
+    const canvas = document.createElement("canvas");
+    canvas.width = 512;
+    canvas.height = 256;
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      return null;
+    }
+
+    context.fillStyle = "#737a7f";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "rgba(255, 255, 255, 0.06)";
+    for (let index = 0; index < 12; index += 1) {
+      context.fillRect(index * 44, 0, 18, canvas.height);
+    }
+    context.fillStyle = "rgba(26, 32, 38, 0.14)";
+    for (let index = 0; index < 900; index += 1) {
+      const size = 1 + Math.random() * 3;
+      context.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, size, size);
+    }
+
     return finalizeCanvasTexture(canvas);
   }
 
@@ -2001,6 +2206,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
 
   function addRoadsideProps() {
     addReflectorPosts();
+    addDistanceMarkers();
     addSponsorBoards();
     addTireStacks();
   }
@@ -2053,6 +2259,103 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     capMesh.instanceMatrix.needsUpdate = true;
 
     scene.add(postMesh, capMesh);
+  }
+
+  function addDistanceMarkers() {
+    const corners = findCornerMarkerAnchors(Math.min(6, Math.max(2, Math.floor(trackLength / 90))));
+    if (corners.length === 0) {
+      return;
+    }
+
+    const markerSpecs = [
+      { label: "150", distance: 26 },
+      { label: "100", distance: 16 },
+      { label: "50", distance: 8 }
+    ];
+
+    for (const corner of corners) {
+      for (const spec of markerSpecs) {
+        const progressDelta = spec.distance / Math.max(trackLength, 0.0001);
+        const progress = trackModel.closed
+          ? wrapProgress(corner.progress - progressDelta)
+          : clamp(corner.progress - progressDelta, 0.02, 0.98);
+        const sample = trackProfileAtProgress(progress);
+        const offset = sample.railOffset + 2.2;
+        const position = sample.center
+          .clone()
+          .add(sample.normal.clone().multiplyScalar(offset * corner.outerSide));
+
+        const group = new THREE.Group();
+        group.position.set(position.x, 0, position.y);
+        group.rotation.y = sample.heading + (corner.outerSide > 0 ? Math.PI / 2 : -Math.PI / 2);
+
+        const board = new THREE.Mesh(
+          new THREE.PlaneGeometry(1.4, 1.6),
+          new THREE.MeshStandardMaterial({
+            map: createDistanceMarkerTexture(spec.label),
+            color: 0xffffff,
+            roughness: 0.5,
+            metalness: 0.02,
+            side: THREE.DoubleSide
+          })
+        );
+        board.position.set(0, 1.46, 0);
+        board.castShadow = true;
+
+        const post = new THREE.Mesh(
+          new THREE.BoxGeometry(0.08, 1.52, 0.08),
+          new THREE.MeshStandardMaterial({ color: 0x666c73, roughness: 0.82 })
+        );
+        post.position.set(0, 0.76, -0.06);
+        post.castShadow = true;
+
+        group.add(board, post);
+        scene.add(group);
+      }
+    }
+  }
+
+  function findCornerMarkerAnchors(limit) {
+    const candidates = [];
+    const totalSamples = trackSamples.length;
+    if (totalSamples < 6) {
+      return candidates;
+    }
+
+    for (let index = 0; index < totalSamples; index += 1) {
+      const previous = trackSamples[wrapIndex(index - 2, totalSamples)];
+      const current = trackSamples[index];
+      const next = trackSamples[wrapIndex(index + 2, totalSamples)];
+      const headingDelta = shortestAngleDelta(previous.heading, next.heading);
+      const strength = Math.abs(headingDelta);
+      if (strength < 0.24) {
+        continue;
+      }
+
+      candidates.push({
+        progress: current.progress ?? sampleProgressForIndex(index, totalSamples),
+        strength,
+        outerSide: headingDelta > 0 ? -1 : 1
+      });
+    }
+
+    candidates.sort((left, right) => right.strength - left.strength);
+    const selected = [];
+    const minSpacing = 52 / Math.max(trackLength, 0.0001);
+
+    for (const candidate of candidates) {
+      if (selected.length >= limit) {
+        break;
+      }
+
+      if (selected.some((entry) => circularProgressDistance(entry.progress, candidate.progress) < minSpacing)) {
+        continue;
+      }
+
+      selected.push(candidate);
+    }
+
+    return selected;
   }
 
   function addSponsorBoards() {
@@ -2160,6 +2463,93 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     }
 
     return placements;
+  }
+
+  function addVenueCluster() {
+    const startSample = trackProfileAtProgress(raceConfig.startProgress);
+    const outwardSide = trackModel.closed && startSample.center.clone().sub(sceneCenter).dot(startSample.normal) >= 0 ? 1 : -1;
+    const anchor = startSample.center
+      .clone()
+      .add(startSample.normal.clone().multiplyScalar((startSample.railOffset + 12) * outwardSide))
+      .add(startSample.tangent.clone().multiplyScalar(-6));
+
+    const group = new THREE.Group();
+    group.position.set(anchor.x, 0, anchor.y);
+    group.rotation.y = startSample.heading + (outwardSide > 0 ? Math.PI / 2 : -Math.PI / 2);
+
+    const buildingMaterial = new THREE.MeshStandardMaterial({ color: 0xc6cbcf, roughness: 0.72 });
+    const roofMaterial = new THREE.MeshStandardMaterial({ color: 0x343b44, roughness: 0.64 });
+    const glassMaterial = new THREE.MeshStandardMaterial({
+      color: 0x87aac2,
+      emissive: 0x17303d,
+      emissiveIntensity: 0.18,
+      roughness: 0.22,
+      metalness: 0.08
+    });
+
+    const baseHall = new THREE.Mesh(new THREE.BoxGeometry(8.5, 2.8, 4.2), buildingMaterial);
+    baseHall.position.set(0, 1.4, 0);
+    baseHall.castShadow = true;
+    baseHall.receiveShadow = true;
+
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(9.4, 0.26, 4.9), roofMaterial);
+    roof.position.set(0, 2.86, 0);
+    roof.castShadow = true;
+
+    const glassBand = new THREE.Mesh(new THREE.BoxGeometry(7.2, 0.56, 0.08), glassMaterial);
+    glassBand.position.set(0, 1.92, 2.12);
+
+    const tower = new THREE.Mesh(new THREE.BoxGeometry(2.2, 5.4, 2.2), buildingMaterial);
+    tower.position.set(4.8, 2.7, -0.8);
+    tower.castShadow = true;
+
+    const towerRoof = new THREE.Mesh(new THREE.BoxGeometry(2.7, 0.24, 2.7), roofMaterial);
+    towerRoof.position.set(4.8, 5.52, -0.8);
+    towerRoof.castShadow = true;
+
+    const awning = new THREE.Mesh(
+      new THREE.BoxGeometry(8.8, 0.16, 1.2),
+      new THREE.MeshStandardMaterial({ color: 0xff7a3d, roughness: 0.54 })
+    );
+    awning.position.set(-0.2, 2.26, 2.76);
+    awning.castShadow = true;
+
+    const standStepsMaterial = new THREE.MeshStandardMaterial({ color: 0x737a80, roughness: 0.86 });
+    for (let index = 0; index < 4; index += 1) {
+      const step = new THREE.Mesh(
+        new THREE.BoxGeometry(4.8, 0.44, 1.5 + index * 0.42),
+        standStepsMaterial
+      );
+      step.position.set(-6.6, 0.22 + index * 0.44, -1.6 - index * 0.42);
+      step.castShadow = true;
+      step.receiveShadow = true;
+      group.add(step);
+    }
+
+    for (let index = 0; index < 2; index += 1) {
+      const mast = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.1, 0.12, 6.8, 8),
+        new THREE.MeshStandardMaterial({ color: 0xc8d0d8, roughness: 0.46, metalness: 0.28 })
+      );
+      mast.position.set(1.8 + index * 2.4, 3.4, -2.5);
+      mast.castShadow = true;
+      group.add(mast);
+
+      const lamp = new THREE.Mesh(
+        new THREE.BoxGeometry(0.8, 0.22, 0.22),
+        new THREE.MeshStandardMaterial({
+          color: 0xf5e7c5,
+          emissive: 0x7d5a22,
+          emissiveIntensity: 0.3,
+          roughness: 0.24
+        })
+      );
+      lamp.position.set(1.8 + index * 2.4, 6.56, -2.24);
+      group.add(lamp);
+    }
+
+    group.add(baseHall, roof, glassBand, tower, towerRoof, awning);
+    scene.add(group);
   }
 
   function addFoliage() {
@@ -2616,6 +3006,40 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     context.fillStyle = "#f8fafc";
     context.fillText("LINE", canvas.width * 0.7, canvas.height * 0.5);
     return finalizeCanvasTexture(canvas);
+  }
+
+  function createDistanceMarkerTexture(label) {
+    if (distanceMarkerTextureCache.has(label)) {
+      return distanceMarkerTextureCache.get(label);
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 320;
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      return null;
+    }
+
+    context.fillStyle = "#f7fafc";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "#e03b2f";
+    context.fillRect(0, 0, canvas.width, 30);
+    context.fillRect(0, canvas.height - 30, canvas.width, 30);
+    context.strokeStyle = "#101418";
+    context.lineWidth = 10;
+    context.strokeRect(8, 8, canvas.width - 16, canvas.height - 16);
+
+    context.fillStyle = "#101418";
+    context.font = "700 136px sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(label, canvas.width * 0.5, canvas.height * 0.54);
+
+    const texture = finalizeCanvasTexture(canvas);
+    distanceMarkerTextureCache.set(label, texture);
+    return texture;
   }
 
   async function createCar(carSpec, tint = null) {
@@ -4368,6 +4792,11 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
 
   function wrapProgress(progress) {
     return ((progress % 1) + 1) % 1;
+  }
+
+  function circularProgressDistance(left, right) {
+    const delta = Math.abs(wrapProgress(left) - wrapProgress(right));
+    return Math.min(delta, 1 - delta);
   }
 
   function wrapIndex(index, length) {
