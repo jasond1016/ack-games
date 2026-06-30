@@ -3,6 +3,7 @@ function createCarModelUrl(relativePath) {
 }
 
 export const racingSceneConfig = {
+  drivingFeelPreset: "arcade",
   visualScale: 2,
   collisionScale: 2,
   trackWidthOverride: 24,

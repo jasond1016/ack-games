@@ -52,6 +52,139 @@ const carTemplatePromises = new Map();
 const rapierReadyPromise = RAPIER.init();
 const upAxis = new THREE.Vector3(0, 1, 0);
 const tempQuaternion = new THREE.Quaternion();
+const defaultDrivingFeelPresetId = "arcade";
+const drivingFeelPresets = {
+  balanced: {
+    camera: {
+      speedFovBoost: 0,
+      speedFovResponse: 4,
+      speedLookAheadBoost: 0,
+      headingFollowTightness: 7.5
+    },
+    car: (isGravelSurface) => ({
+      maxForwardSpeed: 50,
+      maxReverseSpeed: 40 / 3.6,
+      engineForce: 35,
+      brakeForce: isGravelSurface ? 31 : 40,
+      reverseForce: 15,
+      drag: 0.028,
+      rollingResistance: 0.76,
+      roadGrip: isGravelSurface ? 6.4 : 9.4,
+      grassGrip: 2.9,
+      maxSteerRate: isGravelSurface ? 1.68 : 1.82
+    }),
+    handling: (isGravelSurface) => ({
+      steeringResponse: 0.3,
+      steeringReleaseResponse: 0.2,
+      lowSpeedSteerBoost: 1.42,
+      highSpeedSteerStart: 18,
+      highSpeedSteerEnd: 42,
+      highSpeedSteerMin: isGravelSurface ? 0.52 : 0.58,
+      steerFactorFloor: isGravelSurface ? 0.42 : 0.48,
+      driftEntrySpeed: isGravelSurface ? 7.4 : 9,
+      driftSustainSpeed: isGravelSurface ? 5.8 : 6.5,
+      driftSteerThreshold: isGravelSurface ? 0.18 : 0.22,
+      driftGripMultiplier: isGravelSurface ? 0.16 : 0.2,
+      driftBrakeMultiplier: 0.26,
+      driftTurnMultiplier: isGravelSurface ? 1.58 : 1.48,
+      driftYawAssist: isGravelSurface ? 0.74 : 0.62,
+      launchBoostThreshold: 12,
+      launchForceMultiplier: 1.18,
+      grassTopSpeedMultiplier: 0.66,
+      grassDragMultiplier: 1.55
+    }),
+    collision: {
+      stopSeconds: 0.16,
+      carStopSeconds: 0.12,
+      opponentPauseSeconds: 0.36,
+      headingResponseMinSpeed: 2.4,
+      headingCorrectionMax: 0.38,
+      headingIgnoreAngle: Math.PI * 0.65
+    },
+    railImpact: {
+      slideSpeedRetention: 0.62,
+      throttleSlideFloor: 3.8,
+      coastSlideFloor: 1.6,
+      tangentDamping: 0.34,
+      bounceFactor: 0.28,
+      maxSpeedMultiplier: 0.76
+    }
+  },
+  arcade: {
+    camera: {
+      fov: 58,
+      followDistance: 9.8,
+      height: 5.4,
+      lookAhead: 6.2,
+      targetHeight: 1.55,
+      followTightness: 6.8,
+      speedFovBoost: 8,
+      speedFovResponse: 5.4,
+      speedLookAheadBoost: 1.2,
+      headingFollowTightness: 5.2
+    },
+    car: (isGravelSurface) => ({
+      maxForwardSpeed: 50,
+      maxReverseSpeed: 40 / 3.6,
+      engineForce: 42,
+      brakeForce: isGravelSurface ? 35 : 44,
+      reverseForce: 16,
+      drag: 0.024,
+      rollingResistance: 0.68,
+      roadGrip: isGravelSurface ? 8 : 11.2,
+      grassGrip: 3.8,
+      maxSteerRate: isGravelSurface ? 1.82 : 1.96
+    }),
+    handling: (isGravelSurface) => ({
+      steeringResponse: 0.45,
+      steeringReleaseResponse: 0.32,
+      lowSpeedSteerBoost: 1.5,
+      highSpeedSteerStart: 20,
+      highSpeedSteerEnd: 46,
+      highSpeedSteerMin: isGravelSurface ? 0.68 : 0.74,
+      steerFactorFloor: isGravelSurface ? 0.6 : 0.64,
+      driftEntrySpeed: isGravelSurface ? 6.9 : 7.5,
+      driftSustainSpeed: isGravelSurface ? 5.3 : 5.8,
+      driftSteerThreshold: isGravelSurface ? 0.12 : 0.14,
+      driftGripMultiplier: isGravelSurface ? 0.26 : 0.3,
+      driftBrakeMultiplier: 0.36,
+      driftTurnMultiplier: isGravelSurface ? 1.72 : 1.6,
+      driftYawAssist: isGravelSurface ? 0.92 : 0.85,
+      launchBoostThreshold: 15,
+      launchForceMultiplier: 1.35,
+      grassTopSpeedMultiplier: 0.78,
+      grassDragMultiplier: 1
+    }),
+    collision: {
+      stopSeconds: 0.11,
+      carStopSeconds: 0.08,
+      opponentPauseSeconds: 0.22,
+      headingResponseMinSpeed: 2.8,
+      headingCorrectionMax: 0.32,
+      headingIgnoreAngle: Math.PI * 0.62
+    },
+    railImpact: {
+      slideSpeedRetention: 0.78,
+      throttleSlideFloor: 5.4,
+      coastSlideFloor: 2.4,
+      tangentDamping: 0.46,
+      bounceFactor: 0.22,
+      maxSpeedMultiplier: 0.84
+    }
+  }
+};
+
+function resolveDrivingFeelPreset(presetId, isGravelSurface) {
+  const preset = drivingFeelPresets[presetId] ?? drivingFeelPresets[defaultDrivingFeelPresetId];
+  return {
+    id: drivingFeelPresets[presetId] ? presetId : defaultDrivingFeelPresetId,
+    camera: { ...preset.camera },
+    car: preset.car(isGravelSurface),
+    handling: preset.handling(isGravelSurface),
+    collision: { ...preset.collision },
+    railImpact: { ...preset.railImpact }
+  };
+}
 
 function createCarModelLoader() {
   const loader = new GLTFLoader();
@@ -135,13 +268,21 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   const trackWidth = racingSceneConfig.trackWidthOverride ?? mapData.track.width;
   const trackSurface = mapData.track.surface;
   const isGravelSurface = trackSurface === TRACK_SURFACES.GRAVEL;
+  const drivingFeelPreset = resolveDrivingFeelPreset(
+    racingSceneConfig.drivingFeelPreset ?? defaultDrivingFeelPresetId,
+    isGravelSurface
+  );
   const cameraConfig = {
-    fov: racingSceneConfig.cameraFov ?? 58,
-    followDistance: racingSceneConfig.cameraFollowDistance ?? 11.8,
-    height: racingSceneConfig.cameraHeight ?? 6.4,
-    lookAhead: racingSceneConfig.cameraLookAhead ?? 4.2,
-    targetHeight: racingSceneConfig.cameraTargetHeight ?? 1.1,
-    followTightness: racingSceneConfig.cameraFollowTightness ?? 5.2
+    fov: drivingFeelPreset.camera.fov ?? racingSceneConfig.cameraFov ?? 58,
+    followDistance: drivingFeelPreset.camera.followDistance ?? racingSceneConfig.cameraFollowDistance ?? 11.8,
+    height: drivingFeelPreset.camera.height ?? racingSceneConfig.cameraHeight ?? 6.4,
+    lookAhead: drivingFeelPreset.camera.lookAhead ?? racingSceneConfig.cameraLookAhead ?? 4.2,
+    targetHeight: drivingFeelPreset.camera.targetHeight ?? racingSceneConfig.cameraTargetHeight ?? 1.1,
+    followTightness: drivingFeelPreset.camera.followTightness ?? racingSceneConfig.cameraFollowTightness ?? 5.2,
+    speedFovBoost: drivingFeelPreset.camera.speedFovBoost ?? 0,
+    speedFovResponse: drivingFeelPreset.camera.speedFovResponse ?? 4,
+    speedLookAheadBoost: drivingFeelPreset.camera.speedLookAheadBoost ?? 0,
+    headingFollowTightness: drivingFeelPreset.camera.headingFollowTightness ?? 7
   };
 
   const trackConfig = {
@@ -205,45 +346,10 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     sceneBounds.radius + 88
   );
 
-  const carConfig = {
-    maxForwardSpeed: 50,
-    maxReverseSpeed: 40 / 3.6,
-    engineForce: 35,
-    brakeForce: isGravelSurface ? 31 : 40,
-    reverseForce: 15,
-    drag: 0.028,
-    rollingResistance: 0.76,
-    roadGrip: isGravelSurface ? 6.4 : 9.4,
-    grassGrip: 2.9,
-    maxSteerRate: isGravelSurface ? 1.68 : 1.82
-  };
-
-  const handlingConfig = {
-    steeringResponse: 0.3,
-    steeringReleaseResponse: 0.2,
-    lowSpeedSteerBoost: 1.42,
-    highSpeedSteerStart: 18,
-    highSpeedSteerEnd: 42,
-    highSpeedSteerMin: isGravelSurface ? 0.52 : 0.58,
-    steerFactorFloor: isGravelSurface ? 0.42 : 0.48,
-    driftEntrySpeed: isGravelSurface ? 7.4 : 9,
-    driftSustainSpeed: isGravelSurface ? 5.8 : 6.5,
-    driftSteerThreshold: isGravelSurface ? 0.18 : 0.22,
-    driftGripMultiplier: isGravelSurface ? 0.16 : 0.2,
-    driftBrakeMultiplier: 0.26,
-    driftTurnMultiplier: isGravelSurface ? 1.58 : 1.48,
-    driftYawAssist: isGravelSurface ? 0.74 : 0.62,
-    launchBoostThreshold: 12,
-    launchForceMultiplier: 1.18,
-    grassTopSpeedMultiplier: 0.66,
-    grassDragMultiplier: 1.55
-  };
-
-  const collisionConfig = {
-    stopSeconds: 0.16,
-    carStopSeconds: 0.12,
-    opponentPauseSeconds: 0.36
-  };
+  const carConfig = drivingFeelPreset.car;
+  const handlingConfig = drivingFeelPreset.handling;
+  const collisionConfig = drivingFeelPreset.collision;
+  const railImpactConfig = drivingFeelPreset.railImpact;
 
   const opponentConfig = {
     speed: isGravelSurface ? Math.min(7.1, 26 / 3.6) : Math.min(8.2, 30 / 3.6),
@@ -318,6 +424,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   let renderer;
   let scene;
   let camera;
+  let cameraHeading = 0;
   let car;
   let opponentCar;
   let initialized = false;
@@ -373,6 +480,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
       carDistance: Number(state.position.distanceTo(opponentState.position).toFixed(2)),
       playerCar: formatCarLabel(selectedCar()),
       opponentCar: formatCarLabel(opponentCarSelection()),
+      drivingFeelPreset: drivingFeelPreset.id,
       visualScale,
       collisionScale,
       trackWidth: trackConfig.width,
@@ -3117,8 +3225,8 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
         );
       }
 
-      if (responseVelocity && responseVelocity.lengthSq() > 0.4) {
-        state.heading = Math.atan2(responseVelocity.x, responseVelocity.y);
+      if (responseVelocity) {
+        applyCollisionHeading(responseVelocity);
       }
     });
   }
@@ -3135,11 +3243,20 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     const tangentDirection = velocity.dot(trackTangent) >= 0 ? 1 : -1;
     const slideDirection = trackTangent.multiplyScalar(tangentDirection);
     const forwardTrackSpeed = Math.abs(velocity.dot(slideDirection));
-    const slideFloor = state.throttle > 0.1 ? 3.8 : 1.6;
-    const slideVelocity = slideDirection.multiplyScalar(Math.max(forwardTrackSpeed * 0.62, slideFloor));
-    const bounceVelocity = resolveImpactVelocity(velocity, surfaceNormal, 0.34, 0.28);
+    const slideFloor = state.throttle > 0.1
+      ? railImpactConfig.throttleSlideFloor
+      : railImpactConfig.coastSlideFloor;
+    const slideVelocity = slideDirection.multiplyScalar(
+      Math.max(forwardTrackSpeed * railImpactConfig.slideSpeedRetention, slideFloor)
+    );
+    const bounceVelocity = resolveImpactVelocity(
+      velocity,
+      surfaceNormal,
+      railImpactConfig.tangentDamping,
+      railImpactConfig.bounceFactor
+    );
 
-    return slideVelocity.add(bounceVelocity).clampLength(0, playerMaxForwardSpeed() * 0.76);
+    return slideVelocity.add(bounceVelocity).clampLength(0, playerMaxForwardSpeed() * railImpactConfig.maxSpeedMultiplier);
   }
 
   function separatePlayerFromImpact(surfaceNormal, distance) {
@@ -3155,6 +3272,23 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
         z: translation.z + surfaceNormal.y * distance
       },
       true
+    );
+  }
+
+  function applyCollisionHeading(responseVelocity) {
+    const responseSpeed = responseVelocity.length();
+    if (responseSpeed < collisionConfig.headingResponseMinSpeed) {
+      return;
+    }
+
+    const targetHeading = Math.atan2(responseVelocity.x, responseVelocity.y);
+    const headingDelta = shortestAngleDelta(state.heading, targetHeading);
+    if (Math.abs(headingDelta) >= collisionConfig.headingIgnoreAngle) {
+      return;
+    }
+
+    state.heading = normalizeAngle(
+      state.heading + clamp(headingDelta, -collisionConfig.headingCorrectionMax, collisionConfig.headingCorrectionMax)
     );
   }
 
@@ -3352,15 +3486,25 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   }
 
   function updateCamera(deltaSeconds) {
-    const forward = new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading));
+    const speedRatio = clamp(state.velocity.length() / Math.max(playerMaxForwardSpeed(), 0.0001), 0, 1);
+    const dynamicLookAhead = cameraConfig.lookAhead + cameraConfig.speedLookAheadBoost * speedRatio;
+    const headingFollow = 1 - Math.exp(-deltaSeconds * cameraConfig.headingFollowTightness);
+    cameraHeading = normalizeAngle(
+      cameraHeading + shortestAngleDelta(cameraHeading, state.heading) * headingFollow
+    );
+    const forward = new THREE.Vector3(Math.sin(cameraHeading), 0, Math.cos(cameraHeading));
     const target = new THREE.Vector3(state.position.x, cameraConfig.targetHeight, state.position.y)
-      .addScaledVector(forward, cameraConfig.lookAhead);
+      .addScaledVector(forward, dynamicLookAhead);
     const desired = new THREE.Vector3(state.position.x, 0, state.position.y)
       .addScaledVector(forward, -cameraConfig.followDistance)
       .add(new THREE.Vector3(0, cameraConfig.height, 0));
 
     const follow = 1 - Math.exp(-deltaSeconds * cameraConfig.followTightness);
     camera.position.lerp(desired, follow);
+    const targetFov = cameraConfig.fov + cameraConfig.speedFovBoost * speedRatio;
+    const fovFollow = 1 - Math.exp(-deltaSeconds * cameraConfig.speedFovResponse);
+    camera.fov += (targetFov - camera.fov) * fovFollow;
+    camera.updateProjectionMatrix();
     camera.lookAt(target);
   }
 
@@ -3422,6 +3566,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     state.position.copy(startPosition);
     state.velocity.set(0, 0);
     state.heading = start.heading;
+    cameraHeading = start.heading;
     state.steering = 0;
     state.throttle = 0;
     state.brake = 0;
@@ -3895,6 +4040,14 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     return Math.min(Math.max(value, min), max);
   }
 
+  function normalizeAngle(angle) {
+    return Math.atan2(Math.sin(angle), Math.cos(angle));
+  }
+
+  function shortestAngleDelta(from, to) {
+    return normalizeAngle(to - from);
+  }
+
   function randomBetween(min, max) {
     return min + Math.random() * (max - min);
   }
@@ -3927,6 +4080,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     state.previousPosition.copy(state.position);
     state.velocity.set(0, 0);
     state.heading = playerSample.heading;
+    cameraHeading = playerSample.heading;
     state.steering = 0;
     state.throttle = 0;
     state.brake = 0;
