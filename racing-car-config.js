@@ -169,6 +169,19 @@ export const racingCarCatalog = [
     modelRotationDegrees: 0
   },
   {
+    id: "centodieci",
+    make: "Bugatti",
+    name: "Centodieci",
+    tag: "限量超跑",
+    summary: "向 EB110 致敬的限量 Bugatti，低矮楔形轮廓适合作为车库里的稀有旗舰车型。",
+    accentColor: "#f4f4f0",
+    modelUrl: createCarModelUrl(
+      "./assets/cars/2020_bugatti_centodieci.glb"
+    ),
+    targetLength: 4.54,
+    modelRotationDegrees: 0
+  },
+  {
     id: "revuelto",
     make: "Lamborghini",
     name: "Revuelto",
