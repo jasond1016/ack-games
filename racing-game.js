@@ -107,6 +107,15 @@ const drivingFeelPresets = {
       stopSeconds: 0.16,
       carStopSeconds: 0.12,
       opponentPauseSeconds: 0.36,
+      playerOpponentForwardRetention: 0.48,
+      playerOpponentMinForwardSpeed: 2.8,
+      playerOpponentSideShove: 2.1,
+      opponentImpactSpeedMultiplier: 0.52,
+      opponentSpeedLoss: 2.4,
+      opponentLaneKick: 1.15,
+      opponentYawKick: 0.18,
+      opponentLaneRecovery: 3.2,
+      opponentYawRecovery: 3.8,
       headingResponseMinSpeed: 2.4,
       headingCorrectionMax: 0.38,
       headingIgnoreAngle: Math.PI * 0.65
@@ -169,6 +178,15 @@ const drivingFeelPresets = {
       stopSeconds: 0.11,
       carStopSeconds: 0.08,
       opponentPauseSeconds: 0.22,
+      playerOpponentForwardRetention: 0.62,
+      playerOpponentMinForwardSpeed: 4.2,
+      playerOpponentSideShove: 3.2,
+      opponentImpactSpeedMultiplier: 0.64,
+      opponentSpeedLoss: 2.8,
+      opponentLaneKick: 1.55,
+      opponentYawKick: 0.24,
+      opponentLaneRecovery: 4.6,
+      opponentYawRecovery: 5.4,
       headingResponseMinSpeed: 2.8,
       headingCorrectionMax: 0.32,
       headingIgnoreAngle: Math.PI * 0.62
@@ -408,6 +426,8 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     position: new THREE.Vector2(),
     heading: 0,
     laneOffset: opponentConfig.laneOffset,
+    collisionLaneOffset: 0,
+    collisionYawOffset: 0,
     onRoad: true,
     collisionHoldSeconds: 0,
     currentSpeed: opponentConfig.speed,
@@ -500,6 +520,8 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
         y: Number(opponentState.position.y.toFixed(2))
       },
       opponentHoldSeconds: Number(opponentState.collisionHoldSeconds.toFixed(2)),
+      opponentLaneImpact: Number(opponentState.collisionLaneOffset.toFixed(2)),
+      opponentYawImpact: Number(opponentState.collisionYawOffset.toFixed(2)),
       carDistance: Number(state.position.distanceTo(opponentState.position).toFixed(2)),
       playerCar: formatCarLabel(selectedCar()),
       opponentCar: formatCarLabel(opponentCarSelection()),
@@ -3643,26 +3665,40 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     }
 
     opponentState.collisionHoldSeconds = Math.max(0, opponentState.collisionHoldSeconds - deltaSeconds);
+    opponentState.collisionLaneOffset = moveToward(
+      opponentState.collisionLaneOffset,
+      0,
+      deltaSeconds * collisionConfig.opponentLaneRecovery
+    );
+    opponentState.collisionYawOffset = moveToward(
+      opponentState.collisionYawOffset,
+      0,
+      deltaSeconds * collisionConfig.opponentYawRecovery
+    );
     physics.opponentCollider.setEnabled(raceState.opponentEnabled);
 
     if (!raceState.opponentEnabled) {
       return;
     }
 
-    if (opponentState.collisionHoldSeconds === 0) {
-      if (!raceState.finished) {
-        opponentState.currentSpeed = moveToward(opponentState.currentSpeed, opponentConfig.speed, deltaSeconds * 6);
-      } else if (raceConfig.mode === "sprint") {
-        opponentState.currentSpeed = Math.max(0, opponentState.currentSpeed - deltaSeconds * 6.5);
-      } else {
-        opponentState.currentSpeed = 0;
-      }
-
-      const deltaProgress = (opponentState.currentSpeed * deltaSeconds) / Math.max(trackLength, 0.0001);
-      opponentState.progress = raceConfig.mode === "lap"
-        ? wrapProgress(opponentState.progress + deltaProgress)
-        : clamp(opponentState.progress + deltaProgress, 0, 1);
+    if (!raceState.finished) {
+      const targetSpeed = opponentConfig.speed * (
+        opponentState.collisionHoldSeconds > 0
+          ? collisionConfig.opponentImpactSpeedMultiplier
+          : 1
+      );
+      const speedRecovery = opponentState.collisionHoldSeconds > 0 ? 8.4 : 6;
+      opponentState.currentSpeed = moveToward(opponentState.currentSpeed, targetSpeed, deltaSeconds * speedRecovery);
+    } else if (raceConfig.mode === "sprint") {
+      opponentState.currentSpeed = Math.max(0, opponentState.currentSpeed - deltaSeconds * 6.5);
+    } else {
+      opponentState.currentSpeed = 0;
     }
+
+    const deltaProgress = (opponentState.currentSpeed * deltaSeconds) / Math.max(trackLength, 0.0001);
+    opponentState.progress = raceConfig.mode === "lap"
+      ? wrapProgress(opponentState.progress + deltaProgress)
+      : clamp(opponentState.progress + deltaProgress, 0, 1);
 
     syncOpponentPose();
     physics.opponentBody.setNextKinematicTranslation({
@@ -3811,11 +3847,10 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
       } else if (tag === "opponent" && raceState.opponentEnabled) {
         const opponentDelta = state.position.clone().sub(opponentState.position).normalize();
         impactNormal = opponentDelta.lengthSq() > 0.0001 ? opponentDelta : forwardVector();
-        responseVelocity = resolveImpactVelocity(
+        responseVelocity = resolveOpponentCarImpactVelocity(
           new THREE.Vector2(current.x, current.z),
           impactNormal,
-          0.56,
-          0.24
+          opponentState.currentSpeed
         );
         physics.playerBody.setLinvel({ x: responseVelocity.x, y: current.y, z: responseVelocity.y }, true);
         state.boostSeconds = 0;
@@ -3825,6 +3860,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
           opponentState.collisionHoldSeconds,
           collisionConfig.opponentPauseSeconds
         );
+        applyOpponentCollisionReaction(impactNormal);
       }
 
       if (responseVelocity) {
@@ -3870,6 +3906,27 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     return slideVelocity.add(bounceVelocity).clampLength(0, playerMaxForwardSpeed() * railImpactConfig.maxSpeedMultiplier);
   }
 
+  function resolveOpponentCarImpactVelocity(velocity, surfaceNormal, opponentForwardSpeed) {
+    const trackTangent = trackSamples[state.trackIndex].tangent.clone();
+    const tangentDirection = velocity.dot(trackTangent) >= 0 ? 1 : -1;
+    const forwardDirection = trackTangent.multiplyScalar(tangentDirection);
+    const currentForwardSpeed = Math.abs(velocity.dot(forwardDirection));
+    const preservedForwardSpeed = Math.max(
+      currentForwardSpeed * collisionConfig.playerOpponentForwardRetention,
+      Math.min(collisionConfig.playerOpponentMinForwardSpeed, playerMaxForwardSpeed() * 0.22)
+    );
+    const shoveDirection = surfaceNormal.clone().normalize();
+    const relativeSpeedBoost = clamp(opponentForwardSpeed / Math.max(opponentConfig.speed, 0.0001), 0.7, 1.3);
+    const shoveVelocity = shoveDirection.multiplyScalar(collisionConfig.playerOpponentSideShove * relativeSpeedBoost);
+    const bounceVelocity = resolveImpactVelocity(velocity, surfaceNormal, 0.58, 0.2);
+
+    return forwardDirection
+      .multiplyScalar(preservedForwardSpeed)
+      .add(shoveVelocity)
+      .add(bounceVelocity)
+      .clampLength(0, playerMaxForwardSpeed() * 0.78);
+  }
+
   function separatePlayerFromImpact(surfaceNormal, distance) {
     if (!physics?.playerBody || distance <= 0) {
       return;
@@ -3900,6 +3957,27 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
 
     state.heading = normalizeAngle(
       state.heading + clamp(headingDelta, -collisionConfig.headingCorrectionMax, collisionConfig.headingCorrectionMax)
+    );
+  }
+
+  function applyOpponentCollisionReaction(impactNormal) {
+    const sample = trackProfileAtProgress(opponentState.progress);
+    const lateralRelation = impactNormal.dot(sample.normal);
+    const fallbackLateral = state.velocity.dot(sample.normal);
+    const shoveDirection = Math.abs(lateralRelation) > 0.14
+      ? -Math.sign(lateralRelation)
+      : -(Math.sign(fallbackLateral) || 1);
+
+    opponentState.currentSpeed = Math.max(0, opponentState.currentSpeed - collisionConfig.opponentSpeedLoss);
+    opponentState.collisionLaneOffset = clamp(
+      opponentState.collisionLaneOffset + shoveDirection * collisionConfig.opponentLaneKick,
+      -sample.railLimit * 0.55,
+      sample.railLimit * 0.55
+    );
+    opponentState.collisionYawOffset = clamp(
+      opponentState.collisionYawOffset + shoveDirection * collisionConfig.opponentYawKick,
+      -0.5,
+      0.5
     );
   }
 
@@ -4114,8 +4192,8 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
 
     const visualRoot = opponentCar.userData.visualRoot;
     if (visualRoot) {
-      visualRoot.rotation.x = 0;
-      visualRoot.rotation.z = 0;
+      visualRoot.rotation.x = -Math.abs(opponentState.collisionYawOffset) * 0.08;
+      visualRoot.rotation.z = -opponentState.collisionYawOffset * 0.55;
     }
   }
 
@@ -4347,6 +4425,8 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
 
     opponentState.progress = opponentConfig.startProgress;
     opponentState.laneOffset = opponentConfig.laneOffset;
+    opponentState.collisionLaneOffset = 0;
+    opponentState.collisionYawOffset = 0;
     opponentState.onRoad = true;
     opponentState.collisionHoldSeconds = 0;
     opponentState.currentSpeed = opponentConfig.speed;
@@ -4687,14 +4767,14 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   function syncOpponentPose() {
     const sample = trackProfileAtProgress(opponentState.progress);
     const laneOffset = clamp(
-      opponentState.laneOffset,
+      opponentState.laneOffset + opponentState.collisionLaneOffset,
       -sample.railLimit + 1.4,
       sample.railLimit - 1.4
     );
     const position = sample.center.clone().add(sample.normal.clone().multiplyScalar(laneOffset));
 
     opponentState.position.copy(position);
-    opponentState.heading = sample.heading;
+    opponentState.heading = sample.heading + opponentState.collisionYawOffset;
     opponentState.onRoad = true;
     opponentState.raceProgress = relativeRaceProgress(opponentState.progress);
     return sample;
@@ -4840,6 +4920,8 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
 
     opponentState.progress = opponentProgress;
     opponentState.laneOffset = laneOffset;
+    opponentState.collisionLaneOffset = 0;
+    opponentState.collisionYawOffset = 0;
     opponentState.collisionHoldSeconds = 0;
     syncOpponentPose();
 
