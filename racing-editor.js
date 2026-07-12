@@ -1,4 +1,3 @@
-import * as THREE from "three";
 import { racingSceneConfig } from "./racing-car-config.js";
 import {
   cloneRacingMap,
@@ -8,18 +7,13 @@ import {
   racingMapLibrary
 } from "./racing-map.js";
 import {
-  buildTrackModel,
-  findTrackInsertionTarget,
-  getOpenFinishProgress,
   getTrackMinControlPoints,
   getTrackModeLabel,
   getTrackShapeLabel,
+  inspectRacingTrack,
   isLoopTrackShape,
-  projectPointOntoTrack,
   roundCoordinate,
-  sampleTrackModel,
-  validateRacingMap
-} from "./racing-track.js";
+} from "./racing-track.mjs";
 
 const pointRadius = 8;
 const nudgeStep = 0.8;
@@ -27,10 +21,18 @@ const startLineHitPadding = 2.6;
 const trackWidthOverride = racingSceneConfig.trackWidthOverride ?? null;
 
 function buildEditorPreviewModel(track) {
-  return buildTrackModel({
+  const semantics = inspectRacingTrack({
     ...track,
     width: trackWidthOverride ?? track.width
   });
+  return {
+    ...semantics.summary,
+    controlPoints: track.controlPoints.map(([x, z]) => ({ x, z })),
+    validation: semantics.validation,
+    sample: semantics.sample,
+    project: semantics.project,
+    findInsertion: semantics.findInsertion
+  };
 }
 
 export function createRacingEditor({ onPlay, onMapChanged } = {}) {
@@ -231,7 +233,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
   }
 
   function handleApply() {
-    const validation = validateRacingMap(mapData);
+    const validation = inspectRacingTrack(mapData.track).validation;
     if (!validation.valid) {
       setStatus(`赛道校验失败：${validation.errors[0]}`);
       return;
@@ -331,7 +333,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
     }
 
     if (event.shiftKey) {
-      const insertion = findTrackInsertionTarget(previewModel, world);
+      const insertion = previewModel.findInsertion(world);
       mapData.track.controlPoints.splice(
         insertion.index,
         0,
@@ -379,7 +381,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
       return;
     }
 
-    const projection = projectPointOntoTrack(previewModel, world);
+    const projection = previewModel.project(world);
     mapData.track.startPosition.progress = projection.progress;
     startLineSelected = true;
     syncUiState(false);
@@ -616,23 +618,23 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
     const sample = projectTrackLine(progress);
     return {
       center: sample.center,
-      start: sample.center.clone().add(sample.normal.clone().multiplyScalar(sample.halfWidth * 0.98)),
-      end: sample.center.clone().add(sample.normal.clone().multiplyScalar(-sample.halfWidth * 0.98))
+      start: offsetPoint(sample.center, sample.normal, sample.halfWidth * 0.98),
+      end: offsetPoint(sample.center, sample.normal, -sample.halfWidth * 0.98)
     };
   }
 
   function finishLineGeometry() {
-    const progress = getOpenFinishProgress(previewModel);
+    const progress = previewModel.finishProgress;
     const sample = projectTrackLine(progress);
     return {
       center: sample.center,
-      start: sample.center.clone().add(sample.normal.clone().multiplyScalar(sample.halfWidth * 0.98)),
-      end: sample.center.clone().add(sample.normal.clone().multiplyScalar(-sample.halfWidth * 0.98))
+      start: offsetPoint(sample.center, sample.normal, sample.halfWidth * 0.98),
+      end: offsetPoint(sample.center, sample.normal, -sample.halfWidth * 0.98)
     };
   }
 
   function projectTrackLine(progress) {
-    return sampleTrackModel(previewModel, progress);
+    return previewModel.sample(progress);
   }
 
   function render() {
@@ -695,8 +697,8 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
       return;
     }
 
-    const leftEdge = previewModel.samples.map((sample) => sample.center.clone().add(sample.normal.clone().multiplyScalar(sample.halfWidth)));
-    const rightEdge = previewModel.samples.map((sample) => sample.center.clone().add(sample.normal.clone().multiplyScalar(-sample.halfWidth)));
+    const leftEdge = previewModel.samples.map((sample) => offsetPoint(sample.center, sample.normal, sample.halfWidth));
+    const rightEdge = previewModel.samples.map((sample) => offsetPoint(sample.center, sample.normal, -sample.halfWidth));
 
     ctx.save();
     ctx.fillStyle = "#1f2024";
@@ -804,14 +806,10 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
 
   function drawDirectionCue() {
     const cueSample = previewModel.samples[Math.min(previewModel.samples.length - 1, Math.round(previewModel.samples.length * 0.12))];
-    const origin = cueSample.center.clone().sub(cueSample.tangent.clone().multiplyScalar(8));
-    const tip = cueSample.center.clone().add(cueSample.tangent.clone().multiplyScalar(8));
-    const leftWing = tip.clone()
-      .sub(cueSample.tangent.clone().multiplyScalar(2.8))
-      .add(cueSample.normal.clone().multiplyScalar(2.2));
-    const rightWing = tip.clone()
-      .sub(cueSample.tangent.clone().multiplyScalar(2.8))
-      .add(cueSample.normal.clone().multiplyScalar(-2.2));
+    const origin = offsetPoint(cueSample.center, cueSample.tangent, -8);
+    const tip = offsetPoint(cueSample.center, cueSample.tangent, 8);
+    const leftWing = offsetPoint(offsetPoint(tip, cueSample.tangent, -2.8), cueSample.normal, 2.2);
+    const rightWing = offsetPoint(offsetPoint(tip, cueSample.tangent, -2.8), cueSample.normal, -2.2);
 
     const start = worldToScreen(origin.x, origin.y);
     const end = worldToScreen(tip.x, tip.y);
@@ -924,9 +922,20 @@ function computeViewport(trackModel) {
 }
 
 function distanceToSegment(point, start, end) {
-  const pointVector = new THREE.Vector2(point.x, point.z);
-  const segment = end.clone().sub(start);
-  const segmentLengthSq = Math.max(segment.lengthSq(), 0.0001);
-  const t = Math.min(Math.max(pointVector.clone().sub(start).dot(segment) / segmentLengthSq, 0), 1);
-  return pointVector.distanceTo(start.clone().add(segment.multiplyScalar(t)));
+  const px = point.x;
+  const py = point.z ?? point.y;
+  const sx = start.x;
+  const sy = start.z ?? start.y;
+  const dx = end.x - sx;
+  const dy = (end.z ?? end.y) - sy;
+  const lengthSq = Math.max(dx * dx + dy * dy, 0.0001);
+  const mix = Math.min(Math.max(((px - sx) * dx + (py - sy) * dy) / lengthSq, 0), 1);
+  return Math.hypot(px - (sx + dx * mix), py - (sy + dy * mix));
+}
+
+function offsetPoint(point, direction, distance) {
+  return {
+    x: point.x + direction.x * distance,
+    y: point.y + direction.y * distance
+  };
 }

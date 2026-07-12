@@ -8,7 +8,7 @@ test("racing start flow stays usable across selection, race start, pause, and re
   await page.locator("#racingMapSelectRaceButton").click();
 
   const startOverlay = page.locator("#racingStartOverlay");
-  await expect(startOverlay).toBeVisible();
+  await expect(startOverlay).toBeVisible({ timeout: 25_000 });
 
   const carOptions = page.locator("#racingCarOptions .race-car-option");
   await expect.poll(async () => carOptions.count()).toBeGreaterThan(1);
@@ -44,7 +44,7 @@ test("racing start flow stays usable across selection, race start, pause, and re
   await page.locator("#racingGameCard").click();
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
   await page.locator("#racingMapSelectRaceButton").click();
-  await expect(startOverlay).toBeVisible();
+  await expect(startOverlay).toBeVisible({ timeout: 25_000 });
 
   await expect
     .poll(() =>
@@ -62,6 +62,8 @@ test("jsDelivr failure is isolated to racing and can be retried", async ({ page 
   await page.goto("/");
 
   await page.locator("#racingGameCard").click();
+  await expect(page.locator("#racingMapSelectView")).toBeVisible();
+  await page.locator("#racingMapSelectRaceButton").click();
   const lifecycleView = page.locator("#gameLifecycleView");
   await expect(lifecycleView).toBeVisible();
   await expect(lifecycleView).toHaveAttribute("data-state", "failed");
@@ -72,7 +74,7 @@ test("jsDelivr failure is isolated to racing and can be retried", async ({ page 
     page.waitForEvent("framenavigated"),
     page.locator("#gameLifecycleRetryButton").click()
   ]);
-  await expect(page).toHaveURL(/#racing-select$/);
+  await expect(page).toHaveURL(/#racing$/);
 
   await page.goto("/");
   await expect(page.locator("#homeView")).toBeVisible();

@@ -16,13 +16,9 @@ import {
 } from "./racing-start-config.js";
 import { TRACK_SURFACES, racingMapLibrary } from "./racing-map.js";
 import {
-  buildTrackModel,
-  getOpenFinishProgress,
-  getTrackModeForShape,
-  isLoopTrackShape,
-  projectPointOntoTrack,
-  sampleTrackModel
-} from "./racing-track.js";
+  createRacingTrackRuntimeAdapter,
+  inspectRacingTrack
+} from "./racing-track.mjs";
 import {
   disposeObject3DTree,
   disposePhysicsState,
@@ -379,20 +375,22 @@ export function createRacingGame({
     surface: trackSurface,
     width: trackWidth,
     samples: mapData.track.samples,
-    startProgress: isLoopTrackShape(mapData.track.shape) ? mapData.track.startPosition.progress : 0,
+    startProgress: mapData.track.startPosition?.progress ?? 0,
     controlPoints: mapData.track.controlPoints.map((point) => [...point])
   };
-  const trackModel = buildTrackModel(trackConfig);
+  const trackSemantics = inspectRacingTrack(trackConfig);
+  const trackRuntime = createRacingTrackRuntimeAdapter(trackConfig);
+  const trackModel = trackRuntime.model;
   const trackSamples = trackModel.samples;
   const trackLength = trackModel.totalLength;
-  const raceMode = getTrackModeForShape(trackConfig.shape);
+  const raceMode = trackSemantics.summary.raceMode;
   const raceModeLabel = raceMode === "lap" ? "闭环赛" : "点到点冲刺赛";
 
   const raceConfig = {
     mode: raceMode,
     totalLaps: 3,
     startProgress: trackConfig.startProgress,
-    finishProgress: raceMode === "sprint" ? getOpenFinishProgress(trackModel) : trackConfig.startProgress,
+    finishProgress: trackSemantics.summary.finishProgress,
     lapThreshold: 0.16,
     lapCooldownSeconds: 0.72,
     sprintGlideSeconds: 1.6,
@@ -4917,7 +4915,7 @@ export function createRacingGame({
   }
 
   function trackProfileAtProgress(progress) {
-    return sampleTrackModel(trackModel, progress);
+    return trackRuntime.sample(progress);
   }
 
   function syncOpponentPose() {
@@ -4946,7 +4944,7 @@ export function createRacingGame({
   }
 
   function closestTrackSample(position, preferredIndex = null) {
-    const projection = projectPointOntoTrack(trackModel, position, preferredIndex);
+    const projection = trackRuntime.project(position, preferredIndex);
     return {
       index: projection.segmentIndex,
       progress: projection.progress,

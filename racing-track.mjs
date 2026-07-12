@@ -1,38 +1,144 @@
-import * as THREE from "three";
+class Vector2 {
+  constructor(x = 0, y = 0) { this.x = x; this.y = y; }
+  set(x, y) { this.x = x; this.y = y; return this; }
+  clone() { return new Vector2(this.x, this.y); }
+  add(value) { this.x += value.x; this.y += value.y; return this; }
+  sub(value) { this.x -= value.x; this.y -= value.y; return this; }
+  multiplyScalar(value) { this.x *= value; this.y *= value; return this; }
+  lerp(value, mix) { this.x += (value.x - this.x) * mix; this.y += (value.y - this.y) * mix; return this; }
+  dot(value) { return this.x * value.x + this.y * value.y; }
+  lengthSq() { return this.x * this.x + this.y * this.y; }
+  length() { return Math.sqrt(this.lengthSq()); }
+  normalize() { const length = this.length() || 1; return this.multiplyScalar(1 / length); }
+  distanceTo(value) { return Math.sqrt(this.distanceToSquared(value)); }
+  distanceToSquared(value) { const x = this.x - value.x; const y = this.y - value.y; return x * x + y * y; }
+}
+
+class Vector3 {
+  constructor(x = 0, y = 0, z = 0) { this.x = x; this.y = y; this.z = z; }
+  clone() { return new Vector3(this.x, this.y, this.z); }
+  sub(value) { this.x -= value.x; this.y -= value.y; this.z -= value.z; return this; }
+  multiplyScalar(value) { this.x *= value; this.y *= value; this.z *= value; return this; }
+  length() { return Math.hypot(this.x, this.y, this.z); }
+  normalize() { const length = this.length() || 1; return this.multiplyScalar(1 / length); }
+  distanceTo(value) { return Math.hypot(this.x - value.x, this.y - value.y, this.z - value.z); }
+}
+
+class CatmullRomCurve3 {
+  constructor(points, closed = false) { this.points = points; this.closed = closed; this.arcLengths = null; }
+  getPoint(t) {
+    const points = this.points;
+    const count = points.length;
+    const scaled = (count - (this.closed ? 0 : 1)) * clamp(t, 0, 1);
+    let index = Math.floor(scaled);
+    let weight = scaled - index;
+    if (!this.closed && weight === 0 && index === count - 1) { index = count - 2; weight = 1; }
+    const point = (offset) => {
+      const target = index + offset;
+      if (this.closed) return points[wrapIndex(target, count)];
+      if (target < 0) return extrapolate(points[0], points[1]);
+      if (target >= count) return extrapolate(points[count - 1], points[count - 2]);
+      return points[target];
+    };
+    return centripetalPoint(point(-1), point(0), point(1), point(2), weight);
+  }
+  getPointAt(progress) { return this.getPoint(this.getUtoTmapping(clamp(progress, 0, 1))); }
+  getTangentAt(progress) {
+    const delta = 0.0001;
+    const before = this.getPointAt(Math.max(0, progress - delta));
+    const after = this.getPointAt(Math.min(1, progress + delta));
+    return after.sub(before).normalize();
+  }
+  getUtoTmapping(progress) {
+    const lengths = this.getLengths();
+    const target = progress * lengths[lengths.length - 1];
+    let low = 0;
+    let high = lengths.length - 1;
+    while (low <= high) {
+      const middle = Math.floor(low + (high - low) / 2);
+      if (lengths[middle] < target) low = middle + 1;
+      else if (lengths[middle] > target) high = middle - 1;
+      else return middle / (lengths.length - 1);
+    }
+    const index = Math.max(0, high);
+    const before = lengths[index];
+    const after = lengths[index + 1] ?? before;
+    const mix = after === before ? 0 : (target - before) / (after - before);
+    return (index + mix) / (lengths.length - 1);
+  }
+  getLengths(divisions = 200) {
+    if (this.arcLengths) return this.arcLengths;
+    const lengths = [0];
+    let sum = 0;
+    let previous = this.getPoint(0);
+    for (let index = 1; index <= divisions; index += 1) {
+      const current = this.getPoint(index / divisions);
+      sum += current.distanceTo(previous);
+      lengths.push(sum);
+      previous = current;
+    }
+    this.arcLengths = lengths;
+    return lengths;
+  }
+}
+
+function extrapolate(edge, neighbor) {
+  return new Vector3(2 * edge.x - neighbor.x, 2 * edge.y - neighbor.y, 2 * edge.z - neighbor.z);
+}
+
+function centripetalPoint(p0, p1, p2, p3, weight) {
+  const distance = (a, b) => Math.max(Math.pow(a.distanceTo(b), 0.5), 1e-4);
+  const t0 = 0;
+  const t1 = t0 + distance(p0, p1);
+  const t2 = t1 + distance(p1, p2);
+  const t3 = t2 + distance(p2, p3);
+  const t = t1 + (t2 - t1) * weight;
+  const interpolate = (a, b, ta, tb) => new Vector3(
+    ((tb - t) * a.x + (t - ta) * b.x) / (tb - ta),
+    ((tb - t) * a.y + (t - ta) * b.y) / (tb - ta),
+    ((tb - t) * a.z + (t - ta) * b.z) / (tb - ta)
+  );
+  const a1 = interpolate(p0, p1, t0, t1);
+  const a2 = interpolate(p1, p2, t1, t2);
+  const a3 = interpolate(p2, p3, t2, t3);
+  const b1 = interpolate(a1, a2, t0, t2);
+  const b2 = interpolate(a2, a3, t1, t3);
+  return interpolate(b1, b2, t1, t2);
+}
 
 export const TRACK_SHAPES = Object.freeze({
   LOOP: "loop",
   OPEN: "open"
 });
 
-export const TRACK_MODE_LABELS = Object.freeze({
+const TRACK_MODE_LABELS = Object.freeze({
   [TRACK_SHAPES.LOOP]: "闭环赛",
   [TRACK_SHAPES.OPEN]: "点到点冲刺赛"
 });
 
-export const TRACK_SHAPE_LABELS = Object.freeze({
+const TRACK_SHAPE_LABELS = Object.freeze({
   [TRACK_SHAPES.LOOP]: "闭环赛道",
   [TRACK_SHAPES.OPEN]: "开放赛道"
 });
 
-export const TRACK_MIN_CONTROL_POINTS = Object.freeze({
+const TRACK_MIN_CONTROL_POINTS = Object.freeze({
   [TRACK_SHAPES.LOOP]: 4,
   [TRACK_SHAPES.OPEN]: 2
 });
 
-export const TRACK_MIN_POINT_SPACING = 6;
+const TRACK_MIN_POINT_SPACING = 6;
 export const TRACK_MIN_WIDTH = 10;
 export const TRACK_MAX_WIDTH = 28;
 
-export const OPEN_TRACK_FINISH_BUFFER = 12;
+const OPEN_TRACK_FINISH_BUFFER = 12;
 
-export const racingTrackShapeConfig = {
+const racingTrackShapeConfig = {
   minHalfWidthScale: 0.4,
   curvatureRadiusFactor: 4,
   widthSmoothingPasses: 8
 };
 
-const tempPoint = new THREE.Vector2();
+const tempPoint = new Vector2();
 
 export function normalizeTrackShape(shape) {
   return shape === TRACK_SHAPES.OPEN || shape === TRACK_SHAPES.LOOP ? shape : null;
@@ -76,12 +182,12 @@ export function normalizeLoopStartProgress(value, fallback = 0) {
   return clampNumber(value, 0, 0.999, fallback);
 }
 
-export function buildTrackModel(track) {
+function buildTrackModel(track) {
   const shape = normalizeTrackShape(track?.shape) ?? TRACK_SHAPES.LOOP;
   const closed = isLoopTrackShape(shape);
   const sampleCount = Math.max(16, Math.round(Number(track?.samples) || 0));
-  const controlPoints = (track?.controlPoints ?? []).map(([x, z]) => new THREE.Vector3(x, 0, z));
-  const curve = new THREE.CatmullRomCurve3(controlPoints, closed, "centripetal", 0.45);
+  const controlPoints = (track?.controlPoints ?? []).map(([x, z]) => new Vector3(x, 0, z));
+  const curve = new CatmullRomCurve3(controlPoints, closed, "centripetal", 0.45);
   const sampleProgresses = buildSampleProgresses(sampleCount, closed);
   const baseSamples = sampleProgresses.map((progress) => sampleCurve(curve, progress, closed));
   const baseHalfWidth = Number(track?.width) / 2;
@@ -145,7 +251,7 @@ export function buildTrackModel(track) {
   };
 }
 
-export function sampleTrackModel(model, progress) {
+function sampleTrackModel(model, progress) {
   const normalizedProgress = model.closed ? wrapProgress(progress) : clamp(progress, 0, 1);
   const domainLength = model.closed ? model.samples.length : Math.max(model.samples.length - 1, 1);
   const rawIndex = model.closed
@@ -160,7 +266,7 @@ export function sampleTrackModel(model, progress) {
   const end = model.samples[upperIndex];
   const center = start.center.clone().lerp(end.center, mix);
   const tangent = start.tangent.clone().lerp(end.tangent, mix).normalize();
-  const normal = new THREE.Vector2(-tangent.y, tangent.x);
+  const normal = new Vector2(-tangent.y, tangent.x);
   const distanceDelta = model.closed && upperIndex === 0
     ? model.totalLength - start.distance
     : end.distance - start.distance;
@@ -180,7 +286,7 @@ export function sampleTrackModel(model, progress) {
   };
 }
 
-export function projectPointOntoTrack(model, point, preferredSegmentIndex = null) {
+function projectPointOntoTrack(model, point, preferredSegmentIndex = null) {
   const pointVector = toVector2(point);
   const allSegments = enumerateSegmentIndices(model);
   const candidateSegments = preferredSegmentIndex == null
@@ -195,7 +301,7 @@ export function projectPointOntoTrack(model, point, preferredSegmentIndex = null
   return projection;
 }
 
-export function findTrackInsertionTarget(model, point) {
+function findTrackInsertionTarget(model, point) {
   const pointVector = toVector2(point);
   let best = null;
 
@@ -242,12 +348,12 @@ export function findTrackInsertionTarget(model, point) {
   };
 }
 
-export function progressToDistance(model, progress) {
+function progressToDistance(model, progress) {
   const normalizedProgress = model.closed ? wrapProgress(progress) : clamp(progress, 0, 1);
   return normalizedProgress * model.totalLength;
 }
 
-export function distanceToProgress(model, distance) {
+function distanceToProgress(model, distance) {
   if (model.totalLength <= 0) {
     return 0;
   }
@@ -259,7 +365,7 @@ export function distanceToProgress(model, distance) {
   return clamp(distance / model.totalLength, 0, 1);
 }
 
-export function getOpenFinishProgress(model) {
+function getOpenFinishProgress(model) {
   if (model.closed) {
     return 0;
   }
@@ -271,7 +377,7 @@ export function getOpenFinishProgress(model) {
   return distanceToProgress(model, Math.max(0, model.totalLength - bufferDistance));
 }
 
-export function validateRacingMap(map) {
+function validateRacingMap(map) {
   const errors = [];
   const track = map?.track;
   const shape = normalizeTrackShape(track?.shape);
@@ -337,7 +443,7 @@ export function validateRacingMap(map) {
   };
 }
 
-export function trackHasSelfIntersection(model) {
+function trackHasSelfIntersection(model) {
   const segments = buildPolylineSegments(model);
 
   for (let index = 0; index < segments.length; index += 1) {
@@ -372,15 +478,15 @@ export function clampInt(value, min, max, fallback) {
   return Math.round(clampNumber(value, min, max, fallback));
 }
 
-export function wrapProgress(progress) {
+function wrapProgress(progress) {
   return ((progress % 1) + 1) % 1;
 }
 
-export function wrapIndex(index, length) {
+function wrapIndex(index, length) {
   return ((index % length) + length) % length;
 }
 
-export function clamp(value, min, max) {
+function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
@@ -399,7 +505,7 @@ function validatePointSpacing(points, shape) {
 }
 
 function trackPointDistance(point) {
-  return new THREE.Vector2(point[0], point[1]);
+  return new Vector2(point[0], point[1]);
 }
 
 function distanceBetween(a, b) {
@@ -422,13 +528,13 @@ function sampleCurve(curve, progress, closed) {
   const adjustedProgress = closed ? wrapProgress(progress) : clamp(progress, 0, 1);
   const point = curve.getPointAt(adjustedProgress);
   const tangent3 = curve.getTangentAt(adjustedProgress);
-  const tangent = new THREE.Vector2(tangent3.x, tangent3.z).normalize();
-  const center = new THREE.Vector2(point.x, point.z);
+  const tangent = new Vector2(tangent3.x, tangent3.z).normalize();
+  const center = new Vector2(point.x, point.z);
 
   return {
     center,
     tangent,
-    normal: new THREE.Vector2(-tangent.y, tangent.x),
+    normal: new Vector2(-tangent.y, tangent.x),
     heading: Math.atan2(tangent.x, tangent.y)
   };
 }
@@ -475,7 +581,7 @@ function findBestProjection(model, segmentIndices, point) {
     const clampedT = clamp(rawT, 0, 1);
     const projected = start.center.clone().add(segment.multiplyScalar(clampedT));
     const tangent = end.center.clone().sub(start.center).normalize();
-    const normal = new THREE.Vector2(-tangent.y, tangent.x);
+    const normal = new Vector2(-tangent.y, tangent.x);
     const delta = point.clone().sub(projected);
     const distance = delta.length();
     const startDistance = start.distance;
@@ -587,10 +693,132 @@ function lerp(start, end, mix) {
 }
 
 function toVector2(point) {
-  if (point instanceof THREE.Vector2) {
+  if (point instanceof Vector2) {
     return point;
   }
 
   tempPoint.set(point.x, point.z ?? point.y);
   return tempPoint.clone();
 }
+
+export function inspectRacingTrack(trackData) {
+  const input = clonePlain(trackData ?? {});
+  const validation = validateRacingMap({ track: input });
+  let model = null;
+  let geometryError = null;
+  try {
+    const points = input.controlPoints ?? [];
+    if (points.length < 2 || points.some((point) => normalizeControlPoint(point) == null)) {
+      throw new Error("赛道没有足够的有效控制点来建立中心线。");
+    }
+    model = buildTrackModel(input);
+  } catch (error) {
+    geometryError = error;
+  }
+
+  const requireModel = () => {
+    if (!model) throw new Error(geometryError?.message ?? "赛道几何不可用。");
+    return model;
+  };
+  const summary = model ? buildSemanticSummary(model, input) : null;
+  return Object.freeze({
+    validation: freezePlain(validation),
+    geometryAvailable: Boolean(model),
+    summary,
+    sample(progress) { return freezePlain(sampleToPlain(sampleTrackModel(requireModel(), progress))); },
+    project(point, hint = null) { return freezePlain(sampleToPlain(projectPointOntoTrack(requireModel(), point, hint))); },
+    findInsertion(point) { return freezePlain(sampleToPlain(findTrackInsertionTarget(requireModel(), point))); },
+    observeMovement(movement) { return freezePlain(observeTrackMovement(requireModel(), summary, movement)); }
+  });
+}
+
+export function createRacingTrackRuntimeAdapter(trackData) {
+  const model = buildTrackModel(trackData);
+  return Object.freeze({
+    model,
+    sample: (progress) => sampleTrackModel(model, progress),
+    project: (point, hint = null) => projectPointOntoTrack(model, point, hint)
+  });
+}
+
+function buildSemanticSummary(model, trackData) {
+  const startProgress = model.closed ? normalizeLoopStartProgress(trackData.startPosition?.progress, 0) : 0;
+  const finishProgress = model.closed ? startProgress : getOpenFinishProgress(model);
+  return freezePlain({
+    shape: model.shape,
+    shapeLabel: getTrackShapeLabel(model.shape),
+    raceMode: getTrackModeForShape(model.shape),
+    raceModeLabel: getTrackModeLabel(model.shape),
+    closed: model.closed,
+    totalLength: model.totalLength,
+    startProgress,
+    finishProgress,
+    startLine: passingLine(model, startProgress),
+    finishLine: passingLine(model, finishProgress),
+    samples: model.samples.map(sampleToPlain)
+  });
+}
+
+function passingLine(model, progress) {
+  const sample = sampleTrackModel(model, progress);
+  return {
+    progress,
+    center: vectorToPlain(sample.center),
+    direction: vectorToPlain(sample.tangent),
+    from: vectorToPlain(sample.center.clone().add(sample.normal.clone().multiplyScalar(-sample.halfWidth))),
+    to: vectorToPlain(sample.center.clone().add(sample.normal.clone().multiplyScalar(sample.halfWidth)))
+  };
+}
+
+function observeTrackMovement(model, summary, movement) {
+  const previous = projectPointOntoTrack(model, movement.previousPosition, movement.preferredSegmentIndex ?? null);
+  const current = projectPointOntoTrack(model, movement.currentPosition, previous.segmentIndex);
+  const distanceDelta = directedDistanceDelta(model, previous.distanceAlongTrack, current.distanceAlongTrack);
+  const forward = distanceDelta > 0;
+  const onRoad = movement.onRoad !== false && current.distance <= current.roadLimit;
+  const crossedStart = onRoad && forward && crossedProgress(model, previous.progress, current.progress, summary.startProgress);
+  const crossedFinish = onRoad && forward && crossedProgress(model, previous.progress, current.progress, summary.finishProgress);
+  return {
+    candidateProgress: current.progress,
+    centerlineDistance: current.distanceAlongTrack,
+    distanceFromCenterline: current.distance,
+    segmentIndex: current.segmentIndex,
+    forward,
+    onRoad,
+    crossedStart,
+    crossedFinish
+  };
+}
+
+function directedDistanceDelta(model, previous, current) {
+  let delta = current - previous;
+  if (model.closed && delta < -model.totalLength / 2) delta += model.totalLength;
+  if (model.closed && delta > model.totalLength / 2) delta -= model.totalLength;
+  return delta;
+}
+
+function crossedProgress(model, previous, current, target) {
+  if (!model.closed) return previous < target && current >= target;
+  const relativePrevious = wrapProgress(previous - target);
+  const relativeCurrent = wrapProgress(current - target);
+  return relativePrevious > 0.5 && relativeCurrent <= 0.5;
+}
+
+function sampleToPlain(value) {
+  if (!value || typeof value !== "object") return value;
+  const result = {};
+  for (const [key, child] of Object.entries(value)) {
+    result[key] = child instanceof Vector2 || child instanceof Vector3
+      ? vectorToPlain(child)
+      : Array.isArray(child)
+        ? child.map(sampleToPlain)
+        : child && typeof child === "object"
+          ? sampleToPlain(child)
+          : child;
+  }
+  return result;
+}
+
+function vectorToPlain(value) { return { x: value.x, y: value.z ?? value.y }; }
+function clonePlain(value) { return typeof structuredClone === "function" ? structuredClone(value) : JSON.parse(JSON.stringify(value)); }
+function freezePlain(value) { if (!value || typeof value !== "object" || Object.isFrozen(value)) return value; Object.freeze(value); for (const child of Object.values(value)) freezePlain(child); return value; }

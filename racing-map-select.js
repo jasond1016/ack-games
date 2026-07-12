@@ -2,7 +2,7 @@ import {
   getTrackSurfaceLabel,
   racingMapLibrary
 } from "./racing-map.js";
-import { getTrackShapeLabel } from "./racing-track.js";
+import { getTrackShapeLabel } from "./racing-track.mjs";
 
 export function createRacingMapSelect({ onHome = () => {}, onRace = () => {}, onEdit = () => {} } = {}) {
   const homeButton = document.getElementById("racingMapSelectHomeButton");

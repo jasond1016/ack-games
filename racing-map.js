@@ -5,9 +5,9 @@ import {
   clampInt,
   clampNumber,
   normalizeControlPoint,
+  inspectRacingTrack,
   normalizeLoopStartProgress,
-  validateRacingMap
-} from "./racing-track.js";
+} from "./racing-track.mjs";
 import { createRacingMapLibraryCore } from "./racing-map-library-core.mjs";
 
 const USER_MAPS_STORAGE_KEY = "ack-games:racing-map-library:v1";
@@ -181,7 +181,7 @@ export function normalizeRacingMap(rawMap) {
     normalized.track.startPosition = createLoopStartPosition(rawTrack.startPosition?.progress);
   }
 
-  const validation = validateRacingMap(normalized);
+  const validation = inspectRacingTrack(normalized.track).validation;
   if (!validation.valid) {
     throw new Error(validation.errors[0]);
   }
