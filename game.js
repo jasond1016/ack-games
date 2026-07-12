@@ -1,188 +1,123 @@
-import { createRacingGame } from "./racing-game.js";
-import { createRacingEditor } from "./racing-editor.js";
-import { createRacingMapSelect } from "./racing-map-select.js";
-import { createTypingGarageGame } from "./typing-garage-game.js";
-import { createVacuumGame } from "./vacuum-game.js";
-import { createBusRushPrototype } from "./bus-rush-prototype.js";
+import { createGameLifecycle } from "./game-lifecycle.mjs";
 
-const body = document.body;
-const homeView = document.getElementById("homeView");
-const typingGarageView = document.getElementById("typingGarageView");
-const vacuumView = document.getElementById("vacuumView");
-const racingMapSelectView = document.getElementById("racingMapSelectView");
-const racingView = document.getElementById("racingView");
-const racingEditorView = document.getElementById("racingEditorView");
-const busRushView = document.getElementById("busRushView");
-const typingGarageCard = document.getElementById("typingGarageCard");
-const vacuumGameCard = document.getElementById("vacuumGameCard");
-const racingGameCard = document.getElementById("racingGameCard");
-const racingEditorCard = document.getElementById("racingEditorCard");
-const busRushCard = document.getElementById("busRushCard");
-const typingGarageHomeButton = document.getElementById("typingGarageHomeButton");
-const vacuumHomeButton = document.getElementById("vacuumHomeButton");
-const racingEditorHomeButton = document.getElementById("racingEditorHomeButton");
-const busRushHomeButton = document.getElementById("busRushHomeButton");
-
-const games = {
+const registry = Object.freeze({
   "typing-garage": {
     title: "超跑图鉴解锁 - ACK Games",
-    view: typingGarageView,
-    create: () => createTypingGarageGame(),
-    instance: null
+    viewId: "typingGarageView",
+    load: () => import("./typing-garage-game.js")
   },
   "bus-rush": {
     title: "末班车冲刺（原型） - ACK Games",
-    view: busRushView,
-    create: () => createBusRushPrototype(),
-    instance: null
+    viewId: "busRushView",
+    load: () => import("./bus-rush-prototype.js")
   },
   vacuum: {
     title: "吸尘器接管道 - ACK Games",
-    view: vacuumView,
-    create: () => createVacuumGame(),
-    instance: null
+    viewId: "vacuumView",
+    load: () => import("./vacuum-game.js")
   },
   "racing-select": {
     title: "赛车地图选择 - ACK Games",
-    view: racingMapSelectView,
-    create: () => createRacingMapSelect({
-      onHome: () => showHome(),
-      onRace: () => startGame("racing"),
-      onEdit: () => startGame("racing-editor")
-    }),
-    instance: null
+    viewId: "racingMapSelectView",
+    load: () => import("./racing-map-select.js")
   },
   racing: {
     title: "3D 赛车 - ACK Games",
-    view: racingView,
-    create: () => createRacingGame({
-      initialSnapshot: pendingRacingSnapshot,
-      onHome: () => showHome(),
-      onEditMap: () => {
-        pendingRacingSnapshot = null;
-        startGame("racing-editor");
-      },
-      onReplaceSession: (snapshot) => {
-        pendingRacingSnapshot = snapshot;
-        invalidateGame("racing");
-        startGame("racing");
-      }
-    }),
-    instance: null
+    viewId: "racingView",
+    load: () => import("./racing-game.js")
   },
   "racing-editor": {
     title: "地图编辑器 - ACK Games",
-    view: racingEditorView,
-    create: () => createRacingEditor({
-      onPlay: () => {
-        invalidateGame("racing");
-        startGame("racing");
-      },
-      onMapChanged: () => invalidateGame("racing")
-    }),
-    instance: null
+    viewId: "racingEditorView",
+    load: () => import("./racing-editor.js")
   }
-};
+});
 
-let activeGameId = null;
-let pendingRacingSnapshot = null;
+const body = document.body;
+const homeView = document.getElementById("homeView");
+const lifecycleView = document.getElementById("gameLifecycleView");
+const lifecycleTitle = document.getElementById("gameLifecycleTitle");
+const lifecycleMessage = document.getElementById("gameLifecycleMessage");
+const lifecycleRetryButton = document.getElementById("gameLifecycleRetryButton");
+const lifecycleHomeButton = document.getElementById("gameLifecycleHomeButton");
+const gameViews = Object.fromEntries(
+  Object.entries(registry).map(([gameId, descriptor]) => [gameId, document.getElementById(descriptor.viewId)])
+);
 
-function showHome(updateHistory = true) {
-  pendingRacingSnapshot = null;
-  stopActiveGame();
-  homeView.hidden = false;
-  for (const candidate of Object.values(games)) {
-    candidate.view.hidden = true;
+const lifecycle = createGameLifecycle({
+  registry,
+  history: {
+    pathname: () => location.pathname,
+    push: (state, url) => history.pushState(state, "", url),
+    replace: (state, url) => history.replaceState(state, "", url),
+    reload: () => location.reload()
+  },
+  view: {
+    getGameRoot: (gameId) => gameViews[gameId],
+    showLoading({ gameId, title }) {
+      showOnlyLifecycle();
+      lifecycleView.dataset.state = "loading";
+      lifecycleTitle.textContent = title.replace(" - ACK Games", "");
+      lifecycleMessage.textContent = "正在加载游戏…";
+      lifecycleRetryButton.hidden = true;
+      document.title = title;
+      body.dataset.activeView = gameId;
+    },
+    showFailure({ gameId, title, message }) {
+      showOnlyLifecycle();
+      lifecycleView.dataset.state = "failed";
+      lifecycleTitle.textContent = title.replace(" - ACK Games", "");
+      lifecycleMessage.textContent = message;
+      lifecycleRetryButton.hidden = false;
+      document.title = `加载失败 - ${title}`;
+      body.dataset.activeView = gameId;
+    },
+    showGame({ gameId, title }) {
+      homeView.hidden = true;
+      lifecycleView.hidden = true;
+      for (const [candidateId, candidateView] of Object.entries(gameViews)) {
+        candidateView.hidden = candidateId !== gameId;
+      }
+      document.title = title;
+      body.dataset.activeView = gameId;
+    },
+    showHome() {
+      lifecycleView.hidden = true;
+      homeView.hidden = false;
+      for (const candidateView of Object.values(gameViews)) candidateView.hidden = true;
+      document.title = "ACK Games";
+      body.dataset.activeView = "home";
+    }
   }
-  document.title = "ACK Games";
-  body.dataset.activeView = "home";
+});
 
-  if (updateHistory) {
-    history.pushState({ view: "home" }, "", location.pathname);
-  }
-}
-
-function startGame(gameId, updateHistory = true) {
-  const game = games[gameId];
-  if (!game) {
-    showHome(updateHistory);
-    return;
-  }
-
-  stopActiveGame();
-  if (gameId === "racing") {
-    invalidateGame(gameId);
-  } else if (gameId !== "racing-select") {
-    pendingRacingSnapshot = null;
-  }
-  activeGameId = gameId;
+function showOnlyLifecycle() {
   homeView.hidden = true;
-
-  for (const candidate of Object.values(games)) {
-    candidate.view.hidden = candidate !== game;
-  }
-
-  document.title = game.title;
-  body.dataset.activeView = gameId;
-  getGameInstance(gameId).start();
-
-  if (updateHistory) {
-    history.pushState({ view: gameId }, "", `#${gameId}`);
-  }
+  lifecycleView.hidden = false;
+  for (const candidateView of Object.values(gameViews)) candidateView.hidden = true;
 }
 
-function stopActiveGame() {
-  if (!activeGameId) return;
-
-  games[activeGameId].instance?.stop();
-  activeGameId = null;
-}
-
-function getGameInstance(gameId) {
-  const game = games[gameId];
-  if (!game.instance) {
-    game.instance = game.create();
-  }
-
-  return game.instance;
-}
-
-function invalidateGame(gameId) {
-  const game = games[gameId];
-  if (!game?.instance) {
-    return;
-  }
-
-  if (activeGameId === gameId) {
-    game.instance.stop();
-    activeGameId = null;
-  }
-
-  if (typeof game.instance.destroy === "function") {
-    game.instance.destroy();
-  }
-
-  game.instance = null;
-}
-
-function routeFromHash(updateHistory = false) {
+function routeFromLocation() {
   const gameId = location.hash.replace("#", "");
-  if (games[gameId]) {
-    startGame(gameId, updateHistory);
+  if (registry[gameId]) {
+    void lifecycle.open(gameId, { historyMode: "none" });
   } else {
-    showHome(updateHistory);
+    void lifecycle.home({ historyMode: gameId ? "replace" : "none" });
   }
 }
 
-window.addEventListener("popstate", () => routeFromHash(false));
-typingGarageCard.addEventListener("click", () => startGame("typing-garage"));
-vacuumGameCard.addEventListener("click", () => startGame("vacuum"));
-racingGameCard.addEventListener("click", () => startGame("racing-select"));
-racingEditorCard.addEventListener("click", () => startGame("racing-select"));
-busRushCard.addEventListener("click", () => startGame("bus-rush"));
-typingGarageHomeButton.addEventListener("click", () => showHome());
-vacuumHomeButton.addEventListener("click", () => showHome());
-racingEditorHomeButton.addEventListener("click", () => startGame("racing-select"));
-busRushHomeButton.addEventListener("click", () => showHome());
+window.addEventListener("popstate", routeFromLocation);
+lifecycleRetryButton.addEventListener("click", () => void lifecycle.retry());
+lifecycleHomeButton.addEventListener("click", () => void lifecycle.home());
 
-routeFromHash(false);
+document.getElementById("typingGarageCard").addEventListener("click", () => void lifecycle.open("typing-garage"));
+document.getElementById("vacuumGameCard").addEventListener("click", () => void lifecycle.open("vacuum"));
+document.getElementById("racingGameCard").addEventListener("click", () => void lifecycle.open("racing-select"));
+document.getElementById("racingEditorCard").addEventListener("click", () => void lifecycle.open("racing-select"));
+document.getElementById("busRushCard").addEventListener("click", () => void lifecycle.open("bus-rush"));
+document.getElementById("typingGarageHomeButton").addEventListener("click", () => void lifecycle.home());
+document.getElementById("vacuumHomeButton").addEventListener("click", () => void lifecycle.home());
+document.getElementById("busRushHomeButton").addEventListener("click", () => void lifecycle.home());
+document.getElementById("racingEditorHomeButton").addEventListener("click", () => void lifecycle.open("racing-select"));
+
+routeFromLocation();

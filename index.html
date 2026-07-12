@@ -130,6 +130,19 @@
         </div>
       </section>
 
+      <section id="gameLifecycleView" class="game-lifecycle-view" aria-live="polite" hidden>
+        <div class="game-lifecycle-card">
+          <span class="game-lifecycle-spinner" aria-hidden="true"></span>
+          <p class="brand">ACK Games</p>
+          <h2 id="gameLifecycleTitle">正在加载</h2>
+          <p id="gameLifecycleMessage">正在加载游戏…</p>
+          <div class="game-lifecycle-actions">
+            <button id="gameLifecycleRetryButton" class="primary-button" type="button" hidden>重试</button>
+            <button id="gameLifecycleHomeButton" class="secondary-button" type="button">返回首页</button>
+          </div>
+        </div>
+      </section>
+
       <section id="typingGarageView" class="game-view typing-garage-view" aria-label="超跑图鉴解锁" hidden>
         <header class="topbar typing-garage-topbar">
           <button id="typingGarageHomeButton" class="icon-button" type="button" aria-label="返回首页" title="返回首页">

@@ -592,6 +592,11 @@ export function createVacuumGame() {
   return { start, stop, reset: resetGame };
 }
 
+export function createGame() {
+  const game = createVacuumGame();
+  return { ...game, destroy: () => game.stop() };
+}
+
 function randomBetween(min, max) {
   return Math.random() * (max - min) + min;
 }

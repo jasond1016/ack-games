@@ -153,3 +153,11 @@ export function createRacingMapSelect({ onHome = () => {}, onRace = () => {}, on
 
   return { start, stop, destroy };
 }
+
+export function createGame(context) {
+  return createRacingMapSelect({
+    onHome: context.home,
+    onRace: () => context.open("racing"),
+    onEdit: () => context.open("racing-editor")
+  });
+}

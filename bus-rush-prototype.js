@@ -258,3 +258,7 @@ export function createBusRushPrototype() {
   window.addEventListener("resize", resizeCanvas);
   return { start, stop, destroy(){ stop(); window.removeEventListener("keydown",onKey); window.removeEventListener("resize",resizeCanvas); } };
 }
+
+export function createGame() {
+  return createBusRushPrototype();
+}

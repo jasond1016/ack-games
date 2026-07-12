@@ -889,6 +889,13 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
   return { start, stop, destroy };
 }
 
+export function createGame(context) {
+  return createRacingEditor({
+    onPlay: () => context.open("racing"),
+    onMapChanged: () => {}
+  });
+}
+
 function computeViewport(trackModel) {
   const coordinates = [
     ...trackModel.samples.flatMap((sample) => ([

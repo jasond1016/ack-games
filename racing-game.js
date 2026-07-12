@@ -5125,3 +5125,12 @@ export function createRacingGame({
 
   return { start, stop, reset: resetRace, destroy };
 }
+
+export function createGame(context) {
+  return createRacingGame({
+    initialSnapshot: context.payload,
+    onHome: context.home,
+    onEditMap: () => context.open("racing-editor"),
+    onReplaceSession: context.replaceSelf
+  });
+}

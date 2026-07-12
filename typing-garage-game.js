@@ -412,6 +412,11 @@ export function createTypingGarageGame() {
   return { start, stop };
 }
 
+export function createGame() {
+  const game = createTypingGarageGame();
+  return { ...game, destroy: () => game.stop() };
+}
+
 function restartAnimation(element, className) {
   element.classList.remove(className);
   void element.offsetWidth;
