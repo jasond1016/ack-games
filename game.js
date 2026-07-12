@@ -3,6 +3,7 @@ import { createRacingEditor } from "./racing-editor.js";
 import { createRacingMapSelect } from "./racing-map-select.js";
 import { createTypingGarageGame } from "./typing-garage-game.js";
 import { createVacuumGame } from "./vacuum-game.js";
+import { createBusRushPrototype } from "./bus-rush-prototype.js";
 
 const body = document.body;
 const homeView = document.getElementById("homeView");
@@ -11,19 +12,28 @@ const vacuumView = document.getElementById("vacuumView");
 const racingMapSelectView = document.getElementById("racingMapSelectView");
 const racingView = document.getElementById("racingView");
 const racingEditorView = document.getElementById("racingEditorView");
+const busRushView = document.getElementById("busRushView");
 const typingGarageCard = document.getElementById("typingGarageCard");
 const vacuumGameCard = document.getElementById("vacuumGameCard");
 const racingGameCard = document.getElementById("racingGameCard");
 const racingEditorCard = document.getElementById("racingEditorCard");
+const busRushCard = document.getElementById("busRushCard");
 const typingGarageHomeButton = document.getElementById("typingGarageHomeButton");
 const vacuumHomeButton = document.getElementById("vacuumHomeButton");
 const racingEditorHomeButton = document.getElementById("racingEditorHomeButton");
+const busRushHomeButton = document.getElementById("busRushHomeButton");
 
 const games = {
   "typing-garage": {
     title: "超跑图鉴解锁 - ACK Games",
     view: typingGarageView,
     create: () => createTypingGarageGame(),
+    instance: null
+  },
+  "bus-rush": {
+    title: "末班车冲刺（原型） - ACK Games",
+    view: busRushView,
+    create: () => createBusRushPrototype(),
     instance: null
   },
   vacuum: {
@@ -156,8 +166,10 @@ typingGarageCard.addEventListener("click", () => startGame("typing-garage"));
 vacuumGameCard.addEventListener("click", () => startGame("vacuum"));
 racingGameCard.addEventListener("click", () => startGame("racing-select"));
 racingEditorCard.addEventListener("click", () => startGame("racing-select"));
+busRushCard.addEventListener("click", () => startGame("bus-rush"));
 typingGarageHomeButton.addEventListener("click", () => showHome());
 vacuumHomeButton.addEventListener("click", () => showHome());
 racingEditorHomeButton.addEventListener("click", () => startGame("racing-select"));
+busRushHomeButton.addEventListener("click", () => showHome());
 
 routeFromHash(false);

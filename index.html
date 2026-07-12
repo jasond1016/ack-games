@@ -86,6 +86,20 @@
             </span>
           </button>
 
+          <button id="busRushCard" class="game-card" type="button">
+            <span class="game-card-art bus-rush-card-art" aria-hidden="true">
+              <span class="bus-card-bus">公交</span>
+              <span class="bus-card-road"></span>
+              <span class="bus-card-granny">🧓</span>
+              <span class="bus-card-cabbage">🥬</span>
+            </span>
+            <span class="game-card-copy">
+              <span class="game-state">新原型</span>
+              <strong>末班车冲刺</strong>
+              <span>菜市场刚散场，抢在关门前上车</span>
+            </span>
+          </button>
+
           <article class="game-card game-card-disabled" aria-label="更多游戏">
             <span class="game-card-art empty-art" aria-hidden="true">
               <span></span>
@@ -99,6 +113,21 @@
             </span>
           </article>
         </section>
+      </section>
+
+      <!-- PROTOTYPE: three bus-rush variants, switchable via ?variant=A|B|C on #bus-rush. -->
+      <section id="busRushView" class="game-view bus-rush-view" aria-label="末班车冲刺原型" hidden>
+        <div class="bus-rush-shell">
+          <canvas id="busRushCanvas" width="960" height="640" aria-label="老太太追公交游戏画面"></canvas>
+          <button id="busRushHomeButton" class="bus-rush-home" type="button">‹ 大厅</button>
+          <div id="busRushHud" class="bus-rush-hud"></div>
+          <div id="busRushOverlay" class="bus-rush-overlay"></div>
+          <div id="busRushSwitcher" class="prototype-switcher" aria-label="原型版本切换">
+            <button type="button" data-step="-1" aria-label="上一个版本">←</button>
+            <strong id="busRushVariantLabel">A — 街机冲刺</strong>
+            <button type="button" data-step="1" aria-label="下一个版本">→</button>
+          </div>
+        </div>
       </section>
 
       <section id="typingGarageView" class="game-view typing-garage-view" aria-label="超跑图鉴解锁" hidden>
