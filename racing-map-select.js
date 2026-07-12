@@ -145,6 +145,9 @@ export function createRacingMapSelect({ onHome = () => {}, onRace = () => {}, on
   }
 
   function formatMapMeta(entry) {
+    if (entry.map.activity === "free-drive") {
+      return `自由驾驶 · ${getTrackSurfaceLabel(entry.map.track.surface)}`;
+    }
     return `${getTrackShapeLabel(entry.map.track.shape)} · ${getTrackSurfaceLabel(entry.map.track.surface)}`;
   }
 

@@ -23,6 +23,11 @@ export const TRACK_SURFACES = Object.freeze({
   GRAVEL: "gravel"
 });
 
+export const RACING_ACTIVITIES = Object.freeze({
+  RACE: "race",
+  FREE_DRIVE: "free-drive"
+});
+
 export const TRACK_SURFACE_LABELS = Object.freeze({
   [TRACK_SURFACES.ASPHALT]: "柏油路面",
   [TRACK_SURFACES.GRAVEL]: "沙石路面"
@@ -87,6 +92,27 @@ const presetMaps = [
           [-22, 76],
           [-64, 48],
           [-96, 20]
+        ]
+      }
+    }
+  },
+  {
+    mapId: "preset-island-freedrive",
+    kind: "preset",
+    map: {
+      version: MAP_VERSION,
+      name: "海风岛自由驾驶",
+      activity: RACING_ACTIVITIES.FREE_DRIVE,
+      track: {
+        shape: TRACK_SHAPES.LOOP,
+        surface: TRACK_SURFACES.ASPHALT,
+        width: 18,
+        samples: 640,
+        startPosition: { progress: 0.03 },
+        controlPoints: [
+          [-118, -42], [-76, -82], [-18, -96], [46, -82], [104, -44],
+          [126, 8], [98, 58], [48, 92], [-12, 104], [-72, 78],
+          [-112, 38], [-88, 6]
         ]
       }
     }
@@ -168,6 +194,9 @@ export function normalizeRacingMap(rawMap) {
     name: typeof rawMap.name === "string" && rawMap.name.trim()
       ? rawMap.name.trim()
       : defaultMap.name,
+    activity: rawMap.activity === RACING_ACTIVITIES.FREE_DRIVE
+      ? RACING_ACTIVITIES.FREE_DRIVE
+      : RACING_ACTIVITIES.RACE,
     track: {
       shape,
       surface: normalizeTrackSurface(rawTrack.surface),

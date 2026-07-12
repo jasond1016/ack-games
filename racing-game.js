@@ -14,7 +14,7 @@ import {
   loadActiveRacingStartConfig,
   saveActiveRacingStartConfig
 } from "./racing-start-config.js";
-import { TRACK_SURFACES, racingMapLibrary } from "./racing-map.js";
+import { RACING_ACTIVITIES, TRACK_SURFACES, racingMapLibrary } from "./racing-map.js";
 import {
   createRacingTrackRuntimeAdapter,
   inspectRacingTrack
@@ -348,6 +348,7 @@ export function createRacingGame({
   const collisionScale = racingSceneConfig.collisionScale || visualScale;
   const trackWidth = racingSceneConfig.trackWidthOverride ?? mapData.track.width;
   const trackSurface = mapData.track.surface;
+  const isFreeDrive = mapData.activity === RACING_ACTIVITIES.FREE_DRIVE;
   const isGravelSurface = trackSurface === TRACK_SURFACES.GRAVEL;
   const drivingFeelPreset = resolveDrivingFeelPreset(
     racingSceneConfig.drivingFeelPreset ?? defaultDrivingFeelPresetId,
@@ -384,8 +385,8 @@ export function createRacingGame({
   const trackModel = trackRuntime.model;
   const trackSamples = trackModel.samples;
   const trackLength = trackModel.totalLength;
-  const raceMode = trackSemantics.summary.raceMode;
-  const raceModeLabel = raceMode === "lap" ? "闭环赛" : "点到点冲刺赛";
+  const raceMode = isFreeDrive ? "free-drive" : trackSemantics.summary.raceMode;
+  const raceModeLabel = isFreeDrive ? "自由驾驶" : raceMode === "lap" ? "闭环赛" : "点到点冲刺赛";
 
   const raceConfig = {
     mode: raceMode,
@@ -443,7 +444,7 @@ export function createRacingGame({
   const opponentConfig = {
     speed: isGravelSurface ? Math.min(7.1, 26 / 3.6) : Math.min(8.2, 30 / 3.6),
     laneOffset: -2.7,
-    startProgress: raceMode === "lap" ? raceConfig.startProgress : 0
+    startProgress: raceMode === "lap" || isFreeDrive ? raceConfig.startProgress : 0
   };
 
   const physicsConfig = {
@@ -469,7 +470,7 @@ export function createRacingGame({
     previousPosition: new THREE.Vector2(),
     previousTrackIndex: 0,
     trackIndex: 0,
-    trackProgress: raceMode === "lap" ? raceConfig.startProgress : 0,
+    trackProgress: raceMode === "lap" || isFreeDrive ? raceConfig.startProgress : 0,
     raceProgress: 0,
     lastRaceProgress: 0,
     maxForwardProgress: 0,
@@ -506,7 +507,7 @@ export function createRacingGame({
     resultVisible: false,
     winner: "",
     playerPlace: 1,
-    opponentEnabled: true,
+    opponentEnabled: !isFreeDrive,
     paused: false,
     elapsedSeconds: 0,
     settleSeconds: 0
@@ -692,7 +693,7 @@ export function createRacingGame({
   function renderCarOptions() {
     const rival = opponentCarSelection();
     const currentCar = selectedCar();
-    startOpponentValue.textContent = rival.name;
+    startOpponentValue.textContent = isFreeDrive ? "无 · 自由探索" : rival.name;
     updateSelectedCarPanel(currentCar);
     carOptions.replaceChildren(
       ...racingCarCatalog.map((carConfig) => {
@@ -1052,7 +1053,7 @@ export function createRacingGame({
     startOverlay.hidden = false;
     startMapValue.textContent = mapData.name;
     startModeValue.textContent = raceModeLabel;
-    startRaceButton.textContent = raceMode === "lap" ? "开始闭环赛" : "开始冲刺赛";
+    startRaceButton.textContent = isFreeDrive ? "进入自由驾驶" : raceMode === "lap" ? "开始闭环赛" : "开始冲刺赛";
     startRaceButton.disabled = false;
     startEditorButton.disabled = false;
     startHomeButton.disabled = false;
@@ -1490,7 +1491,8 @@ export function createRacingGame({
   function createWorld() {
     startGateLights.length = 0;
     addSkyDome();
-    addGroundLayers();
+    if (isFreeDrive) addFreeDriveGroundLayers();
+    else addGroundLayers();
     addBackdrop();
 
     const road = createRoadMesh();
@@ -1499,14 +1501,174 @@ export function createRacingGame({
 
     addTrackVerges();
     addInfieldSurface();
-    addStartFinishLines();
-    addLaneMarks();
-    addGuardRails();
-    addRoadsideProps();
-    addVenueCluster();
+    if (!isFreeDrive) addStartFinishLines();
+    if (isFreeDrive) addFreeDriveLaneMarks();
+    else addLaneMarks();
+    if (!isFreeDrive) addGuardRails();
+    if (!isFreeDrive) addRoadsideProps();
+    if (!isFreeDrive) addVenueCluster();
     addFoliage();
+    if (isFreeDrive) addFreeDriveLandmarks();
     drivingDust = createDrivingDust();
     scene.add(drivingDust.points);
+  }
+
+  function addFreeDriveGroundLayers() {
+    const textureLoader = new THREE.TextureLoader();
+    const loadTiled = (path, colorSpace = null, repeat = 42) => {
+      const texture = textureLoader.load(new URL(path, import.meta.url).href);
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(repeat, repeat);
+      texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      if (colorSpace) texture.colorSpace = colorSpace;
+      return texture;
+    };
+
+    const ocean = new THREE.Mesh(
+      new THREE.CircleGeometry(groundRadius + 220, 96),
+      new THREE.MeshPhysicalMaterial({
+        color: 0x0b84ad,
+        emissive: 0x063d55,
+        emissiveIntensity: 0.22,
+        roughness: 0.12,
+        metalness: 0.05,
+        transmission: 0.08,
+        clearcoat: 0.72,
+        clearcoatRoughness: 0.2
+      })
+    );
+    ocean.rotation.x = -Math.PI / 2;
+    ocean.position.set(sceneCenter.x, -1.5, sceneCenter.y);
+    scene.add(ocean);
+
+    const islandGeometry = new THREE.CircleGeometry(sceneBounds.radius + 82, 96, 24);
+    const positions = islandGeometry.getAttribute("position");
+    for (let index = 0; index < positions.count; index += 1) {
+      const x = positions.getX(index);
+      const y = positions.getY(index);
+      const radius = Math.hypot(x, y);
+      const edge = smoothstep(sceneBounds.radius + 34, sceneBounds.radius + 82, radius);
+      positions.setZ(index, -0.18 - edge * 2.4);
+    }
+    positions.needsUpdate = true;
+    islandGeometry.computeVertexNormals();
+    const island = new THREE.Mesh(
+      islandGeometry,
+      new THREE.MeshStandardMaterial({
+        map: loadTiled("./assets/freedrive/textures/rocks_ground_03_diff_1k.jpg", THREE.SRGBColorSpace),
+        normalMap: loadTiled("./assets/freedrive/textures/rocks_ground_03_nor_gl_1k.jpg"),
+        roughnessMap: loadTiled("./assets/freedrive/textures/rocks_ground_03_rough_1k.jpg"),
+        color: 0x789164,
+        roughness: 0.92
+      })
+    );
+    island.rotation.x = -Math.PI / 2;
+    island.position.set(sceneCenter.x, 0, sceneCenter.y);
+    island.receiveShadow = true;
+    scene.add(island);
+  }
+
+  function addFreeDriveLandmarks() {
+    const center = sceneCenter;
+    const rockMaterial = new THREE.MeshStandardMaterial({ color: 0x5c665f, roughness: 0.96, flatShading: true });
+    for (let index = 0; index < 18; index += 1) {
+      const angle = (index / 18) * Math.PI * 2 + randomBetween(-0.12, 0.12);
+      const radius = randomBetween(38, 72);
+      const height = randomBetween(5, 17);
+      const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 1), rockMaterial);
+      rock.position.set(center.x + Math.cos(angle) * radius, height * 0.35 - 0.1, center.y + Math.sin(angle) * radius);
+      rock.scale.set(randomBetween(3, 7), height, randomBetween(3, 8));
+      rock.rotation.set(randomBetween(-0.2, 0.2), randomBetween(0, Math.PI), randomBetween(-0.15, 0.15));
+      rock.castShadow = qualityPreset.shadows;
+      rock.receiveShadow = true;
+      scene.add(rock);
+    }
+
+    const tower = new THREE.Group();
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(4.6, 6.2, 13, 12), new THREE.MeshStandardMaterial({ color: 0xf0e4cf, roughness: 0.78 }));
+    base.position.y = 6.5;
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(5.4, 5.4, 2.2, 12), new THREE.MeshStandardMaterial({ color: 0xe64c3c, roughness: 0.55 }));
+    cap.position.y = 13.8;
+    const beacon = new THREE.Mesh(new THREE.SphereGeometry(1.25, 18, 12), new THREE.MeshStandardMaterial({ color: 0xfff1b5, emissive: 0xffb43b, emissiveIntensity: 2.2 }));
+    beacon.position.y = 16;
+    tower.add(base, cap, beacon);
+    tower.position.set(center.x - 18, 0, center.y + 5);
+    tower.traverse((child) => { if (child.isMesh) child.castShadow = qualityPreset.shadows; });
+    scene.add(tower);
+    addFreeDrivePalms();
+    addFreeDriveResort();
+  }
+
+  function addFreeDrivePalms() {
+    const placements = buildTracksidePlacements(Math.round(38 * environmentDensity), {
+      minOffset: 15,
+      maxOffset: 42,
+      minSpacing: 10,
+      maxAttempts: 1600
+    }).map((placement) => ({ ...placement, height: randomBetween(7, 12) }));
+    const trunkGeometry = new THREE.CylinderGeometry(0.22, 0.42, 1, 7);
+    const leafGeometry = new THREE.ConeGeometry(1.8, 1.1, 9);
+    const trunks = new THREE.InstancedMesh(
+      trunkGeometry,
+      new THREE.MeshStandardMaterial({ color: 0x8a6242, roughness: 0.92 }),
+      placements.length
+    );
+    const leavesPerPalm = 1;
+    const leaves = new THREE.InstancedMesh(
+      leafGeometry,
+      new THREE.MeshStandardMaterial({ color: 0x2f8b55, roughness: 0.86, flatShading: true }),
+      placements.length * leavesPerPalm
+    );
+    const dummy = new THREE.Object3D();
+    placements.forEach((palm, palmIndex) => {
+      dummy.position.set(palm.position.x, palm.height * 0.5, palm.position.y);
+      dummy.rotation.set(0, randomBetween(0, Math.PI * 2), randomBetween(-0.08, 0.08));
+      dummy.scale.set(1, palm.height, 1);
+      dummy.updateMatrix();
+      trunks.setMatrixAt(palmIndex, dummy.matrix);
+      dummy.position.set(palm.position.x, palm.height, palm.position.y);
+      dummy.rotation.set(0, randomBetween(0, Math.PI * 2), Math.PI);
+      dummy.scale.set(1.8, 0.8, 1.8);
+      dummy.updateMatrix();
+      leaves.setMatrixAt(palmIndex, dummy.matrix);
+    });
+    trunks.instanceMatrix.needsUpdate = true;
+    leaves.instanceMatrix.needsUpdate = true;
+    trunks.castShadow = qualityPreset.shadows;
+    leaves.castShadow = qualityPreset.shadows;
+    scene.add(trunks, leaves);
+  }
+
+  function addFreeDriveResort() {
+    const sample = trackProfileAtProgress(0.61);
+    const anchor = sample.center.clone().add(sample.normal.clone().multiplyScalar(31));
+    const group = new THREE.Group();
+    group.position.set(anchor.x, 0, anchor.y);
+    group.rotation.y = sample.heading + Math.PI * 0.5;
+    const colors = [0xf3b56b, 0xe77d6d, 0x69b6bd];
+    for (let index = 0; index < 3; index += 1) {
+      const building = new THREE.Mesh(
+        new THREE.BoxGeometry(8, 4 + index * 0.8, 6),
+        new THREE.MeshStandardMaterial({ color: colors[index], roughness: 0.78 })
+      );
+      building.position.set((index - 1) * 9, building.geometry.parameters.height * 0.5, 0);
+      building.castShadow = qualityPreset.shadows;
+      building.receiveShadow = true;
+      const roof = new THREE.Mesh(
+        new THREE.BoxGeometry(8.7, 0.35, 6.7),
+        new THREE.MeshStandardMaterial({ color: 0xf5efe3, roughness: 0.68 })
+      );
+      roof.position.set((index - 1) * 9, building.geometry.parameters.height + 0.18, 0);
+      roof.castShadow = qualityPreset.shadows;
+      group.add(building, roof);
+    }
+    scene.add(group);
+  }
+
+  function smoothstep(edge0, edge1, value) {
+    const x = clamp((value - edge0) / Math.max(edge1 - edge0, 0.0001), 0, 1);
+    return x * x * (3 - 2 * x);
   }
 
   function createDrivingDust() {
@@ -1873,8 +2035,10 @@ export function createRacingGame({
     );
     physics.colliderTags.set(groundCollider.handle, "ground");
 
-    createRailColliders(1);
-    createRailColliders(-1);
+    if (!isFreeDrive) {
+      createRailColliders(1);
+      createRailColliders(-1);
+    }
 
     const playerBodyDesc = RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(0, physicsConfig.fixedHeight, 0)
@@ -2009,7 +2173,7 @@ export function createRacingGame({
     const normals = [];
     const uvs = [];
     const indices = [];
-    const roadTextures = createRoadTextures(trackSurface);
+    const roadTextures = isFreeDrive ? createFreeDriveRoadTextures() : createRoadTextures(trackSurface);
 
     for (const sample of trackSamples) {
       const left = sample.center.clone().add(sample.normal.clone().multiplyScalar(sample.halfWidth));
@@ -2043,13 +2207,32 @@ export function createRacingGame({
       new THREE.MeshStandardMaterial({
         color: 0xffffff,
         map: roadTextures.color,
-        bumpMap: roadTextures.bump,
+        bumpMap: roadTextures.bump ?? null,
+        normalMap: roadTextures.normal ?? null,
         bumpScale: isGravelSurface ? 0.085 : 0.035,
         roughnessMap: roadTextures.roughness,
         roughness: isGravelSurface ? 0.96 : 0.84,
         metalness: 0.03
       })
     );
+  }
+
+  function createFreeDriveRoadTextures() {
+    const loader = new THREE.TextureLoader();
+    const load = (name, colorSpace = null) => {
+      const texture = loader.load(new URL(`./assets/freedrive/textures/${name}`, import.meta.url).href);
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(2.4, 1);
+      texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      if (colorSpace) texture.colorSpace = colorSpace;
+      return texture;
+    };
+    return {
+      color: load("clean_asphalt_diff_1k.jpg", THREE.SRGBColorSpace),
+      normal: load("clean_asphalt_nor_gl_1k.jpg"),
+      roughness: load("clean_asphalt_rough_1k.jpg")
+    };
   }
 
   function createTrackBandMesh({ side, innerOffset, outerOffset, height, color, texture }) {
@@ -2577,6 +2760,31 @@ export function createRacingGame({
       rightCurb.castShadow = true;
 
       scene.add(leftLine, rightLine, leftCurb, rightCurb);
+    }
+  }
+
+  function addFreeDriveLaneMarks() {
+    const centerMaterial = new THREE.MeshStandardMaterial({ color: 0xf3d15b, roughness: 0.58 });
+    const edgeMaterial = new THREE.MeshStandardMaterial({ color: 0xf4f1e8, roughness: 0.62 });
+    const dashGeometry = new THREE.BoxGeometry(0.16, 0.025, 3.6);
+    const edgeGeometry = new THREE.BoxGeometry(0.14, 0.025, 4.8);
+    for (let index = 0; index < 140; index += 1) {
+      const sample = trackProfileAtProgress(sampleProgressForIndex(index, 140));
+      if (index % 2 === 0) {
+        const dash = new THREE.Mesh(dashGeometry, centerMaterial);
+        dash.position.set(sample.center.x, 0.105, sample.center.y);
+        dash.rotation.y = sample.heading;
+        dash.receiveShadow = true;
+        scene.add(dash);
+      }
+      for (const side of [-1, 1]) {
+        const point = sample.center.clone().add(sample.normal.clone().multiplyScalar((sample.halfWidth - 0.55) * side));
+        const edge = new THREE.Mesh(edgeGeometry, edgeMaterial);
+        edge.position.set(point.x, 0.102, point.y);
+        edge.rotation.y = sample.heading;
+        edge.receiveShadow = true;
+        scene.add(edge);
+      }
     }
   }
 
@@ -4491,6 +4699,11 @@ export function createRacingGame({
 
   function updateRaceState(deltaSeconds) {
     raceState.elapsedSeconds += deltaSeconds;
+    if (isFreeDrive) {
+      state.maxForwardDistance += state.velocity.length() * deltaSeconds;
+      raceState.playerPlace = 1;
+      return;
+    }
 
     if (raceConfig.mode === "lap") {
       if (raceState.finished) {
@@ -4898,11 +5111,13 @@ export function createRacingGame({
   }
 
   function updateHud() {
-    progressLabel.textContent = raceConfig.mode === "lap" ? "LAP" : "LEFT";
-    progressValue.textContent = raceConfig.mode === "lap"
+    progressLabel.textContent = isFreeDrive ? "ROAM" : raceConfig.mode === "lap" ? "LAP" : "LEFT";
+    progressValue.textContent = isFreeDrive
+      ? `${Math.round(state.maxForwardDistance)} M`
+      : raceConfig.mode === "lap"
       ? formatLapDisplay(state.completedLaps)
       : formatDistanceHud(sprintRemainingDistance(state));
-    placeValue.textContent = `${raceState.playerPlace} / ${raceState.opponentEnabled ? 2 : 1}`;
+    placeValue.textContent = isFreeDrive ? "FREE" : `${raceState.playerPlace} / ${raceState.opponentEnabled ? 2 : 1}`;
     speedValue.textContent = `${Math.round(state.velocity.length() * 3.6)}`;
     boostValue.textContent = state.boostSeconds > 0
       ? `${state.boostSeconds.toFixed(1)}S`
@@ -4968,7 +5183,7 @@ export function createRacingGame({
     state.previousPosition.copy(startPosition);
     state.previousTrackIndex = Math.round(raceConfig.startProgress * trackConfig.samples) % trackConfig.samples;
     state.trackIndex = Math.round(raceConfig.startProgress * trackConfig.samples) % trackConfig.samples;
-    state.trackProgress = raceMode === "lap" ? raceConfig.startProgress : 0;
+    state.trackProgress = raceMode === "lap" || isFreeDrive ? raceConfig.startProgress : 0;
     state.raceProgress = 0;
     state.lastRaceProgress = 0;
     state.maxForwardProgress = 0;
