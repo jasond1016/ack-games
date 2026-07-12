@@ -2,18 +2,24 @@ import { racingDeploymentConfig } from "./racing-deployment-config.js";
 import { racingModelManifest } from "./racing-model-manifest.js";
 
 function createCarAssetUrls(carId, relativePath) {
+  const manifestEntry = racingModelManifest[carId];
   const cleanPath = relativePath.replace(/^\.\/assets\/cars\//, "");
   const modelPath = racingDeploymentConfig.useHashedModelAssets
-    ? racingModelManifest[carId]?.objectKey ?? cleanPath
+    ? manifestEntry?.objectKey ?? cleanPath
     : cleanPath;
   const previewModelPath = racingDeploymentConfig.useHashedModelAssets
-    ? racingModelManifest[carId]?.previewObjectKey ?? modelPath
+    ? manifestEntry?.previewObjectKey ?? modelPath
     : cleanPath;
+  const buildModelUrl = (assetPath) => {
+    const url = new URL(assetPath, racingDeploymentConfig.modelAssetBaseUrl);
+    if (racingDeploymentConfig.modelAssetVersion) url.searchParams.set("v", racingDeploymentConfig.modelAssetVersion);
+    return url.href;
+  };
   return {
     modelSourcePath: cleanPath,
-    modelUrl: new URL(modelPath, racingDeploymentConfig.modelAssetBaseUrl).href,
-    previewModelUrl: new URL(previewModelPath, racingDeploymentConfig.modelAssetBaseUrl).href,
-    thumbnailUrl: new URL(`./assets/car-thumbnails/${carId}.webp`, import.meta.url).href
+    modelUrl: buildModelUrl(modelPath),
+    previewModelUrl: buildModelUrl(previewModelPath),
+    thumbnailUrl: new URL(manifestEntry?.thumbnailUrl ?? `./assets/car-thumbnails/${carId}.webp`, import.meta.url).href
   };
 }
 

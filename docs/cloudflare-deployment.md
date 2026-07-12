@@ -43,9 +43,13 @@ pnpm run assets:build
 
 This produces:
 
-- `_deploy/pages`: Pages files, with no GLBs.
+- `_deploy/pages`: fail-closed Pages runtime files, with no GLBs or repository internals.
 - `_deploy/r2/cars`: content-hashed full and preview GLBs.
 - `_deploy/r2-manifest.json`: object keys, sizes, and checksums.
+
+The build writes to a staging directory and only replaces the previous output
+after asset-graph, file-size, hash, and target checks pass. Car thumbnails are
+also emitted with content-hashed filenames and immutable cache headers.
 
 ## Deploy
 
@@ -88,6 +92,9 @@ pnpm exec wrangler pages deploy _deploy/pages --project-name ack-games
 ```
 
 Upload R2 before Pages. The Pages build references content-hashed object names, so old cached assets remain valid and deployments are atomic from the browser's perspective. Periodically delete unreferenced old object hashes after confirming no live Pages deployment uses them.
+Existing R2 keys are downloaded and hash-checked before upload: matching
+immutable objects are skipped, while a same-key content mismatch stops the
+deployment plan instead of overwriting the object.
 
 ## Runtime behavior
 

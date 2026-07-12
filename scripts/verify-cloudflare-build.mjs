@@ -1,8 +1,13 @@
 import { chromium } from "playwright";
-import { readdir, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
+import { racingCarCatalog } from "../racing-car-config.js";
+import { createCloudflareAssetGraph, createCloudflareBuildPlan } from "./cloudflare-asset-graph.mjs";
 
 const pagesDir = path.resolve("_deploy/pages");
+const r2Dir = path.resolve("_deploy/r2");
+const assetGraph = createCloudflareAssetGraph(racingCarCatalog);
 async function findGlbs(directory) {
   const matches = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -14,6 +19,9 @@ async function findGlbs(directory) {
 }
 const pageGlbs = await findGlbs(pagesDir);
 if (pageGlbs.length) throw new Error(`Pages output contains GLBs:\n${pageGlbs.join("\n")}`);
+await verifyPagesAllowlist();
+await verifyLocalReferences();
+await verifyR2Manifest();
 
 const browser = await chromium.launch({ headless: true });
 try {
@@ -40,3 +48,56 @@ try {
 } finally {
   await browser.close();
 }
+
+async function verifyPagesAllowlist() {
+  const plan = createCloudflareBuildPlan(assetGraph);
+  const allowedRoots = new Set([
+    ...plan.pagesFiles.map((file) => file.split("/")[0]),
+    ...plan.pagesDirectories.map((directory) => directory.split("/")[0]),
+    ...assetGraph.pages.generated.map((file) => file.split("/")[0]),
+    "assets"
+  ]);
+  for (const entry of await readdir(pagesDir, { withFileTypes: true })) {
+    if (!allowedRoots.has(entry.name)) throw new Error(`Unknown root entry in Pages output: ${entry.name}`);
+  }
+}
+
+async function verifyLocalReferences() {
+  const files = await walkFiles(pagesDir);
+  for (const file of files.filter((target) => /\.(?:html|css|js|mjs)$/.test(target))) {
+    const content = await readFile(file, "utf8");
+    const references = [
+      ...content.matchAll(/(?:from\s+|import\s*\()(["'])(\.{1,2}\/[^"']+)\1/g),
+      ...content.matchAll(/(?:src|href)=["'](\.\/?[^"']+)["']/g),
+      ...content.matchAll(/url\(["']?(\.\/?[^"')]+)["']?\)/g)
+    ].map((match) => match[2] ?? match[1]).filter(Boolean);
+    for (const reference of references) {
+      const clean = reference.split(/[?#]/)[0];
+      const target = path.resolve(path.dirname(file), clean);
+      if (!target.startsWith(pagesDir) || !await exists(target)) throw new Error(`Missing local reference from ${path.relative(pagesDir, file)}: ${reference}`);
+    }
+  }
+}
+
+async function verifyR2Manifest() {
+  const manifest = JSON.parse(await readFile(path.resolve("_deploy/r2-manifest.json"), "utf8"));
+  for (const entry of Object.values(manifest)) {
+    for (const [keyName, bytesName, hashName] of [["objectKey", "bytes", "sha256"], ["previewObjectKey", "previewBytes", "previewSha256"]]) {
+      const target = path.join(r2Dir, entry[keyName]);
+      const bytes = await readFile(target);
+      if (bytes.length !== entry[bytesName]) throw new Error(`R2 size mismatch: ${entry[keyName]}`);
+      if (createHash("sha256").update(bytes).digest("hex") !== entry[hashName]) throw new Error(`R2 hash mismatch: ${entry[keyName]}`);
+    }
+  }
+}
+
+async function walkFiles(directory) {
+  const files = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...await walkFiles(target)); else files.push(target);
+  }
+  return files;
+}
+
+async function exists(target) { return stat(target).then(() => true).catch(() => false); }
