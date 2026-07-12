@@ -329,19 +329,34 @@
           </section>
 
           <section id="racingResultOverlay" class="race-result-overlay" aria-label="比赛结果" hidden>
+            <canvas id="racingFinishCanvas" class="race-finish-canvas" aria-label="赛车侧视飞跃的比赛结束动画"></canvas>
+            <div class="race-finish-cinema-bars" aria-hidden="true"></div>
+            <header class="race-finish-header">
+              <span class="race-finish-kicker">赛后精彩时刻</span>
+              <span id="racingFinishTrack" class="race-finish-track">当前赛道</span>
+            </header>
+            <section class="race-finish-reveal" aria-live="polite">
+              <p id="racingResultTag" class="race-result-tag">FINAL POSITION</p>
+              <div class="race-finish-place">
+                <span id="racingFinishPlaceNumber">1</span>
+                <span id="racingFinishPlaceSuffix">ST</span>
+              </div>
+              <div class="race-finish-rule"></div>
+              <h2 id="racingResultTitle" class="race-result-title">冠军</h2>
+              <p class="race-finish-caption">漂亮的收官飞跃</p>
+            </section>
+            <div class="race-finish-slowmo"><span></span><b>SLOW MOTION</b></div>
             <div id="racingResultCard" class="race-result-card">
               <div id="racingConfetti" class="race-confetti" aria-hidden="true"></div>
-              <p id="racingResultTag" class="race-result-tag">比赛结束</p>
-              <h2 id="racingResultTitle" class="race-result-title">获胜</h2>
-              <p id="racingResultSummary" class="race-result-summary">你率先完成 3 圈。</p>
+              <p id="racingResultSummary" class="race-result-summary">你率先完成比赛。</p>
               <div class="race-result-stats">
                 <div>
-                  <span id="racingResultPlayerLabel">你的圈数</span>
-                  <strong id="racingResultPlayerValue">3 / 3</strong>
+                  <span id="racingResultPlayerLabel">你的成绩</span>
+                  <strong id="racingResultPlayerValue">--</strong>
                 </div>
                 <div>
-                  <span id="racingResultOpponentLabel">对手圈数</span>
-                  <strong id="racingResultOpponentValue">2 / 3</strong>
+                  <span id="racingResultOpponentLabel">对手成绩</span>
+                  <strong id="racingResultOpponentValue">--</strong>
                 </div>
               </div>
               <button id="racingPlayAgainButton" class="race-result-button" type="button">再跑一场</button>

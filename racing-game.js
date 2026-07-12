@@ -26,6 +26,7 @@ import {
   disposeSceneResources,
   markMaterialsOnlyDispose
 } from "./racing-resource-cleanup.mjs";
+import { createRacingFinishCinematic } from "./racing-finish-cinematic.js";
 
 const dracoDecoderPath = "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/libs/draco/";
 const carSurfaceExclusionPatterns = [
@@ -253,6 +254,10 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   const pauseEditorButton = document.getElementById("racingPauseEditorButton");
   const pauseHomeButton = document.getElementById("racingPauseHomeButton");
   const resultOverlay = document.getElementById("racingResultOverlay");
+  const finishCanvas = document.getElementById("racingFinishCanvas");
+  const finishTrack = document.getElementById("racingFinishTrack");
+  const finishPlaceNumber = document.getElementById("racingFinishPlaceNumber");
+  const finishPlaceSuffix = document.getElementById("racingFinishPlaceSuffix");
   const resultCard = document.getElementById("racingResultCard");
   const confetti = document.getElementById("racingConfetti");
   const resultTag = document.getElementById("racingResultTag");
@@ -262,6 +267,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   const resultPlayerValue = document.getElementById("racingResultPlayerValue");
   const resultOpponentLabel = document.getElementById("racingResultOpponentLabel");
   const resultOpponentValue = document.getElementById("racingResultOpponentValue");
+  const finishCinematic = createRacingFinishCinematic({ overlay: resultOverlay, canvas: finishCanvas });
   const playAgainButton = document.getElementById("racingPlayAgainButton");
   let selectedCarId = getRacingCarById(startConfig.playerCarId).id;
   const handleResumeButtonClick = () => setPaused(false);
@@ -499,6 +505,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   const debugApi = {
     activateBoost,
     resetRace,
+    finishRace: (winner = "player") => finishLapRace(winner === "opponent" ? "opponent" : "player"),
     placeCollisionScenario,
     toggleOpponent,
     toggleCollisionDebug: () => setCollisionDebugEnabled(!collisionDebug.enabled),
@@ -564,6 +571,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     startOverlay.hidden = true;
     pauseOverlay.hidden = true;
     resultOverlay.hidden = true;
+    finishCinematic.stop();
     hudOverlay.hidden = true;
     updateCollisionDebugVisibility();
 
@@ -585,6 +593,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     pauseEditorButton.removeEventListener("click", handlePauseEditorButtonClick);
     pauseHomeButton.removeEventListener("click", handlePauseHomeButtonClick);
     playAgainButton.removeEventListener("click", handleResetButtonClick);
+    finishCinematic.destroy();
     removeCollisionDebugHud();
     if (globalThis.__ackGamesDebug?.racing === debugApi) {
       delete globalThis.__ackGamesDebug.racing;
@@ -4502,8 +4511,12 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     pauseOverlay.hidden = true;
     resultCard.classList.toggle("is-win", winner === "player");
     resultCard.classList.toggle("is-loss", winner !== "player");
-    resultTag.textContent = winner === "player" ? "率先冲线" : "对手先冲线";
-    resultTitle.textContent = winner === "player" ? "你赢了" : "惜败";
+    const playerPlace = winner === "player" ? 1 : 2;
+    resultTag.textContent = "FINAL POSITION";
+    resultTitle.textContent = playerPlace === 1 ? "冠军" : "第 2 名";
+    finishPlaceNumber.textContent = String(playerPlace);
+    finishPlaceSuffix.textContent = playerPlace === 1 ? "ST" : "ND";
+    finishTrack.textContent = `${mapData.name} · ${raceConfig.mode === "lap" ? "闭环赛" : "冲刺赛"}`;
 
     if (raceConfig.mode === "lap") {
       resultSummary.textContent = !raceState.opponentEnabled
@@ -4536,11 +4549,15 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
         : "未启用";
     }
 
+    hudOverlay.hidden = true;
     resultOverlay.hidden = false;
+    void finishCinematic.start({ carConfig: selectedCar() });
   }
 
   function hideResultOverlay() {
+    finishCinematic.stop();
     resultOverlay.hidden = true;
+    hudOverlay.hidden = false;
     resultCard.classList.remove("is-win", "is-loss");
     raceState.resultVisible = false;
   }
