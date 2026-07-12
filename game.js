@@ -56,8 +56,17 @@ const games = {
     title: "3D 赛车 - ACK Games",
     view: racingView,
     create: () => createRacingGame({
+      initialSnapshot: pendingRacingSnapshot,
       onHome: () => showHome(),
-      onEditMap: () => startGame("racing-editor")
+      onEditMap: () => {
+        pendingRacingSnapshot = null;
+        startGame("racing-editor");
+      },
+      onReplaceSession: (snapshot) => {
+        pendingRacingSnapshot = snapshot;
+        invalidateGame("racing");
+        startGame("racing");
+      }
     }),
     instance: null
   },
@@ -76,8 +85,10 @@ const games = {
 };
 
 let activeGameId = null;
+let pendingRacingSnapshot = null;
 
 function showHome(updateHistory = true) {
+  pendingRacingSnapshot = null;
   stopActiveGame();
   homeView.hidden = false;
   for (const candidate of Object.values(games)) {
@@ -101,6 +112,8 @@ function startGame(gameId, updateHistory = true) {
   stopActiveGame();
   if (gameId === "racing") {
     invalidateGame(gameId);
+  } else if (gameId !== "racing-select") {
+    pendingRacingSnapshot = null;
   }
   activeGameId = gameId;
   homeView.hidden = true;

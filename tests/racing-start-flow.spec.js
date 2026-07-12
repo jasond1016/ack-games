@@ -26,6 +26,16 @@ test("racing start flow stays usable across selection, race start, pause, and re
   const pauseOverlay = page.locator("#racingPauseOverlay");
   await expect(pauseOverlay).toBeVisible();
 
+  const firstSeed = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().randomSeed);
+  await page.locator("#racingPauseResetButton").click();
+  await expect(startOverlay).toBeHidden();
+  await expect(page.locator("#racingHudOverlay")).toBeVisible();
+  const restartedSeed = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().randomSeed);
+  expect(restartedSeed).toBe(firstSeed);
+
+  await page.keyboard.press("Escape");
+  await expect(pauseOverlay).toBeVisible();
+
   await page.locator("#racingPauseHomeButton").click();
   await expect(page.locator("#homeView")).toBeVisible();
 
