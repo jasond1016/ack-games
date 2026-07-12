@@ -14,7 +14,7 @@ import {
   loadActiveRacingStartConfig,
   saveActiveRacingStartConfig
 } from "./racing-start-config.js";
-import { TRACK_SURFACES, loadSelectedRacingMap } from "./racing-map.js";
+import { TRACK_SURFACES, racingMapLibrary } from "./racing-map.js";
 import {
   buildTrackModel,
   getOpenFinishProgress,
@@ -244,7 +244,7 @@ export function createRacingGame({
   onEditMap = () => {},
   onReplaceSession = () => {}
 } = {}) {
-  const mapData = initialSnapshot?.map ?? loadSelectedRacingMap();
+  const mapData = initialSnapshot?.map ?? racingMapLibrary.snapshot().selected.map;
   const startConfig = initialSnapshot?.startConfig ?? loadActiveRacingStartConfig();
   const canvas = document.getElementById("racingCanvas");
   const hudOverlay = document.getElementById("racingHudOverlay");

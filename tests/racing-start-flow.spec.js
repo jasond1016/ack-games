@@ -105,3 +105,39 @@ test("editing a preset map creates a user-map copy before entering the editor", 
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
   await expect(page.locator("#racingUserMaps .map-select-card").first()).toContainText("F1 练习场 副本");
 });
+
+test("legacy racing map keys migrate atomically to one library state", async ({ page }) => {
+  await page.addInitScript(() => {
+    const map = {
+      version: 3,
+      name: "旧版用户地图",
+      track: {
+        shape: "open",
+        surface: "asphalt",
+        width: 14,
+        samples: 240,
+        controlPoints: [[0, 0], [20, 0]]
+      }
+    };
+    localStorage.setItem("ack-games:racing-map-library:v1", JSON.stringify([{
+      mapId: "legacy-user",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-02T00:00:00.000Z",
+      map
+    }]));
+    localStorage.setItem("ack-games:racing-selected-map-id:v1", "legacy-user");
+  });
+
+  await page.goto("/#racing-select");
+  await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
+  await expect(page.locator("#racingMapSelectName")).toHaveText("旧版用户地图");
+  const storageState = await page.evaluate(() => ({
+    current: JSON.parse(localStorage.getItem("ack-games:racing-map-library-state:v1")),
+    oldLibrary: localStorage.getItem("ack-games:racing-map-library:v1"),
+    oldSelection: localStorage.getItem("ack-games:racing-selected-map-id:v1")
+  }));
+  expect(storageState.current.selectedMapId).toBe("legacy-user");
+  expect(storageState.current.userEntries).toHaveLength(1);
+  expect(storageState.oldLibrary).toBeNull();
+  expect(storageState.oldSelection).toBeNull();
+});

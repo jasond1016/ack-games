@@ -3,12 +3,9 @@ import { racingSceneConfig } from "./racing-car-config.js";
 import {
   cloneRacingMap,
   createLoopStartPosition,
-  duplicateSelectedRacingMap,
-  ensureSelectedRacingMapIsEditable,
   exportRacingMap,
   getTrackSurfaceLabel,
-  importRacingMap,
-  saveSelectedRacingMap
+  racingMapLibrary
 } from "./racing-map.js";
 import {
   buildTrackModel,
@@ -61,7 +58,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
 
   let active = false;
   let listening = false;
-  let mapData = ensureSelectedRacingMapIsEditable().map;
+  let mapData = racingMapLibrary.beginEditingSelected().selected.map;
   let lastValidMap = cloneRacingMap(mapData);
   let previewModel = buildEditorPreviewModel(mapData.track);
   let viewport = null;
@@ -71,7 +68,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
 
   function start() {
     active = true;
-    mapData = ensureSelectedRacingMapIsEditable().map;
+    mapData = racingMapLibrary.beginEditingSelected().selected.map;
     lastValidMap = cloneRacingMap(mapData);
     previewModel = buildEditorPreviewModel(mapData.track);
     selectedPointIndex = 0;
@@ -245,8 +242,8 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
   }
 
   function handleDuplicate() {
-    const duplicated = duplicateSelectedRacingMap();
-    mapData = duplicated.map;
+    const duplicated = racingMapLibrary.duplicateEditingMap();
+    mapData = duplicated.selected.map;
     lastValidMap = cloneRacingMap(mapData);
     previewModel = buildEditorPreviewModel(mapData.track);
     selectedPointIndex = 0;
@@ -281,8 +278,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
     }
 
     try {
-      const imported = importRacingMap(await file.text());
-      mapData = saveSelectedRacingMap(imported);
+      mapData = racingMapLibrary.importEditingMap(await file.text()).selected.map;
       lastValidMap = cloneRacingMap(mapData);
       previewModel = buildEditorPreviewModel(mapData.track);
       selectedPointIndex = 0;
@@ -471,8 +467,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
 
   function commitCandidate(candidateMap, successMessage, invalidMessage = "") {
     try {
-      const saved = saveSelectedRacingMap(candidateMap);
-      mapData = saved;
+      mapData = racingMapLibrary.saveEditingMap(candidateMap).selected.map;
       lastValidMap = cloneRacingMap(saved);
       previewModel = buildEditorPreviewModel(saved.track);
       selectedPointIndex = clampPointSelection(selectedPointIndex);

@@ -1,11 +1,6 @@
 import {
-  createNewRacingUserMap,
-  deleteUserRacingMap,
-  ensureSelectedRacingMapIsEditable,
   getTrackSurfaceLabel,
-  listRacingMapEntries,
-  loadSelectedRacingMapEntry,
-  selectRacingMap
+  racingMapLibrary
 } from "./racing-map.js";
 import { getTrackShapeLabel } from "./racing-track.js";
 
@@ -71,13 +66,17 @@ export function createRacingMapSelect({ onHome = () => {}, onRace = () => {}, on
   }
 
   function handleEditClick() {
-    ensureSelectedRacingMapIsEditable();
-    onEdit();
+    try {
+      racingMapLibrary.beginEditingSelected();
+      onEdit();
+    } catch (error) { showLibraryError(error); }
   }
 
   function handleNewClick() {
-    createNewRacingUserMap();
-    onEdit();
+    try {
+      racingMapLibrary.createUserMap();
+      onEdit();
+    } catch (error) { showLibraryError(error); }
   }
 
   function render() {
@@ -85,10 +84,10 @@ export function createRacingMapSelect({ onHome = () => {}, onRace = () => {}, on
       return;
     }
 
-    const entries = listRacingMapEntries();
-    const selected = loadSelectedRacingMapEntry();
-    const presetEntries = entries.filter((entry) => entry.kind === "preset");
-    const userEntries = entries.filter((entry) => entry.kind === "user");
+    const librarySnapshot = racingMapLibrary.snapshot();
+    const selected = librarySnapshot.selected;
+    const presetEntries = librarySnapshot.presets;
+    const userEntries = librarySnapshot.userMaps;
 
     nameValue.textContent = selected.map.name;
     metaValue.textContent = formatMapMeta(selected);
@@ -108,8 +107,7 @@ export function createRacingMapSelect({ onHome = () => {}, onRace = () => {}, on
     selectButton.type = "button";
     selectButton.className = "map-select-card-button";
     selectButton.addEventListener("click", () => {
-      selectRacingMap(entry.mapId);
-      render();
+      try { racingMapLibrary.select(entry.mapId); render(); } catch (error) { showLibraryError(error); }
     });
 
     const header = document.createElement("div");
@@ -136,8 +134,7 @@ export function createRacingMapSelect({ onHome = () => {}, onRace = () => {}, on
       deleteButton.textContent = "删除";
       deleteButton.addEventListener("click", (event) => {
         event.stopPropagation();
-        deleteUserRacingMap(entry.mapId);
-        render();
+        try { racingMapLibrary.deleteUserMap(entry.mapId); render(); } catch (error) { showLibraryError(error); }
       });
       header.append(deleteButton);
     }
@@ -149,6 +146,11 @@ export function createRacingMapSelect({ onHome = () => {}, onRace = () => {}, on
 
   function formatMapMeta(entry) {
     return `${getTrackShapeLabel(entry.map.track.shape)} · ${getTrackSurfaceLabel(entry.map.track.surface)}`;
+  }
+
+  function showLibraryError(error) {
+    metaValue.textContent = error?.message ?? "地图库操作失败。";
+    metaValue.classList.add("is-error");
   }
 
   return { start, stop, destroy };
