@@ -1,0 +1,3 @@
+# Introduce Racing Map Selection And Library
+
+The racing game is moving from a single mutable active map to a map library with a dedicated selection screen, because the new scope includes two shipped presets (`F1 练习场` and a rally preset), user-created maps, and a persistent current selection shared by race start and map editing. We decided to model presets and user maps as distinct map entries with stable `mapId`s, keep race start bound to the current selected map, and treat editing of preset maps as copy-then-edit into user maps, because this preserves built-in content, supports multiple user saves, and makes the new map-selection flow coherent instead of splitting the game between hidden temporary map state and explicit library state.
