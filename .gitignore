@@ -1,7 +1,10 @@
 _deploy/
 assets/cars-optimized/
 assets/cars-preview-optimized/
+assets/cars/*.glb
 cloudflare/r2-cors.json
+.playwright-cli/
+output/
 .wrangler/
 node_modules/
 npm-debug.log*
