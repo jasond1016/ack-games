@@ -1731,6 +1731,22 @@ h1 {
   text-align: right;
 }
 
+.race-camera-panel {
+  top: 18px;
+  left: 50%;
+  min-width: 104px;
+  padding: 10px 13px;
+  text-align: center;
+  transform: translateX(-50%);
+}
+
+.race-camera-value {
+  display: block;
+  margin-top: 3px;
+  font-size: 15px;
+  line-height: 1;
+}
+
 .race-hud-panel-bottom-left {
   left: 18px;
   bottom: 18px;

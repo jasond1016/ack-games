@@ -1,7 +1,21 @@
 import { defaultRacingCarId, getRacingCarById } from "./racing-car-config.js";
 
 const STORAGE_KEY = "ack-games:racing-start-config:v1";
-const START_CONFIG_VERSION = 1;
+const START_CONFIG_VERSION = 2;
+
+export const RACING_CAMERA_MODES = Object.freeze({
+  CHASE: "chase",
+  HOOD: "hood"
+});
+
+function normalizeCameraMode(cameraMode) {
+  if (cameraMode === "cockpit") {
+    return RACING_CAMERA_MODES.HOOD;
+  }
+  return Object.values(RACING_CAMERA_MODES).includes(cameraMode)
+    ? cameraMode
+    : RACING_CAMERA_MODES.CHASE;
+}
 
 function normalizeCarId(carId) {
   return typeof carId === "string" && getRacingCarById(carId)?.id === carId
@@ -12,7 +26,8 @@ function normalizeCarId(carId) {
 export function getDefaultRacingStartConfig() {
   return {
     version: START_CONFIG_VERSION,
-    playerCarId: defaultRacingCarId
+    playerCarId: defaultRacingCarId,
+    cameraMode: RACING_CAMERA_MODES.CHASE
   };
 }
 
@@ -55,6 +70,7 @@ function normalizeRacingStartConfig(rawConfig) {
 
   return {
     version: START_CONFIG_VERSION,
-    playerCarId: normalizeCarId(rawConfig.playerCarId)
+    playerCarId: normalizeCarId(rawConfig.playerCarId),
+    cameraMode: normalizeCameraMode(rawConfig.cameraMode)
   };
 }

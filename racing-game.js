@@ -9,7 +9,11 @@ import {
   racingCarCatalog,
   racingSceneConfig
 } from "./racing-car-config.js";
-import { loadActiveRacingStartConfig, saveActiveRacingStartConfig } from "./racing-start-config.js";
+import {
+  RACING_CAMERA_MODES,
+  loadActiveRacingStartConfig,
+  saveActiveRacingStartConfig
+} from "./racing-start-config.js";
 import { TRACK_SURFACES, loadSelectedRacingMap } from "./racing-map.js";
 import {
   buildTrackModel,
@@ -233,6 +237,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   const placeValue = document.getElementById("racingPlaceValue");
   const speedValue = document.getElementById("racingSpeedValue");
   const boostValue = document.getElementById("racingBoostValue");
+  const cameraValue = document.getElementById("racingCameraValue");
   const startOverlay = document.getElementById("racingStartOverlay");
   const startMapValue = document.getElementById("racingStartMapValue");
   const startModeValue = document.getElementById("racingStartModeValue");
@@ -270,6 +275,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   const finishCinematic = createRacingFinishCinematic({ overlay: resultOverlay, canvas: finishCanvas });
   const playAgainButton = document.getElementById("racingPlayAgainButton");
   let selectedCarId = getRacingCarById(startConfig.playerCarId).id;
+  let cameraMode = startConfig.cameraMode;
   const handleResumeButtonClick = () => setPaused(false);
   const handleStartRaceButtonClick = () => {
     beginRace();
@@ -317,6 +323,11 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     speedFovResponse: drivingFeelPreset.camera.speedFovResponse ?? 4,
     speedLookAheadBoost: drivingFeelPreset.camera.speedLookAheadBoost ?? 0,
     headingFollowTightness: drivingFeelPreset.camera.headingFollowTightness ?? 7
+  };
+  const fallbackHoodCameraConfig = {
+    position: [0, 1.45, 2.05],
+    lookAhead: 15,
+    fov: 70
   };
 
   const trackConfig = {
@@ -505,6 +516,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   const debugApi = {
     activateBoost,
     resetRace,
+    toggleCamera: toggleCameraMode,
     finishRace: (winner = "player") => finishLapRace(winner === "opponent" ? "opponent" : "player"),
     placeCollisionScenario,
     toggleOpponent,
@@ -532,6 +544,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
       carDistance: Number(state.position.distanceTo(opponentState.position).toFixed(2)),
       playerCar: formatCarLabel(selectedCar()),
       opponentCar: formatCarLabel(opponentCarSelection()),
+      cameraMode,
       drivingFeelPreset: drivingFeelPreset.id,
       visualScale,
       collisionScale,
@@ -1062,7 +1075,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     setStartStatus(`正在加载 ${selectedCar().name} 与对手车辆...`);
 
     try {
-      saveActiveRacingStartConfig({ playerCarId: selectedCarId });
+      saveActiveRacingStartConfig({ playerCarId: selectedCarId, cameraMode });
       await initializeScene();
       if (!active || requestId !== startRequestId) {
         return;
@@ -3096,6 +3109,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     visualRoot.position.y = racingSceneConfig.groundOffset;
     group.userData.visualRoot = visualRoot;
     group.userData.model = model;
+    group.userData.cameraMetrics = { width: size.x, height: size.y, length: size.z };
     group.userData.boostFlames = boostGroup.userData.flames;
     group.userData.boostGroup = boostGroup;
     visualRoot.add(boostGroup);
@@ -3523,6 +3537,12 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     visualRoot.add(body, hood, cabin, rear, frontLightLeft, frontLightRight);
     visualRoot.add(boostGroup);
     group.add(visualRoot);
+    const fallbackSize = new THREE.Box3().setFromObject(visualRoot).getSize(new THREE.Vector3());
+    group.userData.cameraMetrics = {
+      width: fallbackSize.x,
+      height: fallbackSize.y,
+      length: fallbackSize.z
+    };
     return group;
   }
 
@@ -4329,6 +4349,15 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   }
 
   function updateCamera(deltaSeconds) {
+    if (cameraMode === RACING_CAMERA_MODES.HOOD) {
+      updateHoodCamera(deltaSeconds);
+      return;
+    }
+
+    updateChaseCamera(deltaSeconds);
+  }
+
+  function updateChaseCamera(deltaSeconds) {
     const speedRatio = clamp(state.velocity.length() / Math.max(playerMaxForwardSpeed(), 0.0001), 0, 1);
     const dynamicLookAhead = cameraConfig.lookAhead + cameraConfig.speedLookAheadBoost * speedRatio;
     const headingFollow = 1 - Math.exp(-deltaSeconds * cameraConfig.headingFollowTightness);
@@ -4347,8 +4376,54 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     const targetFov = cameraConfig.fov + cameraConfig.speedFovBoost * speedRatio;
     const fovFollow = 1 - Math.exp(-deltaSeconds * cameraConfig.speedFovResponse);
     camera.fov += (targetFov - camera.fov) * fovFollow;
+    if (camera.near !== 0.1) camera.near = 0.1;
     camera.updateProjectionMatrix();
     camera.lookAt(target);
+  }
+
+  function updateHoodCamera(deltaSeconds) {
+    const metrics = car?.userData.cameraMetrics;
+    const hoodConfig = metrics
+      ? {
+          position: [0, Math.max(metrics.height * .78, 1.45), metrics.length * .43],
+          lookAhead: Math.max(15, metrics.length * 1.4),
+          fov: 70
+        }
+      : fallbackHoodCameraConfig;
+    const [localX, localY, localZ] = hoodConfig.position;
+    const forward = new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading));
+    const right = new THREE.Vector3(Math.cos(state.heading), 0, -Math.sin(state.heading));
+    const desired = new THREE.Vector3(state.position.x, 0, state.position.y)
+      .addScaledVector(right, localX)
+      .addScaledVector(forward, localZ)
+      .add(new THREE.Vector3(0, localY, 0));
+    camera.position.copy(desired);
+
+    const speedRatio = clamp(state.velocity.length() / Math.max(playerMaxForwardSpeed(), 0.0001), 0, 1);
+    const targetFov = hoodConfig.fov + speedRatio * 2.5;
+    const fovFollow = 1 - Math.exp(-deltaSeconds * 8);
+    camera.fov += (targetFov - camera.fov) * fovFollow;
+    camera.near = 0.03;
+    camera.updateProjectionMatrix();
+    camera.lookAt(
+      desired.clone()
+        .addScaledVector(forward, hoodConfig.lookAhead)
+        .add(new THREE.Vector3(0, 0.12, 0))
+    );
+  }
+
+  function toggleCameraMode() {
+    cameraMode = cameraMode === RACING_CAMERA_MODES.CHASE
+      ? RACING_CAMERA_MODES.HOOD
+      : RACING_CAMERA_MODES.CHASE;
+    saveActiveRacingStartConfig({ playerCarId: selectedCarId, cameraMode });
+    if (camera) {
+      camera.fov = cameraMode === RACING_CAMERA_MODES.HOOD
+        ? fallbackHoodCameraConfig.fov
+        : cameraConfig.fov;
+    }
+    updateHud();
+    return cameraMode;
   }
 
   function updateHud() {
@@ -4361,6 +4436,9 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
     boostValue.textContent = state.boostSeconds > 0
       ? `${state.boostSeconds.toFixed(1)}S`
       : `x${state.boostCharges}`;
+    cameraValue.textContent = cameraMode === RACING_CAMERA_MODES.CHASE
+      ? "跟车"
+      : "引擎盖";
   }
 
   function currentStatusLabel() {
@@ -4481,16 +4559,20 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
       updateCarTransform();
       updateOpponentTransform();
 
-      const forward = new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading));
-      camera.position.copy(
-        new THREE.Vector3(state.position.x, 0, state.position.y)
-          .addScaledVector(forward, -cameraConfig.followDistance)
-          .add(new THREE.Vector3(0, cameraConfig.height, 0))
-      );
-      camera.lookAt(
-        new THREE.Vector3(state.position.x, cameraConfig.targetHeight, state.position.y)
-          .addScaledVector(forward, cameraConfig.lookAhead)
-      );
+      if (cameraMode === RACING_CAMERA_MODES.HOOD) {
+        updateHoodCamera(1);
+      } else {
+        const forward = new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading));
+        camera.position.copy(
+          new THREE.Vector3(state.position.x, 0, state.position.y)
+            .addScaledVector(forward, -cameraConfig.followDistance)
+            .add(new THREE.Vector3(0, cameraConfig.height, 0))
+        );
+        camera.lookAt(
+          new THREE.Vector3(state.position.x, cameraConfig.targetHeight, state.position.y)
+            .addScaledVector(forward, cameraConfig.lookAhead)
+        );
+      }
     }
 
     updateHud();
@@ -4666,7 +4748,7 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   }
 
   function handleKeyDown(event) {
-    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "KeyW", "KeyA", "KeyS", "KeyD", "KeyE", "KeyH", "KeyR", "Escape", "F2"].includes(event.code)) {
+    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "KeyW", "KeyA", "KeyS", "KeyD", "KeyC", "KeyE", "KeyH", "KeyR", "Escape", "F2"].includes(event.code)) {
       event.preventDefault();
     }
 
@@ -4698,6 +4780,10 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
 
     if (event.code === "KeyH" && !event.repeat) {
       toggleOpponent();
+    }
+
+    if (event.code === "KeyC" && !event.repeat) {
+      toggleCameraMode();
     }
 
     if (event.code === "KeyR" && !event.repeat) {
