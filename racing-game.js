@@ -240,6 +240,7 @@ export function createRacingGame({
   onEditMap = () => {},
   onReplaceSession = () => {}
 } = {}) {
+  const qualityPreset = resolveRacingQualityPreset();
   const mapData = initialSnapshot?.map ?? racingMapLibrary.snapshot().selected.map;
   const startConfig = initialSnapshot?.startConfig ?? loadActiveRacingStartConfig();
   const canvas = document.getElementById("racingCanvas");
@@ -419,6 +420,7 @@ export function createRacingGame({
   const foliageConfig = environmentConfig.foliage ?? {};
   const backdropConfig = environmentConfig.backdrop ?? {};
   const roadsidePropsConfig = environmentConfig.roadsideProps ?? {};
+  const environmentDensity = qualityPreset.environmentDensity;
   const sceneBounds = computeTrackBounds(trackSamples);
   const sceneCenter = sceneBounds.center;
   const environmentScale = Math.max(1, trackLength / 650);
@@ -516,6 +518,10 @@ export function createRacingGame({
   let cameraHeading = 0;
   let car;
   let opponentCar;
+  let drivingDust = null;
+  let wheelSpinAngle = 0;
+  let boostCameraKick = 0;
+  const startGateLights = [];
   let initialized = false;
   let active = false;
   let listening = false;
@@ -563,6 +569,12 @@ export function createRacingGame({
     toggleOpponent,
     toggleCollisionDebug: () => setCollisionDebugEnabled(!collisionDebug.enabled),
     getState: () => ({
+      quality: qualityPreset.id,
+      render: renderer ? {
+        calls: renderer.info.render.calls,
+        triangles: renderer.info.render.triangles,
+        points: renderer.info.render.points
+      } : null,
       lapText: formatLapDisplay(state.completedLaps),
       completedLaps: state.completedLaps,
       lapArmed: state.lapArmed,
@@ -1203,15 +1215,15 @@ export function createRacingGame({
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = racingSceneConfig.toneMappingExposure ?? 1;
-      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.enabled = qualityPreset.shadows;
       renderer.shadowMap.type = THREE.PCFShadowMap;
 
       scene = new THREE.Scene();
       scene.background = new THREE.Color(racingSceneConfig.backgroundColor ?? 0x9fc9f3);
       scene.fog = new THREE.Fog(
         racingSceneConfig.fogColor ?? racingSceneConfig.backgroundColor ?? 0x9fc9f3,
-        150,
-        260
+        138,
+        285
       );
 
       camera = new THREE.PerspectiveCamera(cameraConfig.fov, 1, 0.1, 500);
@@ -1374,10 +1386,10 @@ export function createRacingGame({
     scene.add(hemisphere);
 
     const sun = new THREE.DirectionalLight(0xfff0d0, racingSceneConfig.sunIntensity ?? 2.4);
-    sun.position.set(-55, 82, 42);
+    sun.position.set(-72, 58, 46);
     sun.castShadow = true;
-    sun.shadow.mapSize.width = isGravelSurface ? 1024 : 2048;
-    sun.shadow.mapSize.height = isGravelSurface ? 1024 : 2048;
+    sun.shadow.mapSize.width = qualityPreset.shadowMapSize;
+    sun.shadow.mapSize.height = qualityPreset.shadowMapSize;
     sun.shadow.bias = racingSceneConfig.sunShadowBias ?? 0;
     sun.shadow.normalBias = racingSceneConfig.sunShadowNormalBias ?? 0;
     sun.shadow.camera.left = -120;
@@ -1385,6 +1397,10 @@ export function createRacingGame({
     sun.shadow.camera.top = 120;
     sun.shadow.camera.bottom = -120;
     scene.add(sun);
+
+    const horizonFill = new THREE.DirectionalLight(0x8bbbe2, 0.28);
+    horizonFill.position.set(68, 24, -52);
+    scene.add(horizonFill);
   }
 
   function applySceneEnvironment() {
@@ -1472,6 +1488,8 @@ export function createRacingGame({
   }
 
   function createWorld() {
+    startGateLights.length = 0;
+    addSkyDome();
     addGroundLayers();
     addBackdrop();
 
@@ -1487,6 +1505,157 @@ export function createRacingGame({
     addRoadsideProps();
     addVenueCluster();
     addFoliage();
+    drivingDust = createDrivingDust();
+    scene.add(drivingDust.points);
+  }
+
+  function createDrivingDust() {
+    const count = qualityPreset.particleCount;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+    geometry.setAttribute("color", new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+    const points = new THREE.Points(
+      geometry,
+      new THREE.PointsMaterial({
+        size: isGravelSurface ? 1.05 : 0.72,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.68,
+        depthWrite: false,
+        sizeAttenuation: true,
+        fog: true
+      })
+    );
+    points.frustumCulled = false;
+    return {
+      points,
+      particles: Array.from({ length: count }, (_, index) => ({
+        index,
+        life: 0,
+        maxLife: 1,
+        velocity: new THREE.Vector3()
+      })),
+      cursor: 0,
+      emissionCarry: 0
+    };
+  }
+
+  function updateDrivingDust(deltaSeconds) {
+    if (!drivingDust || deltaSeconds <= 0) return;
+
+    const speed = state.velocity.length();
+    const dustySurface = isGravelSurface || !state.onRoad;
+    const emissionRate = dustySurface
+      ? clamp((speed - 2) * 2.1, 0, 52)
+      : state.drifting && speed > 6 ? clamp((speed - 5) * 1.15, 0, 28) : 0;
+    drivingDust.emissionCarry += emissionRate * deltaSeconds;
+    while (drivingDust.emissionCarry >= 1) {
+      emitDrivingDustParticle(dustySurface);
+      drivingDust.emissionCarry -= 1;
+    }
+
+    const positionAttribute = drivingDust.points.geometry.getAttribute("position");
+    const colorAttribute = drivingDust.points.geometry.getAttribute("color");
+    const baseColor = new THREE.Color(dustySurface ? 0xb59a70 : 0x9ba1a5);
+    for (const particle of drivingDust.particles) {
+      if (particle.life <= 0) continue;
+      particle.life = Math.max(0, particle.life - deltaSeconds);
+      const offset = particle.index * 3;
+      if (particle.life <= 0) {
+        setAttributeTriple(positionAttribute, offset, 0, -20, 0);
+        setAttributeTriple(colorAttribute, offset, 0, 0, 0);
+        continue;
+      }
+      positionAttribute.array[offset] += particle.velocity.x * deltaSeconds;
+      positionAttribute.array[offset + 1] += particle.velocity.y * deltaSeconds;
+      positionAttribute.array[offset + 2] += particle.velocity.z * deltaSeconds;
+      particle.velocity.y += deltaSeconds * 0.34;
+      particle.velocity.multiplyScalar(Math.max(0, 1 - deltaSeconds * 0.8));
+      const alpha = particle.life / particle.maxLife;
+      setAttributeTriple(colorAttribute, offset, baseColor.r * alpha, baseColor.g * alpha, baseColor.b * alpha);
+    }
+    positionAttribute.needsUpdate = true;
+    colorAttribute.needsUpdate = true;
+  }
+
+  function emitDrivingDustParticle(dustySurface) {
+    const particle = drivingDust.particles[drivingDust.cursor];
+    drivingDust.cursor = (drivingDust.cursor + 1) % drivingDust.particles.length;
+    const forward = new THREE.Vector2(Math.sin(state.heading), Math.cos(state.heading));
+    const right = new THREE.Vector2(Math.cos(state.heading), -Math.sin(state.heading));
+    const rear = new THREE.Vector2(state.position.x, state.position.y)
+      .addScaledVector(forward, -2.1)
+      .addScaledVector(right, (random() < 0.5 ? -1 : 1) * 0.82);
+    const positionAttribute = drivingDust.points.geometry.getAttribute("position");
+    setAttributeTriple(
+      positionAttribute,
+      particle.index * 3,
+      rear.x + randomBetween(-0.18, 0.18),
+      randomBetween(0.18, 0.42),
+      rear.y + randomBetween(-0.18, 0.18)
+    );
+    particle.maxLife = randomBetween(dustySurface ? 0.7 : 0.4, dustySurface ? 1.35 : 0.82);
+    particle.life = particle.maxLife;
+    particle.velocity.set(
+      -forward.x * randomBetween(1.2, 3.4) + right.x * randomBetween(-0.8, 0.8),
+      randomBetween(0.35, 1.15),
+      -forward.y * randomBetween(1.2, 3.4) + right.y * randomBetween(-0.8, 0.8)
+    );
+  }
+
+  function setAttributeTriple(attribute, offset, x, y, z) {
+    attribute.array[offset] = x;
+    attribute.array[offset + 1] = y;
+    attribute.array[offset + 2] = z;
+  }
+
+  function addSkyDome() {
+    const sky = new THREE.Mesh(
+      new THREE.SphereGeometry(groundRadius + 155, 32, 18),
+      new THREE.ShaderMaterial({
+        side: THREE.BackSide,
+        depthWrite: false,
+        fog: false,
+        uniforms: {
+          topColor: { value: new THREE.Color(0x4f86b9) },
+          horizonColor: { value: new THREE.Color(0xb9d2df) },
+          groundColor: { value: new THREE.Color(0x8899a1) },
+          sunColor: { value: new THREE.Color(0xffe2a8) },
+          sunDirection: { value: new THREE.Vector3(-0.7, 0.48, 0.42).normalize() }
+        },
+        vertexShader: `
+          varying vec3 vWorldDirection;
+          void main() {
+            vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+            vWorldDirection = normalize(worldPosition.xyz - cameraPosition);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: `
+          varying vec3 vWorldDirection;
+          uniform vec3 topColor;
+          uniform vec3 horizonColor;
+          uniform vec3 groundColor;
+          uniform vec3 sunColor;
+          uniform vec3 sunDirection;
+          void main() {
+            float height = vWorldDirection.y;
+            float skyMix = smoothstep(-0.04, 0.72, height);
+            vec3 color = mix(groundColor, mix(horizonColor, topColor, skyMix), smoothstep(-0.16, 0.04, height));
+            float horizonHaze = exp(-abs(height) * 12.0) * 0.16;
+            color += horizonColor * horizonHaze;
+            float sunDot = max(dot(vWorldDirection, sunDirection), 0.0);
+            color += sunColor * pow(sunDot, 420.0) * 2.4;
+            color += sunColor * pow(sunDot, 18.0) * 0.16;
+            gl_FragColor = vec4(color, 1.0);
+          }
+        `
+      })
+    );
+    sky.name = "festival-sky";
+    sky.position.set(sceneCenter.x, -22, sceneCenter.y);
+    sky.renderOrder = -1000;
+    scene.add(sky);
   }
 
   function addGroundLayers() {
@@ -1840,7 +2009,7 @@ export function createRacingGame({
     const normals = [];
     const uvs = [];
     const indices = [];
-    const roadTexture = createRoadTexture(trackSurface);
+    const roadTextures = createRoadTextures(trackSurface);
 
     for (const sample of trackSamples) {
       const left = sample.center.clone().add(sample.normal.clone().multiplyScalar(sample.halfWidth));
@@ -1873,8 +2042,11 @@ export function createRacingGame({
       geometry,
       new THREE.MeshStandardMaterial({
         color: 0xffffff,
-        map: roadTexture,
-        roughness: 0.92,
+        map: roadTextures.color,
+        bumpMap: roadTextures.bump,
+        bumpScale: isGravelSurface ? 0.085 : 0.035,
+        roughnessMap: roadTextures.roughness,
+        roughness: isGravelSurface ? 0.96 : 0.84,
         metalness: 0.03
       })
     );
@@ -1926,15 +2098,15 @@ export function createRacingGame({
 
   function addStartFinishLines() {
     if (raceConfig.mode === "lap") {
-      addTrackLine(raceConfig.startProgress, 0xd64545, 0xd64545);
+      addTrackLine(raceConfig.startProgress, 0xd64545, 0xd64545, true);
       return;
     }
 
-    addTrackLine(0, 0x27ae60, 0x27ae60);
+    addTrackLine(0, 0x27ae60, 0x27ae60, true);
     addTrackLine(raceConfig.finishProgress, 0xd64545, 0xd64545);
   }
 
-  function addTrackLine(progress, lineColor, accentColor) {
+  function addTrackLine(progress, lineColor, accentColor, isStartGate = false) {
     const sample = trackProfileAtProgress(progress);
     const group = new THREE.Group();
     group.position.set(sample.center.x, 0, sample.center.y);
@@ -1975,8 +2147,47 @@ export function createRacingGame({
     leftPost.castShadow = true;
     rightPost.castShadow = true;
 
+    if (isStartGate) {
+      const lampHousing = new THREE.Mesh(
+        new THREE.BoxGeometry(3.1, 0.62, 0.42),
+        new THREE.MeshStandardMaterial({ color: 0x171b20, roughness: 0.5, metalness: 0.32 })
+      );
+      lampHousing.position.set(0, 2.72, 0);
+      lampHousing.castShadow = true;
+      group.add(lampHousing);
+
+      const lamps = [];
+      for (let index = 0; index < 3; index += 1) {
+        const material = new THREE.MeshStandardMaterial({
+          color: 0x3a1717,
+          emissive: 0x180000,
+          emissiveIntensity: 0.15,
+          roughness: 0.28
+        });
+        const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 10), material);
+        lamp.position.set((index - 1) * 0.72, 2.72, -0.23);
+        lamps.push(lamp);
+        group.add(lamp);
+      }
+      startGateLights.push(lamps);
+    }
+
     group.add(line, accent, leftPost, rightPost);
     scene.add(group);
+  }
+
+  function updateStartGateLights() {
+    if (startGateLights.length === 0) return;
+    const phase = raceState.elapsedSeconds;
+    for (const lamps of startGateLights) {
+      lamps.forEach((lamp, index) => {
+        const green = phase >= 1.8;
+        const redActive = !green && phase >= index * 0.48;
+        lamp.material.color.setHex(green ? 0x38d96b : redActive ? 0xff3d32 : 0x3a1717);
+        lamp.material.emissive.setHex(green ? 0x16b84c : redActive ? 0xe31b12 : 0x180000);
+        lamp.material.emissiveIntensity = green ? 2.8 : redActive ? 2.3 : 0.15;
+      });
+    }
   }
 
   function createCheckeredTexture() {
@@ -2008,7 +2219,7 @@ export function createRacingGame({
     return texture;
   }
 
-  function createRoadTexture(surface) {
+  function createRoadTextures(surface) {
     const canvas = document.createElement("canvas");
     canvas.width = 512;
     canvas.height = 512;
@@ -2044,10 +2255,16 @@ export function createRacingGame({
       context.fillStyle = "rgba(160, 137, 104, 0.24)";
       context.fillRect(0, 0, 26, canvas.height);
       context.fillRect(canvas.width - 26, 0, 26, canvas.height);
-      return finalizeCanvasTexture(canvas);
+      return finalizeRoadTextureSet(canvas, surface);
     }
 
-    context.fillStyle = "#2a2c30";
+    const asphaltGradient = context.createLinearGradient(0, 0, canvas.width, 0);
+    asphaltGradient.addColorStop(0, "#303238");
+    asphaltGradient.addColorStop(0.15, "#25282d");
+    asphaltGradient.addColorStop(0.5, "#2b2d31");
+    asphaltGradient.addColorStop(0.85, "#24272b");
+    asphaltGradient.addColorStop(1, "#32343a");
+    context.fillStyle = asphaltGradient;
     context.fillRect(0, 0, canvas.width, canvas.height);
 
     for (let index = 0; index < 1900; index += 1) {
@@ -2069,7 +2286,52 @@ export function createRacingGame({
     context.fillStyle = "rgba(172, 146, 108, 0.15)";
     context.fillRect(0, 0, 22, canvas.height);
     context.fillRect(canvas.width - 22, 0, 22, canvas.height);
-    return finalizeCanvasTexture(canvas);
+    return finalizeRoadTextureSet(canvas, surface);
+  }
+
+  function finalizeRoadTextureSet(colorCanvas, surface) {
+    const bumpCanvas = document.createElement("canvas");
+    bumpCanvas.width = colorCanvas.width;
+    bumpCanvas.height = colorCanvas.height;
+    const bumpContext = bumpCanvas.getContext("2d");
+    if (bumpContext) {
+      bumpContext.fillStyle = surface === TRACK_SURFACES.GRAVEL ? "#777777" : "#858585";
+      bumpContext.fillRect(0, 0, bumpCanvas.width, bumpCanvas.height);
+      const count = surface === TRACK_SURFACES.GRAVEL ? 4200 : 3200;
+      for (let index = 0; index < count; index += 1) {
+        const shade = 75 + Math.floor(random() * 105);
+        bumpContext.fillStyle = `rgb(${shade}, ${shade}, ${shade})`;
+        const size = surface === TRACK_SURFACES.GRAVEL ? 1 + random() * 3.2 : 0.6 + random() * 1.8;
+        bumpContext.fillRect(random() * bumpCanvas.width, random() * bumpCanvas.height, size, size);
+      }
+    }
+
+    const roughnessCanvas = document.createElement("canvas");
+    roughnessCanvas.width = colorCanvas.width;
+    roughnessCanvas.height = colorCanvas.height;
+    const roughnessContext = roughnessCanvas.getContext("2d");
+    if (roughnessContext) {
+      roughnessContext.fillStyle = surface === TRACK_SURFACES.GRAVEL ? "#f1f1f1" : "#d0d0d0";
+      roughnessContext.fillRect(0, 0, roughnessCanvas.width, roughnessCanvas.height);
+      if (surface !== TRACK_SURFACES.GRAVEL) {
+        const wornBand = roughnessContext.createLinearGradient(0, 0, roughnessCanvas.width, 0);
+        wornBand.addColorStop(0, "#e4e4e4");
+        wornBand.addColorStop(0.22, "#b0b0b0");
+        wornBand.addColorStop(0.42, "#d2d2d2");
+        wornBand.addColorStop(0.62, "#ababab");
+        wornBand.addColorStop(1, "#e5e5e5");
+        roughnessContext.globalAlpha = 0.62;
+        roughnessContext.fillStyle = wornBand;
+        roughnessContext.fillRect(0, 0, roughnessCanvas.width, roughnessCanvas.height);
+        roughnessContext.globalAlpha = 1;
+      }
+    }
+
+    return {
+      color: finalizeCanvasTexture(colorCanvas),
+      bump: finalizeCanvasTexture(bumpCanvas),
+      roughness: finalizeCanvasTexture(roughnessCanvas)
+    };
   }
 
   function createVergeTexture(surface) {
@@ -2715,15 +2977,36 @@ export function createRacingGame({
       width: randomBetween(1.2, 2.8),
       height: randomBetween(0.55, 1.2)
     }));
+    const grassTufts = buildTracksidePlacements(scaleEnvironmentCount(foliageConfig.grassTuftCount ?? 220, 0.65), {
+      minOffset: 3.2,
+      maxOffset: 14,
+      minSpacing: foliageConfig.grassTuftMinSpacing ?? 1.8,
+      maxAttempts: (foliageConfig.maxAttempts ?? 1400) * 2
+    }).map((placement) => ({
+      ...placement,
+      width: randomBetween(0.45, 1.05),
+      height: randomBetween(0.32, 0.8)
+    }));
+    const rocks = buildTracksidePlacements(scaleEnvironmentCount(foliageConfig.rockCount ?? 42, 0.72), {
+      minOffset: 7,
+      maxOffset: 25,
+      minSpacing: foliageConfig.rockMinSpacing ?? 6.5,
+      maxAttempts: foliageConfig.maxAttempts ?? 1400
+    }).map((placement) => ({
+      ...placement,
+      size: randomBetween(0.45, 1.5)
+    }));
 
     addNearTreeInstances(nearTrees);
     addBillboardTreeInstances(farTrees, 0x90a98e);
     addShrubInstances(shrubs);
+    addGrassTuftInstances(grassTufts);
+    addRockInstances(rocks);
   }
 
   function scaleEnvironmentCount(baseCount, capMultiplier = 1) {
     const scale = Math.min(capMultiplier + 2, environmentScale * capMultiplier);
-    return Math.max(baseCount, Math.round(baseCount * scale));
+    return Math.max(8, Math.round(baseCount * scale * environmentDensity));
   }
 
   function addNearTreeInstances(placements) {
@@ -2732,16 +3015,23 @@ export function createRacingGame({
     const castTreeShadows = !isGravelSurface;
     const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x745336, roughness: 0.92 });
     const foliageMaterial = new THREE.MeshStandardMaterial({
-      color: 0x356b41,
+      color: 0x2f6b3f,
       roughness: 0.88,
+      flatShading: true
+    });
+    const foliageHighlightMaterial = new THREE.MeshStandardMaterial({
+      color: 0x4f8750,
+      roughness: 0.9,
       flatShading: true
     });
     const dummy = new THREE.Object3D();
 
     const slenderTrunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.22, 0.3, 1, 6), trunkMaterial, slender.length);
-    const slenderCrowns = new THREE.InstancedMesh(new THREE.ConeGeometry(0.92, 1.9, 7), foliageMaterial, slender.length);
+    const slenderCrowns = new THREE.InstancedMesh(new THREE.ConeGeometry(0.92, 1.9, 9), foliageMaterial, slender.length);
+    const slenderCrownHighlights = new THREE.InstancedMesh(new THREE.ConeGeometry(0.7, 1.45, 9), foliageHighlightMaterial, slender.length);
     slenderTrunks.castShadow = castTreeShadows;
     slenderCrowns.castShadow = castTreeShadows;
+    slenderCrownHighlights.castShadow = castTreeShadows;
 
     slender.forEach((tree, index) => {
       const trunkHeight = tree.height * 0.42;
@@ -2757,6 +3047,11 @@ export function createRacingGame({
       dummy.scale.set(tree.height * 0.38, tree.height * 0.62, tree.height * 0.38);
       dummy.updateMatrix();
       slenderCrowns.setMatrixAt(index, dummy.matrix);
+
+      dummy.position.set(tree.position.x, tree.height * 0.98, tree.position.y);
+      dummy.scale.set(tree.height * 0.25, tree.height * 0.38, tree.height * 0.25);
+      dummy.updateMatrix();
+      slenderCrownHighlights.setMatrixAt(index, dummy.matrix);
     });
 
     const layeredTrunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.2, 0.28, 1, 6), trunkMaterial, layered.length);
@@ -2790,11 +3085,12 @@ export function createRacingGame({
 
     slenderTrunks.instanceMatrix.needsUpdate = true;
     slenderCrowns.instanceMatrix.needsUpdate = true;
+    slenderCrownHighlights.instanceMatrix.needsUpdate = true;
     layeredTrunks.instanceMatrix.needsUpdate = true;
     layeredLower.instanceMatrix.needsUpdate = true;
     layeredUpper.instanceMatrix.needsUpdate = true;
 
-    scene.add(slenderTrunks, slenderCrowns, layeredTrunks, layeredLower, layeredUpper);
+    scene.add(slenderTrunks, slenderCrowns, slenderCrownHighlights, layeredTrunks, layeredLower, layeredUpper);
   }
 
   function addBillboardTreeInstances(placements, color) {
@@ -2864,6 +3160,58 @@ export function createRacingGame({
     shrubs.instanceMatrix.needsUpdate = true;
 
     scene.add(shrubs);
+  }
+
+  function addGrassTuftInstances(placements) {
+    if (placements.length === 0) return;
+
+    const geometry = new THREE.ConeGeometry(0.5, 1, 5);
+    geometry.translate(0, 0.5, 0);
+    const material = new THREE.MeshStandardMaterial({
+      color: isGravelSurface ? 0x8f8b55 : 0x6f963f,
+      roughness: 0.96,
+      flatShading: true
+    });
+    const tufts = new THREE.InstancedMesh(geometry, material, placements.length);
+    const dummy = new THREE.Object3D();
+
+    placements.forEach((tuft, index) => {
+      dummy.position.set(tuft.position.x, 0.04, tuft.position.y);
+      dummy.rotation.set(randomBetween(-0.08, 0.08), randomBetween(0, Math.PI * 2), randomBetween(-0.08, 0.08));
+      dummy.scale.set(tuft.width, tuft.height, tuft.width * randomBetween(0.72, 1.18));
+      dummy.updateMatrix();
+      tufts.setMatrixAt(index, dummy.matrix);
+    });
+
+    tufts.instanceMatrix.needsUpdate = true;
+    tufts.receiveShadow = true;
+    scene.add(tufts);
+  }
+
+  function addRockInstances(placements) {
+    if (placements.length === 0) return;
+
+    const geometry = new THREE.DodecahedronGeometry(1, 0);
+    const material = new THREE.MeshStandardMaterial({
+      color: isGravelSurface ? 0x8b7a62 : 0x69756b,
+      roughness: 0.93,
+      flatShading: true
+    });
+    const rocks = new THREE.InstancedMesh(geometry, material, placements.length);
+    const dummy = new THREE.Object3D();
+
+    placements.forEach((rock, index) => {
+      dummy.position.set(rock.position.x, rock.size * 0.32, rock.position.y);
+      dummy.rotation.set(randomBetween(-0.3, 0.3), randomBetween(0, Math.PI * 2), randomBetween(-0.22, 0.22));
+      dummy.scale.set(rock.size, rock.size * randomBetween(0.42, 0.72), rock.size * randomBetween(0.75, 1.35));
+      dummy.updateMatrix();
+      rocks.setMatrixAt(index, dummy.matrix);
+    });
+
+    rocks.instanceMatrix.needsUpdate = true;
+    rocks.castShadow = !isGravelSurface;
+    rocks.receiveShadow = true;
+    scene.add(rocks);
   }
 
   function createBillboardTreeTexture() {
@@ -2967,7 +3315,7 @@ export function createRacingGame({
         segments: backdropConfig.ridgeSegments ?? 36,
         minHeight: backdropConfig.ridgeHeightMin ?? 16,
         maxHeight: backdropConfig.ridgeHeightMax ?? 36,
-        color: 0x7d8e8f
+        color: 0x71868a
       }),
       createBackdropRidge({
         bounds: expandBounds(ridgeBounds, 18),
@@ -2975,7 +3323,15 @@ export function createRacingGame({
         segments: Math.max(20, Math.floor((backdropConfig.ridgeSegments ?? 36) * 0.7)),
         minHeight: 22,
         maxHeight: 46,
-        color: 0x6a7980
+        color: 0x637981
+      }),
+      createBackdropRidge({
+        bounds: expandBounds(ridgeBounds, 42),
+        depth: 58,
+        segments: Math.max(18, Math.floor((backdropConfig.ridgeSegments ?? 36) * 0.58)),
+        minHeight: 30,
+        maxHeight: 58,
+        color: 0x708691
       })
     );
 
@@ -3552,12 +3908,14 @@ export function createRacingGame({
       [-1.18, 0.48, -1.36],
       [1.18, 0.48, -1.36]
     ];
+    const fallbackWheelNodes = [];
     for (const [x, y, z] of wheelPositions) {
       const wheel = new THREE.Mesh(wheelGeometry, darkMaterial);
       wheel.position.set(x, y, z);
       wheel.rotation.z = Math.PI / 2;
       wheel.castShadow = true;
       visualRoot.add(wheel);
+      fallbackWheelNodes.push({ node: wheel, baseQuaternion: wheel.quaternion.clone() });
     }
 
     const boostGroup = new THREE.Group();
@@ -3616,6 +3974,7 @@ export function createRacingGame({
     visualRoot.position.y = racingSceneConfig.groundOffset;
     group.userData.boostFlames = flames;
     group.userData.boostGroup = boostGroup;
+    group.userData.wheelNodes = fallbackWheelNodes;
     group.userData.visualRoot = visualRoot;
     visualRoot.add(body, hood, cabin, rear, frontLightLeft, frontLightRight);
     visualRoot.add(boostGroup);
@@ -3647,8 +4006,10 @@ export function createRacingGame({
         state.steering += (0 - state.steering) * 0.18;
       }
 
-      updateCarTransform();
+      updateCarTransform(deltaSeconds);
       updateBoostEffect(timestamp);
+      updateStartGateLights();
+      updateDrivingDust(deltaSeconds);
       updateOpponentTransform();
       updateCamera(deltaSeconds);
       updateCollisionDebugVisuals();
@@ -4284,14 +4645,34 @@ export function createRacingGame({
     updateHud();
   }
 
-  function updateCarTransform() {
+  function updateCarTransform(deltaSeconds = 0) {
     car.position.set(state.position.x, 0, state.position.y);
     car.rotation.set(0, state.heading, 0);
 
     const visualRoot = car.userData.visualRoot;
     if (visualRoot) {
-      visualRoot.rotation.x = (state.brake - state.throttle * 0.45) * 0.03;
-      visualRoot.rotation.z = -state.steering * Math.min(0.12, state.velocity.length() * 0.004);
+      const speedRatio = clamp(state.velocity.length() / Math.max(playerMaxForwardSpeed(), 0.001), 0, 1);
+      const targetPitch = (state.brake * 0.075 - state.throttle * 0.035) * speedRatio;
+      const targetRoll = -state.steering
+        * Math.min(0.17, state.velocity.length() * 0.0052)
+        * (state.drifting ? 1.32 : 1);
+      const response = 1 - Math.exp(-Math.max(deltaSeconds, 1 / 120) * 8.5);
+      visualRoot.rotation.x += (targetPitch - visualRoot.rotation.x) * response;
+      visualRoot.rotation.z += (targetRoll - visualRoot.rotation.z) * response;
+      visualRoot.position.y = (racingSceneConfig.groundOffset ?? 0)
+        + Math.sin(wheelSpinAngle * 0.22) * speedRatio * 0.012;
+    }
+
+    const forwardSpeed = state.velocity.dot(forwardVector());
+    wheelSpinAngle += (forwardSpeed / 0.36) * deltaSeconds;
+    animateWheelNodes(car.userData.wheelNodes, wheelSpinAngle);
+  }
+
+  function animateWheelNodes(wheelNodes, spinAngle) {
+    if (!wheelNodes?.length) return;
+    const rollingRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), spinAngle);
+    for (const { node, baseQuaternion } of wheelNodes) {
+      node.quaternion.copy(baseQuaternion).multiply(rollingRotation);
     }
   }
 
@@ -4434,6 +4815,7 @@ export function createRacingGame({
   }
 
   function updateCamera(deltaSeconds) {
+    boostCameraKick = Math.max(0, boostCameraKick - deltaSeconds * 1.85);
     if (cameraMode === RACING_CAMERA_MODES.HOOD) {
       updateHoodCamera(deltaSeconds);
       return;
@@ -4450,15 +4832,19 @@ export function createRacingGame({
       cameraHeading + shortestAngleDelta(cameraHeading, state.heading) * headingFollow
     );
     const forward = new THREE.Vector3(Math.sin(cameraHeading), 0, Math.cos(cameraHeading));
+    const right = new THREE.Vector3(Math.cos(cameraHeading), 0, -Math.sin(cameraHeading));
     const target = new THREE.Vector3(state.position.x, cameraConfig.targetHeight, state.position.y)
-      .addScaledVector(forward, dynamicLookAhead);
+      .addScaledVector(forward, dynamicLookAhead)
+      .addScaledVector(right, state.steering * speedRatio * (state.drifting ? 0.85 : 0.3));
     const desired = new THREE.Vector3(state.position.x, 0, state.position.y)
       .addScaledVector(forward, -cameraConfig.followDistance)
-      .add(new THREE.Vector3(0, cameraConfig.height, 0));
+      .addScaledVector(forward, -boostCameraKick * 0.9)
+      .addScaledVector(right, -state.steering * speedRatio * (state.drifting ? 1.25 : 0.42))
+      .add(new THREE.Vector3(0, cameraConfig.height + Math.sin(wheelSpinAngle * 0.16) * speedRatio * 0.035, 0));
 
     const follow = 1 - Math.exp(-deltaSeconds * cameraConfig.followTightness);
     camera.position.lerp(desired, follow);
-    const targetFov = cameraConfig.fov + cameraConfig.speedFovBoost * speedRatio;
+    const targetFov = cameraConfig.fov + cameraConfig.speedFovBoost * speedRatio + boostCameraKick * 6;
     const fovFollow = 1 - Math.exp(-deltaSeconds * cameraConfig.speedFovResponse);
     camera.fov += (targetFov - camera.fov) * fovFollow;
     if (camera.near !== 0.1) camera.near = 0.1;
@@ -4478,14 +4864,14 @@ export function createRacingGame({
     const [localX, localY, localZ] = hoodConfig.position;
     const forward = new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading));
     const right = new THREE.Vector3(Math.cos(state.heading), 0, -Math.sin(state.heading));
+    const speedRatio = clamp(state.velocity.length() / Math.max(playerMaxForwardSpeed(), 0.0001), 0, 1);
     const desired = new THREE.Vector3(state.position.x, 0, state.position.y)
       .addScaledVector(right, localX)
       .addScaledVector(forward, localZ)
-      .add(new THREE.Vector3(0, localY, 0));
+      .add(new THREE.Vector3(0, localY + Math.sin(wheelSpinAngle * 0.18) * speedRatio * 0.018, 0));
     camera.position.copy(desired);
 
-    const speedRatio = clamp(state.velocity.length() / Math.max(playerMaxForwardSpeed(), 0.0001), 0, 1);
-    const targetFov = hoodConfig.fov + speedRatio * 2.5;
+    const targetFov = hoodConfig.fov + speedRatio * 2.5 + boostCameraKick * 4;
     const fovFollow = 1 - Math.exp(-deltaSeconds * 8);
     camera.fov += (targetFov - camera.fov) * fovFollow;
     camera.near = 0.03;
@@ -4752,6 +5138,7 @@ export function createRacingGame({
 
     state.boostCharges -= 1;
     state.boostSeconds = boostConfig.durationSeconds;
+    boostCameraKick = 1;
     return true;
   }
 
@@ -4792,7 +5179,7 @@ export function createRacingGame({
       const rect = canvas.getBoundingClientRect();
       const width = Math.max(320, Math.floor(rect.width || 960));
       const height = Math.max(320, Math.floor(rect.height || 620));
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, qualityPreset.maxPixelRatio));
       renderer.setSize(width, height, false);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
@@ -5122,6 +5509,43 @@ export function createRacingGame({
   playAgainButton.addEventListener("click", handleResetButtonClick);
 
   return { start, stop, reset: resetRace, destroy };
+}
+
+function resolveRacingQualityPreset() {
+  const presets = {
+    low: {
+      id: "low",
+      maxPixelRatio: 1,
+      shadowMapSize: 1024,
+      shadows: false,
+      environmentDensity: 0.48,
+      particleCount: 36
+    },
+    balanced: {
+      id: "balanced",
+      maxPixelRatio: 1.5,
+      shadowMapSize: 1536,
+      shadows: true,
+      environmentDensity: 0.76,
+      particleCount: 60
+    },
+    high: {
+      id: "high",
+      maxPixelRatio: 2,
+      shadowMapSize: 2048,
+      shadows: true,
+      environmentDensity: 1,
+      particleCount: 84
+    }
+  };
+  const requested = new URLSearchParams(window.location.search).get("quality")?.toLowerCase();
+  if (requested && presets[requested]) return presets[requested];
+
+  const memory = Number(navigator.deviceMemory || 0);
+  const cores = Number(navigator.hardwareConcurrency || 4);
+  if ((memory > 0 && memory <= 4) || cores <= 4) return presets.low;
+  if ((memory > 0 && memory >= 8) && cores >= 8) return presets.high;
+  return presets.balanced;
 }
 
 export function createGame(context) {
