@@ -1,0 +1,16 @@
+{
+  "rules": [
+    {
+      "allowed": {
+        "origins": [
+          "https://game.example.com",
+          "http://127.0.0.1:4173"
+        ],
+        "methods": ["GET", "HEAD"],
+        "headers": ["Range"]
+      },
+      "exposeHeaders": ["ETag", "Content-Length", "Content-Range"],
+      "maxAgeSeconds": 86400
+    }
+  ]
+}

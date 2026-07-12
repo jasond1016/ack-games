@@ -1,0 +1,26 @@
+{
+  "name": "vacuum-game",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Static game hub with the vacuum game and the 3D racing prototype.",
+  "packageManager": "pnpm@11.2.2",
+  "scripts": {
+    "serve": "node ./scripts/serve.mjs --port 4173",
+    "serve:open": "node ./scripts/serve.mjs --port 4173 --open",
+    "assets:thumbnails": "node ./scripts/generate-car-thumbnails.mjs",
+    "assets:optimize": "node ./scripts/optimize-car-models.mjs",
+    "assets:build": "node ./scripts/build-cloudflare.mjs",
+    "assets:verify": "node ./scripts/verify-cloudflare-build.mjs",
+    "deploy:r2": "node ./scripts/upload-r2.mjs",
+    "test:unit": "node --test tests/*.test.mjs",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:debug": "playwright test --debug",
+    "setup:e2e": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@gltf-transform/cli": "^4.4.1",
+    "@playwright/test": "^1.55.0",
+    "wrangler": "^4.110.0"
+  }
+}

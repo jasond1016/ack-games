@@ -871,12 +871,14 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   }
 
   async function hydrateCarOptionThumbnail(imageElement, carConfig) {
-    const thumbnailUrl = await ensureCarThumbnail(carConfig);
-    if (!thumbnailUrl || !imageElement.isConnected || imageElement.dataset.carId !== carConfig.id) {
+    if (!imageElement.isConnected || imageElement.dataset.carId !== carConfig.id) return;
+    if (new URLSearchParams(location.search).has("generate-car-thumbnails")) {
+      imageElement.src = await ensureCarThumbnail(carConfig);
       return;
     }
-
-    imageElement.src = thumbnailUrl;
+    imageElement.loading = "lazy";
+    imageElement.decoding = "async";
+    imageElement.src = carConfig.thumbnailUrl;
   }
 
   function ensureCarThumbnail(carConfig) {
@@ -956,7 +958,11 @@ export function createRacingGame({ onHome = () => {}, onEditMap = () => {} } = {
   }
 
   async function buildCarPreviewObject(carConfig) {
-    const template = await loadCarTemplate(carConfig);
+    const template = await loadCarTemplate({
+      ...carConfig,
+      id: `${carConfig.id}:preview`,
+      modelUrl: carConfig.previewModelUrl ?? carConfig.modelUrl
+    });
     return template
       ? buildPreviewCarFromTemplate(template)
       : createFallbackCar(carConfig, Number.parseInt(carConfig.accentColor.slice(1), 16));

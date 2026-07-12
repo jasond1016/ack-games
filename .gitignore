@@ -1,9 +1,14 @@
 _deploy/
+assets/cars-optimized/
+assets/cars-preview-optimized/
+cloudflare/r2-cors.json
 .wrangler/
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 verification-screenshot.png
+playwright-report/
+test-results/
 .DS_Store
 Thumbs.db

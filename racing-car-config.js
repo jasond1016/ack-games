@@ -1,5 +1,20 @@
-function createCarModelUrl(relativePath) {
-  return new URL(relativePath, import.meta.url).href;
+import { racingDeploymentConfig } from "./racing-deployment-config.js";
+import { racingModelManifest } from "./racing-model-manifest.js";
+
+function createCarAssetUrls(carId, relativePath) {
+  const cleanPath = relativePath.replace(/^\.\/assets\/cars\//, "");
+  const modelPath = racingDeploymentConfig.useHashedModelAssets
+    ? racingModelManifest[carId]?.objectKey ?? cleanPath
+    : cleanPath;
+  const previewModelPath = racingDeploymentConfig.useHashedModelAssets
+    ? racingModelManifest[carId]?.previewObjectKey ?? modelPath
+    : cleanPath;
+  return {
+    modelSourcePath: cleanPath,
+    modelUrl: new URL(modelPath, racingDeploymentConfig.modelAssetBaseUrl).href,
+    previewModelUrl: new URL(previewModelPath, racingDeploymentConfig.modelAssetBaseUrl).href,
+    thumbnailUrl: new URL(`./assets/car-thumbnails/${carId}.webp`, import.meta.url).href
+  };
 }
 
 export const racingSceneConfig = {
@@ -95,7 +110,7 @@ export const racingCarCatalog = [
     tag: "中置超跑",
     summary: "线条低矮的公路超跑，作为当前默认参赛车提供。",
     accentColor: "#d64545",
-    modelUrl: createCarModelUrl(
+    ...createCarAssetUrls("aventador",
       "./assets/cars/lamborghini_aventador_lp720-4_50th_anniversary/lamborghini_aventador_lp720-4_50th_anniversary.glb"
     ),
     targetLength: 4.78,
@@ -108,7 +123,7 @@ export const racingCarCatalog = [
     tag: "高性能 SUV",
     summary: "插混高性能 SUV，车身更高更重，提供与超跑完全不同的视觉轮廓。",
     accentColor: "#b66a2d",
-    modelUrl: createCarModelUrl(
+    ...createCarAssetUrls("urus-se",
       "./assets/cars/2025_lamborghini_urus_se.glb"
     ),
     targetLength: 5.12,
@@ -121,7 +136,7 @@ export const racingCarCatalog = [
     tag: "经典超跑",
     summary: "60 年代中置经典，车身低平，用来补充现有车库的年代层次。",
     accentColor: "#c08b2f",
-    modelUrl: createCarModelUrl(
+    ...createCarAssetUrls("miura-p400",
       "./assets/cars/1968_lamborghini_miura_p400.glb"
     ),
     targetLength: 4.37,
@@ -134,7 +149,7 @@ export const racingCarCatalog = [
     tag: "复古新生代",
     summary: "现代化 Countach 复刻，棱角轮廓鲜明，适合作为高辨识度公路超跑。",
     accentColor: "#d1d5db",
-    modelUrl: createCarModelUrl(
+    ...createCarAssetUrls("countach-lpi-800-4",
       "./assets/cars/2022_lamborghini_countach_lpi_800-4.optimized.glb"
     ),
     targetLength: 4.87,
@@ -147,7 +162,7 @@ export const racingCarCatalog = [
     tag: "GT 赛道车",
     summary: "耐力赛风格的 GT 赛车，用来和默认参赛车形成明确外观差异。",
     accentColor: "#0f8b8d",
-    modelUrl: createCarModelUrl(
+    ...createCarAssetUrls("dbr9",
       "./assets/cars/2008-aston-martin-009-aston-martin-racing-dbr9/source/2008 Aston Martin 009 Aston Martin Racing DBR9.glb"
     ),
     targetLength: 4.72,
@@ -162,7 +177,7 @@ export const racingCarCatalog = [
     accentColor: "#2f72d6",
     defaultPaintColor: "#2f72d6",
     tintIncludePatterns: ["paint", "material", "rimcolor"],
-    modelUrl: createCarModelUrl(
+    ...createCarAssetUrls("bolide",
       "./assets/cars/bugatti_bolide.glb"
     ),
     targetLength: 4.76,
@@ -175,7 +190,7 @@ export const racingCarCatalog = [
     tag: "限量超跑",
     summary: "向 EB110 致敬的限量 Bugatti，低矮楔形轮廓适合作为车库里的稀有旗舰车型。",
     accentColor: "#f4f4f0",
-    modelUrl: createCarModelUrl(
+    ...createCarAssetUrls("centodieci",
       "./assets/cars/2020_bugatti_centodieci.glb"
     ),
     targetLength: 4.54,
@@ -188,7 +203,7 @@ export const racingCarCatalog = [
     tag: "旗舰混动",
     summary: "新一代 V12 旗舰超跑，适合作为当前兰博基尼车系的顶级公路车型。",
     accentColor: "#63b64d",
-    modelUrl: createCarModelUrl(
+    ...createCarAssetUrls("revuelto",
       "./assets/cars/free_lamborghini_revuelto.glb"
     ),
     targetLength: 4.95,
@@ -201,7 +216,7 @@ export const racingCarCatalog = [
     tag: "V12 超跑",
     summary: "标准版 Aventador，作为现有 50th 纪念版之外的另一种 V12 轮廓选择。",
     accentColor: "#ef7d33",
-    modelUrl: createCarModelUrl(
+    ...createCarAssetUrls("aventador-classic",
       "./assets/cars/lamborghini_aventador.glb"
     ),
     targetLength: 4.78,
@@ -214,7 +229,7 @@ export const racingCarCatalog = [
     tag: "经典楔形",
     summary: "80 年代楔形超跑代表，适合补充更纯粹的复古兰博基尼风格。",
     accentColor: "#f5f0e8",
-    modelUrl: createCarModelUrl(
+    ...createCarAssetUrls("countach-5000qv",
       "./assets/cars/lamborghini_countach_5000qv__www.vecarz.com.glb"
     ),
     targetLength: 4.14,
@@ -227,7 +242,7 @@ export const racingCarCatalog = [
     tag: "赛道街车",
     summary: "更偏赛道取向的 Huracan 版本，用来填补 GT 赛车和公路超跑之间的视觉区间。",
     accentColor: "#2d8dbf",
-    modelUrl: createCarModelUrl(
+    ...createCarAssetUrls("huracan-sto",
       "./assets/cars/lamborghini_huracan_sto_2020.glb"
     ),
     targetLength: 4.55,
@@ -240,7 +255,7 @@ export const racingCarCatalog = [
     tag: "概念车",
     summary: "未来感极强的概念车型，用来提供与量产车完全不同的造型语言。",
     accentColor: "#4ab3c3",
-    modelUrl: createCarModelUrl(
+    ...createCarAssetUrls("terzo-millennio",
       "./assets/cars/lamborghini_terzo.glb"
     ),
     targetLength: 4.73,
@@ -253,7 +268,7 @@ export const racingCarCatalog = [
     tag: "极端超跑",
     summary: "夸张空气动力学外观的限量超跑，适合作为车库里的视觉焦点车型。",
     accentColor: "#9aa3ad",
-    modelUrl: createCarModelUrl(
+    ...createCarAssetUrls("veneno",
       "./assets/cars/lamborghini_venevo.glb"
     ),
     targetLength: 5.02,
