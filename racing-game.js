@@ -36,6 +36,7 @@ import {
 } from "./racing-session.mjs";
 import { createBrowserRacingClock, createBrowserRacingInput } from "./racing-runtime-adapters.mjs";
 import { createResourceLeaseCache } from "./racing-resource-leases.mjs";
+import { calculateDriveRetention, calculateEngineForce } from "./racing-driving-dynamics.mjs";
 
 const dracoDecoderPath = "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/libs/draco/";
 const carSurfaceExclusionPatterns = [
@@ -406,6 +407,7 @@ export function createRacingGame({
 
   const boostConfig = {
     charges: 5,
+    unlimited: true,
     durationSeconds: 5,
     topSpeedMultiplier: 2,
     engineForceMultiplier: 2.15
@@ -5028,9 +5030,6 @@ export function createRacingGame({
     const right = new THREE.Vector2(forward.y, -forward.x);
     const boostActive = state.boostSeconds > 0;
     const maxForwardSpeed = playerMaxForwardSpeed() * (state.onRoad ? 1 : handlingConfig.grassTopSpeedMultiplier);
-    const currentEngineForce = carConfig.engineForce
-      * (boostActive ? boostConfig.engineForceMultiplier : 1)
-      * controlScale;
     let forwardSpeed = velocity.dot(forward);
     const driftIntent = controlScale >= 0.95 &&
       state.onRoad &&
@@ -5050,11 +5049,16 @@ export function createRacingGame({
     }
 
     if (state.throttle > 0 && forwardSpeed < maxForwardSpeed) {
-      const speedRatio = Math.max(0, forwardSpeed / maxForwardSpeed);
-      const launchMultiplier = Math.abs(forwardSpeed) < handlingConfig.launchBoostThreshold
-        ? handlingConfig.launchForceMultiplier
-        : 1;
-      const force = currentEngineForce * launchMultiplier * (1 - speedRatio * 0.34);
+      const force = calculateEngineForce({
+        engineForce: carConfig.engineForce,
+        boostActive,
+        boostMultiplier: boostConfig.engineForceMultiplier,
+        controlScale,
+        forwardSpeed,
+        maxForwardSpeed,
+        launchBoostThreshold: handlingConfig.launchBoostThreshold,
+        launchForceMultiplier: handlingConfig.launchForceMultiplier
+      });
       velocity.addScaledVector(forward, force * deltaSeconds);
     }
 
@@ -5075,9 +5079,15 @@ export function createRacingGame({
       : carConfig.grassGrip;
     velocity.addScaledVector(right, -lateralSpeed * Math.min(1, grip * deltaSeconds));
 
-    const rolling = Math.max(0, 1 - carConfig.rollingResistance * deltaSeconds * (state.onRoad ? 1 : 1.75));
-    const drag = Math.max(0, 1 - velocity.lengthSq() * carConfig.drag * deltaSeconds * 0.01);
-    velocity.multiplyScalar(rolling * drag);
+    velocity.multiplyScalar(calculateDriveRetention({
+      deltaSeconds,
+      speedSquared: velocity.lengthSq(),
+      rollingResistance: carConfig.rollingResistance,
+      drag: carConfig.drag,
+      onRoad: state.onRoad,
+      throttleActive: state.throttle > 0,
+      boostActive
+    }));
 
     if (!state.onRoad) {
       velocity.multiplyScalar(Math.max(0, 1 - handlingConfig.grassDragMultiplier * deltaSeconds));
@@ -5819,7 +5829,7 @@ export function createRacingGame({
     speedValue.textContent = `${Math.round(state.velocity.length() * 3.6)}`;
     boostValue.textContent = state.boostSeconds > 0
       ? `${state.boostSeconds.toFixed(1)}S`
-      : `x${state.boostCharges}`;
+      : boostConfig.unlimited ? "∞" : `x${state.boostCharges}`;
     cameraValue.textContent = cameraMode === RACING_CAMERA_MODES.CHASE
       ? "跟车"
       : "引擎盖";
@@ -6047,11 +6057,11 @@ export function createRacingGame({
       return false;
     }
 
-    if (state.boostSeconds > 0 || state.boostCharges <= 0) {
+    if (state.boostSeconds > 0 || (!boostConfig.unlimited && state.boostCharges <= 0)) {
       return false;
     }
 
-    state.boostCharges -= 1;
+    if (!boostConfig.unlimited) state.boostCharges -= 1;
     state.boostSeconds = boostConfig.durationSeconds;
     boostCameraKick = 1;
     return true;

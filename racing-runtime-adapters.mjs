@@ -42,14 +42,15 @@ export function createBrowserRacingInput({
 }, { windowObject = window, documentObject = document } = {}) {
   let listening = false;
   const drivingCodes = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "KeyW", "KeyA", "KeyS", "KeyD"]);
-  const handledCodes = new Set([...drivingCodes, "KeyC", "KeyE", "KeyH", "KeyR", "Escape", "F2"]);
+  const boostCodes = new Set(["KeyE", "Numpad0"]);
+  const handledCodes = new Set([...drivingCodes, ...boostCodes, "KeyC", "KeyH", "KeyR", "Escape", "F2"]);
 
   function handleKeyDown(event) {
     if (handledCodes.has(event.code)) event.preventDefault();
     if (drivingCodes.has(event.code)) onDrive(event.code, true);
     if (event.repeat) return;
     if (event.code === "Escape") onPause();
-    else if (event.code === "KeyE") onBoost();
+    else if (boostCodes.has(event.code)) onBoost();
     else if (event.code === "KeyH") onToggleOpponent();
     else if (event.code === "KeyC") onToggleCamera();
     else if (event.code === "KeyR") onReplaceSession();
