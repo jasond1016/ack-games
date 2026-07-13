@@ -37,6 +37,13 @@ import {
 import { createBrowserRacingClock, createBrowserRacingInput } from "./racing-runtime-adapters.mjs";
 import { createResourceLeaseCache } from "./racing-resource-leases.mjs";
 import { calculateDriveRetention, calculateEngineForce } from "./racing-driving-dynamics.mjs";
+import {
+  FREE_DRIVE_JUMP,
+  freeDriveJumpRampRise,
+  isFreeDriveJumpGap,
+  isFreeDriveJumpGapSegment,
+  resolveFreeDriveJumpLaunch
+} from "./racing-jump-rules.mjs";
 
 const dracoDecoderPath = "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/libs/draco/";
 const carSurfaceExclusionPatterns = [
@@ -488,6 +495,11 @@ export function createRacingGame({
     boostCharges: boostConfig.charges,
     drifting: false
   };
+  const freeDriveJumpState = {
+    airborne: false,
+    elapsedSeconds: 0,
+    cooldownSeconds: 0
+  };
   const opponentState = {
     progress: opponentConfig.startProgress,
     position: new THREE.Vector2(),
@@ -590,6 +602,7 @@ export function createRacingGame({
       boostSeconds: Number(state.boostSeconds.toFixed(2)),
       boostCharges: state.boostCharges,
       drifting: state.drifting,
+      airborne: freeDriveJumpState.airborne,
       speedKmh: Math.round(state.velocity.length() * 3.6),
       playerMaxForwardSpeed: playerMaxForwardSpeed(),
       status: currentStatusLabel(),
@@ -607,6 +620,7 @@ export function createRacingGame({
         progress: Number(traffic.progress.toFixed(3)),
         speedKmh: Math.round(traffic.currentSpeed * 3.6),
         direction: traffic.direction,
+        airborne: traffic.airborne,
         collisionHoldSeconds: Number(traffic.collisionHoldSeconds.toFixed(2)),
         position: { x: Number(traffic.position.x.toFixed(1)), y: Number(traffic.position.y.toFixed(1)) }
       })),
@@ -1978,6 +1992,7 @@ export function createRacingGame({
       const start = bridgeSamples[index];
       const end = bridgeSamples[Math.min(index + 3, bridgeSamples.length - 1)];
       if (Math.sign(start.center.y) !== Math.sign(end.center.y) || start.center.distanceTo(end.center) > 18) continue;
+      if (isFreeDriveJumpGapSegment(start.center, end.center)) continue;
       for (const side of [-1, 1]) {
         const a = start.center.clone().add(start.normal.clone().multiplyScalar((start.halfWidth + 0.42) * side));
         const b = end.center.clone().add(end.normal.clone().multiplyScalar((end.halfWidth + 0.42) * side));
@@ -2019,6 +2034,30 @@ export function createRacingGame({
       crossbeam.castShadow = qualityPreset.shadows;
       scene.add(crossbeam);
     });
+
+    const warningMaterial = new THREE.MeshStandardMaterial({ color: 0xf2c94c, roughness: 0.54, metalness: 0.08 });
+    for (const edgeX of [FREE_DRIVE_JUMP.gapMinX, FREE_DRIVE_JUMP.gapMaxX]) {
+      const edgeSample = bridgeSamples
+        .filter((sample) => sample.center.y > FREE_DRIVE_JUMP.corridorMinY)
+        .reduce((best, sample) => Math.abs(sample.center.x - edgeX) < Math.abs(best.center.x - edgeX) ? sample : best);
+      if (!edgeSample) continue;
+      const deckY = freeDriveElevationAtPosition(edgeSample.center, edgeSample.progress);
+      const endFace = new THREE.Mesh(
+        new THREE.BoxGeometry(edgeSample.halfWidth * 2, 1.5, 0.72),
+        concrete
+      );
+      endFace.position.set(edgeSample.center.x, deckY - 0.72, edgeSample.center.y);
+      endFace.rotation.y = edgeSample.heading;
+      endFace.castShadow = endFace.receiveShadow = qualityPreset.shadows;
+      const warningBar = new THREE.Mesh(
+        new THREE.BoxGeometry(edgeSample.halfWidth * 1.7, 0.12, 0.9),
+        warningMaterial
+      );
+      warningBar.position.set(edgeSample.center.x, deckY + 0.1, edgeSample.center.y);
+      warningBar.rotation.y = edgeSample.heading;
+      warningBar.receiveShadow = true;
+      scene.add(endFace, warningBar);
+    }
 
   }
 
@@ -2554,6 +2593,7 @@ export function createRacingGame({
       const startSample = trackProfileAtProgress(sampleProgressForIndex(index, railConfig.sampleCount));
       const endSample = trackProfileAtProgress(sampleProgressForIndex(index + 1, railConfig.sampleCount));
       if (sampleFilter && (!sampleFilter(startSample) || !sampleFilter(endSample))) continue;
+      if (isFreeDrive && isFreeDriveJumpGapSegment(startSample.center, endSample.center)) continue;
       const start = startSample.center.clone().add(startSample.normal.clone().multiplyScalar(startSample.railOffset * side));
       const end = endSample.center.clone().add(endSample.normal.clone().multiplyScalar(endSample.railOffset * side));
       const segment = end.clone().sub(start);
@@ -2612,6 +2652,9 @@ export function createRacingGame({
     physics.playerBody.setRotation(rapierRotationFromYaw(heading), true);
     physics.playerBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
     physics.playerBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    freeDriveJumpState.airborne = false;
+    freeDriveJumpState.elapsedSeconds = 0;
+    freeDriveJumpState.cooldownSeconds = 0;
   }
 
   function setOpponentBodyPose(position, heading) {
@@ -2655,6 +2698,7 @@ export function createRacingGame({
 
     for (let index = 0; index < trackModel.segmentCount; index += 1) {
       const next = trackModel.closed ? (index + 1) % trackConfig.samples : index + 1;
+      if (isFreeDrive && isFreeDriveJumpGapSegment(trackSamples[index].center, trackSamples[next].center)) continue;
       const left = index * 2;
       const right = left + 1;
       const nextLeft = next * 2;
@@ -2669,6 +2713,7 @@ export function createRacingGame({
     geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
     geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
     geometry.setIndex(indices);
+    geometry.computeVertexNormals();
 
     return new THREE.Mesh(
       geometry,
@@ -2722,6 +2767,7 @@ export function createRacingGame({
     for (let index = 0; index < trackModel.segmentCount; index += 1) {
       const next = trackModel.closed ? (index + 1) % trackConfig.samples : index + 1;
       if (segmentFilter && (!segmentFilter(trackSamples[index]) || !segmentFilter(trackSamples[next]))) continue;
+      if (isFreeDrive && isFreeDriveJumpGapSegment(trackSamples[index].center, trackSamples[next].center)) continue;
       const inner = index * 2;
       const outer = inner + 1;
       const nextInner = next * 2;
@@ -3240,6 +3286,7 @@ export function createRacingGame({
     const edgeGeometry = new THREE.BoxGeometry(0.14, 0.025, 4.8);
     for (let index = 0; index < 140; index += 1) {
       const sample = trackProfileAtProgress(sampleProgressForIndex(index, 140));
+      if (isFreeDriveJumpGap(sample.center)) continue;
       const markHeight = 0.105 + freeDriveElevationAtProgress(sampleProgressForIndex(index, 140));
       if (index % 2 === 0) {
         const dash = new THREE.Mesh(dashGeometry, centerMaterial);
@@ -3270,7 +3317,7 @@ export function createRacingGame({
     if (position.x > 238) return 1.15;
     if (position.x > 116) {
       const bridgeProgress = clamp((position.x - 116) / 122, 0, 1);
-      return 4.8 + Math.sin(bridgeProgress * Math.PI) * 3.2;
+      return 4.8 + Math.sin(bridgeProgress * Math.PI) * 3.2 + freeDriveJumpRampRise(position);
     }
     const phase = wrapProgress(progress) * Math.PI * 2;
     return 2.8 + Math.sin(phase - 0.4) * 2.6 + Math.sin(phase * 2 + 0.8) * 1.15;
@@ -4301,6 +4348,10 @@ export function createRacingGame({
         collisionHoldSeconds: 0,
         contactCooldownSeconds: 0,
         wheelSpin: 0,
+        jumpOffset: 0,
+        jumpVelocity: 0,
+        jumpCooldownSeconds: 0,
+        airborne: false,
         position: new THREE.Vector2(),
         heading: 0
       };
@@ -4337,6 +4388,10 @@ export function createRacingGame({
       traffic.collisionHoldSeconds = 0;
       traffic.contactCooldownSeconds = 0;
       traffic.wheelSpin = 0;
+      traffic.jumpOffset = 0;
+      traffic.jumpVelocity = 0;
+      traffic.jumpCooldownSeconds = 0;
+      traffic.airborne = false;
       syncFreeDriveTrafficPose(traffic, true);
     }
   }
@@ -4345,7 +4400,11 @@ export function createRacingGame({
     const sample = trackProfileAtProgress(traffic.progress);
     traffic.position.copy(sample.center).add(sample.normal.clone().multiplyScalar(traffic.laneOffset));
     traffic.heading = sample.heading + (traffic.direction < 0 ? Math.PI : 0);
-    const translation = { x: traffic.position.x, y: physicsConfig.fixedHeight, z: traffic.position.y };
+    const translation = {
+      x: traffic.position.x,
+      y: physicsConfig.fixedHeight + traffic.jumpOffset,
+      z: traffic.position.y
+    };
     const rotation = rapierRotationFromYaw(traffic.heading);
     if (immediate) {
       traffic.body.setTranslation(translation, true);
@@ -4356,7 +4415,7 @@ export function createRacingGame({
     }
     traffic.visual.position.set(
       traffic.position.x,
-      freeDriveElevationAtProgress(traffic.progress),
+      freeDriveElevationAtProgress(traffic.progress) + traffic.jumpOffset,
       traffic.position.y
     );
     traffic.visual.rotation.set(0, traffic.heading, 0);
@@ -4367,6 +4426,7 @@ export function createRacingGame({
     for (const traffic of freeDriveTraffic) {
       traffic.collisionHoldSeconds = Math.max(0, traffic.collisionHoldSeconds - deltaSeconds);
       traffic.contactCooldownSeconds = Math.max(0, traffic.contactCooldownSeconds - deltaSeconds);
+      traffic.jumpCooldownSeconds = Math.max(0, traffic.jumpCooldownSeconds - deltaSeconds);
       let targetSpeed = traffic.collisionHoldSeconds > 0 ? 1.5 : traffic.cruiseSpeed;
       let nearestAhead = Infinity;
       for (const other of freeDriveTraffic) {
@@ -4387,6 +4447,26 @@ export function createRacingGame({
         targetSpeed = Math.min(targetSpeed, Math.max(0, state.velocity.length() - 1));
       }
       traffic.currentSpeed = moveToward(traffic.currentSpeed, targetSpeed, deltaSeconds * 5.5);
+      if (!traffic.airborne && traffic.jumpCooldownSeconds <= 0) {
+        const launch = resolveFreeDriveJumpLaunch(traffic.position, {
+          x: Math.sin(traffic.heading) * traffic.currentSpeed,
+          y: Math.cos(traffic.heading) * traffic.currentSpeed
+        });
+        if (launch) {
+          traffic.airborne = true;
+          traffic.jumpVelocity = launch.verticalSpeed;
+        }
+      }
+      if (traffic.airborne) {
+        traffic.jumpVelocity -= FREE_DRIVE_JUMP.gravity * deltaSeconds;
+        traffic.jumpOffset += traffic.jumpVelocity * deltaSeconds;
+        if (traffic.jumpOffset <= 0 && traffic.jumpVelocity < 0) {
+          traffic.jumpOffset = 0;
+          traffic.jumpVelocity = 0;
+          traffic.airborne = false;
+          traffic.jumpCooldownSeconds = 0.8;
+        }
+      }
       traffic.progress = wrapProgress(
         traffic.progress + traffic.direction * traffic.currentSpeed * deltaSeconds / Math.max(trackLength, 0.001)
       );
@@ -4964,14 +5044,45 @@ export function createRacingGame({
     }
 
     drivePlayerBody(deltaSeconds, verticalVelocity, impactRecovery);
+    updatePlayerFreeDriveJump(deltaSeconds);
 
     updateOpponent(deltaSeconds);
     updateFreeDriveTraffic(deltaSeconds);
     physics.world.step(physics.eventQueue);
     drainPhysicsEvents();
     syncPlayerPhysicsState(state.previousTrackIndex);
+    settlePlayerFreeDriveJump();
     resolveFreeDriveTrafficContacts();
     syncOpponentPhysicsState();
+  }
+
+  function updatePlayerFreeDriveJump(deltaSeconds) {
+    if (!isFreeDrive || !physics?.playerBody) return;
+    freeDriveJumpState.cooldownSeconds = Math.max(0, freeDriveJumpState.cooldownSeconds - deltaSeconds);
+    if (freeDriveJumpState.airborne || freeDriveJumpState.cooldownSeconds > 0) return;
+
+    const launch = resolveFreeDriveJumpLaunch(state.position, state.velocity);
+    if (!launch) return;
+    const velocity = physics.playerBody.linvel();
+    physics.playerBody.setLinvel({ x: velocity.x, y: launch.verticalSpeed, z: velocity.z }, true);
+    freeDriveJumpState.airborne = true;
+    freeDriveJumpState.elapsedSeconds = 0;
+  }
+
+  function settlePlayerFreeDriveJump() {
+    if (!freeDriveJumpState.airborne || !physics?.playerBody) return;
+    freeDriveJumpState.elapsedSeconds += physicsConfig.stepSeconds;
+    const translation = physics.playerBody.translation();
+    const verticalSpeed = physics.playerBody.linvel().y;
+    if (
+      freeDriveJumpState.elapsedSeconds > 0.18
+      && translation.y <= physicsConfig.fixedHeight + 0.04
+      && verticalSpeed <= 0.2
+    ) {
+      freeDriveJumpState.airborne = false;
+      freeDriveJumpState.elapsedSeconds = 0;
+      freeDriveJumpState.cooldownSeconds = 0.8;
+    }
   }
 
   function updateOpponent(deltaSeconds) {
@@ -5210,6 +5321,7 @@ export function createRacingGame({
   function resolveFreeDriveTrafficContacts() {
     if (!isFreeDrive || !physics?.playerBody) return;
     for (const traffic of freeDriveTraffic) {
+      if (freeDriveJumpState.airborne || traffic.airborne) continue;
       if (traffic.contactCooldownSeconds > 0) continue;
       const delta = state.position.clone().sub(traffic.position);
       const forward = new THREE.Vector2(Math.sin(traffic.heading), Math.cos(traffic.heading));
@@ -5557,9 +5669,13 @@ export function createRacingGame({
   }
 
   function updateCarTransform(deltaSeconds = 0) {
-    const targetElevation = state.onRoad
+    const roadElevation = state.onRoad
       ? freeDriveElevationAtProgress(state.trackProgress)
       : freeDriveGroundElevationAt(state.position, state.trackProgress);
+    const physicsElevation = freeDriveJumpState.airborne && physics?.playerBody
+      ? Math.max(0, physics.playerBody.translation().y - physicsConfig.fixedHeight)
+      : 0;
+    const targetElevation = roadElevation + physicsElevation;
     const elevationFollow = 1 - Math.exp(-Math.max(deltaSeconds, 1 / 120) * (state.onRoad ? 10 : 3.2));
     playerVisualElevation += (targetElevation - playerVisualElevation) * elevationFollow;
     car.position.set(state.position.x, playerVisualElevation, state.position.y);
@@ -5568,7 +5684,26 @@ export function createRacingGame({
     const visualRoot = car.userData.visualRoot;
     if (visualRoot) {
       const speedRatio = clamp(state.velocity.length() / Math.max(playerMaxForwardSpeed(), 0.001), 0, 1);
-      const targetPitch = (state.brake * 0.075 - state.throttle * 0.035) * speedRatio;
+      const forward = forwardVector();
+      const rampSampleDistance = 0.75;
+      const rampRiseAhead = freeDriveJumpRampRise({
+        x: state.position.x + forward.x * rampSampleDistance,
+        y: state.position.y + forward.y * rampSampleDistance
+      });
+      const rampRiseBehind = freeDriveJumpRampRise({
+        x: state.position.x - forward.x * rampSampleDistance,
+        y: state.position.y - forward.y * rampSampleDistance
+      });
+      const rampPitch = Math.atan2(rampRiseAhead - rampRiseBehind, rampSampleDistance * 2);
+      const verticalSpeed = freeDriveJumpState.airborne && physics?.playerBody
+        ? physics.playerBody.linvel().y
+        : 0;
+      const flightPitch = freeDriveJumpState.airborne
+        ? Math.atan2(verticalSpeed, Math.max(8, state.velocity.length())) * 0.72
+        : 0;
+      const targetPitch = (state.brake * 0.075 - state.throttle * 0.035) * speedRatio
+        - rampPitch
+        - flightPitch;
       const targetRoll = -state.steering
         * Math.min(0.17, state.velocity.length() * 0.0052)
         * (state.drifting ? 1.32 : 1);
