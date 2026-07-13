@@ -571,7 +571,7 @@ export function createRacingGame({
     resetRace,
     toggleCamera: toggleCameraMode,
     finishRace: (winner = "player") => finishLapRace(winner === "opponent" ? "opponent" : "player"),
-    placeCollisionScenario,
+    placeCollisionScenario: (progress) => placeCollisionScenario(progress),
     toggleOpponent,
     toggleCollisionDebug: () => setCollisionDebugEnabled(!collisionDebug.enabled),
     getState: () => ({
@@ -1220,19 +1220,19 @@ export function createRacingGame({
       renderer.setClearColor(racingSceneConfig.backgroundColor ?? 0x9fc9f3);
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = (racingSceneConfig.toneMappingExposure ?? 1) * (isFreeDrive ? 1.22 : 1);
+      renderer.toneMappingExposure = (racingSceneConfig.toneMappingExposure ?? 1) * (isFreeDrive ? 0.98 : 1);
       renderer.shadowMap.enabled = qualityPreset.shadows;
       renderer.shadowMap.type = THREE.PCFShadowMap;
 
       scene = new THREE.Scene();
       scene.background = new THREE.Color(racingSceneConfig.backgroundColor ?? 0x9fc9f3);
-      scene.fog = new THREE.Fog(
+      scene.fog = isFreeDrive ? null : new THREE.Fog(
         racingSceneConfig.fogColor ?? racingSceneConfig.backgroundColor ?? 0x9fc9f3,
         138,
         285
       );
 
-      camera = new THREE.PerspectiveCamera(cameraConfig.fov, 1, 0.1, 500);
+      camera = new THREE.PerspectiveCamera(cameraConfig.fov, 1, 0.1, isFreeDrive ? 900 : 500);
 
       await applySceneEnvironment();
       createLights();
@@ -1385,26 +1385,28 @@ export function createRacingGame({
 
   function createLights() {
     const hemisphere = new THREE.HemisphereLight(
-      0xb9dcff,
-      0x587044,
-      racingSceneConfig.hemisphereIntensity ?? 1.2
+      isFreeDrive ? 0xdceeff : 0xb9dcff,
+      isFreeDrive ? 0x6f795c : 0x587044,
+      isFreeDrive ? 1.25 : racingSceneConfig.hemisphereIntensity ?? 1.2
     );
     scene.add(hemisphere);
 
-    const sun = new THREE.DirectionalLight(0xfff0d0, racingSceneConfig.sunIntensity ?? 2.4);
-    sun.position.set(-72, 58, 46);
+    const sun = new THREE.DirectionalLight(isFreeDrive ? 0xfff4dc : 0xfff0d0, isFreeDrive ? 2.7 : racingSceneConfig.sunIntensity ?? 2.4);
+    sun.position.set(isFreeDrive ? -165 : -72, isFreeDrive ? 190 : 58, isFreeDrive ? -115 : 46);
     sun.castShadow = true;
     sun.shadow.mapSize.width = qualityPreset.shadowMapSize;
     sun.shadow.mapSize.height = qualityPreset.shadowMapSize;
     sun.shadow.bias = racingSceneConfig.sunShadowBias ?? 0;
     sun.shadow.normalBias = racingSceneConfig.sunShadowNormalBias ?? 0;
-    sun.shadow.camera.left = -120;
-    sun.shadow.camera.right = 120;
-    sun.shadow.camera.top = 120;
-    sun.shadow.camera.bottom = -120;
+    const shadowExtent = isFreeDrive ? 330 : 120;
+    sun.shadow.camera.left = -shadowExtent;
+    sun.shadow.camera.right = shadowExtent;
+    sun.shadow.camera.top = shadowExtent;
+    sun.shadow.camera.bottom = -shadowExtent;
+    sun.shadow.camera.far = isFreeDrive ? 650 : 500;
     scene.add(sun);
 
-    const horizonFill = new THREE.DirectionalLight(0x8bbbe2, 0.28);
+    const horizonFill = new THREE.DirectionalLight(isFreeDrive ? 0xa9d5ff : 0x8bbbe2, isFreeDrive ? 0.42 : 0.28);
     horizonFill.position.set(68, 24, -52);
     scene.add(horizonFill);
   }
@@ -1416,13 +1418,13 @@ export function createRacingGame({
 
     if (isFreeDrive) {
       const texture = await new RGBELoader().loadAsync(
-        new URL("./assets/freedrive/environment/secluded-beach-1k.hdr", import.meta.url).href
+        new URL("./assets/freedrive/environment/qwantani-noon-puresky-1k.hdr", import.meta.url).href
       );
       texture.mapping = THREE.EquirectangularReflectionMapping;
       scene.environment = texture;
       scene.background = texture;
-      scene.backgroundBlurriness = 0.18;
-      scene.environmentIntensity = 0.86;
+      scene.backgroundBlurriness = 0;
+      scene.environmentIntensity = 0.92;
       return;
     }
 
@@ -1510,7 +1512,7 @@ export function createRacingGame({
     if (!isFreeDrive) addSkyDome();
     if (isFreeDrive) addFreeDriveGroundLayers();
     else addGroundLayers();
-    addBackdrop();
+    if (!isFreeDrive) addBackdrop();
 
     const road = createRoadMesh();
     road.receiveShadow = true;
@@ -1527,7 +1529,9 @@ export function createRacingGame({
     if (!isFreeDrive) addFoliage();
     if (isFreeDrive) {
       addFreeDriveLandmarks();
-      await Promise.all([addRealFreeDriveVegetation(), addFreeDriveCoastalCliffs()]);
+      addFreeDriveBridge();
+      addFreeDriveCity();
+      await Promise.all([addRealFreeDriveVegetation(), addFreeDriveCoastalCliffs(), addRealFreeDriveCityProps()]);
     }
     drivingDust = createDrivingDust();
     scene.add(drivingDust.points);
@@ -1580,6 +1584,85 @@ export function createRacingGame({
     return template;
   }
 
+  async function loadFreeDrivePropTemplate(filename, targetHeight) {
+    const url = new URL(`./assets/freedrive/models/${filename}`, import.meta.url).href;
+    const gltf = await carModelLoader.loadAsync(url);
+    const template = gltf.scene || gltf.scenes?.[0];
+    if (!template) throw new Error(`${filename} has no scene.`);
+    template.updateMatrixWorld(true);
+    const bounds = new THREE.Box3().setFromObject(template);
+    const size = bounds.getSize(new THREE.Vector3());
+    const center = bounds.getCenter(new THREE.Vector3());
+    const scale = targetHeight / Math.max(size.y, 0.001);
+    template.scale.setScalar(scale);
+    template.position.set(-center.x * scale, -bounds.min.y * scale, -center.z * scale);
+    template.traverse((child) => {
+      if (!child.isMesh) return;
+      child.castShadow = qualityPreset.shadows;
+      child.receiveShadow = true;
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      materials.forEach((material) => {
+        if (material.map) material.map.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      });
+    });
+    return template;
+  }
+
+  async function addRealFreeDriveCityProps() {
+    try {
+      const [streetLamp, seating, hydrant, trashCan, storefront, planter, cafeSet] = await Promise.all([
+        loadFreeDrivePropTemplate("street_lamp_01-lod0.glb", 6.4),
+        loadFreeDrivePropTemplate("modular_street_seating-lod0.glb", 1.05),
+        loadFreeDrivePropTemplate("fire_hydrant-lod0.glb", 0.92),
+        loadFreeDrivePropTemplate("metal_trash_can-lod0.glb", 1.08),
+        loadFreeDrivePropTemplate("rollershutter_door-lod0.glb", 3.15),
+        loadFreeDrivePropTemplate("planter_box_01-lod0.glb", 0.78),
+        loadFreeDrivePropTemplate("outdoor_table_chair_set_01-lod0.glb", 1.2)
+      ]);
+      const citySamples = trackSamples.filter((sample) => sample.center.x > 246);
+      citySamples.filter((_, index) => index % 20 === 0).forEach((sample) => {
+        for (const side of [-1, 1]) {
+          const position = sample.center.clone().add(sample.normal.clone().multiplyScalar((sample.halfWidth + 3.35) * side));
+          const lamp = streetLamp.clone(true);
+          lamp.position.set(position.x, 1.12, position.y);
+          lamp.rotation.y = sample.heading + (side > 0 ? 0 : Math.PI);
+          scene.add(lamp);
+        }
+      });
+      citySamples.filter((_, index) => index % 58 === 12).forEach((sample, index) => {
+        const side = index % 2 === 0 ? 1 : -1;
+        const base = sample.center.clone().add(sample.normal.clone().multiplyScalar((sample.halfWidth + 5.5) * side));
+        const bench = seating.clone(true);
+        bench.position.set(base.x, 1.1, base.y);
+        bench.rotation.y = sample.heading + (side > 0 ? Math.PI : 0);
+        const smallProp = (index % 3 === 0 ? hydrant : trashCan).clone(true);
+        const propPosition = base.clone().add(sample.tangent.clone().multiplyScalar(3.2));
+        smallProp.position.set(propPosition.x, 1.1, propPosition.y);
+        smallProp.rotation.y = randomBetween(0, Math.PI * 2);
+        scene.add(bench, smallProp);
+      });
+      const cityCore = new THREE.Vector2(340, 34);
+      citySamples.filter((_, index) => index % 72 === 24).forEach((sample, index) => {
+        const inwardSide = Math.sign(cityCore.clone().sub(sample.center).dot(sample.normal)) || 1;
+        const storefrontPosition = sample.center.clone().add(sample.normal.clone().multiplyScalar((sample.halfWidth + 13.5) * inwardSide));
+        const door = storefront.clone(true);
+        door.position.set(storefrontPosition.x, 1.1, storefrontPosition.y);
+        door.rotation.y = sample.heading + (inwardSide > 0 ? Math.PI : 0);
+        const planterPosition = sample.center.clone().add(sample.normal.clone().multiplyScalar((sample.halfWidth + 6.2) * inwardSide));
+        const planterModel = planter.clone(true);
+        planterModel.position.set(planterPosition.x, 1.1, planterPosition.y);
+        planterModel.rotation.y = sample.heading;
+        const socialProp = (index % 2 === 0 ? cafeSet : seating).clone(true);
+        const socialPosition = planterPosition.clone().add(sample.tangent.clone().multiplyScalar(4.5));
+        socialProp.position.set(socialPosition.x, 1.1, socialPosition.y);
+        socialProp.rotation.y = sample.heading + (inwardSide > 0 ? Math.PI : 0);
+        scene.add(door, planterModel, socialProp);
+      });
+    } catch (error) {
+      console.warn("Free Drive city prop models failed to load.", error);
+    }
+  }
+
   function placeFreeDriveVegetation(template, count, options) {
     const placements = buildTracksidePlacements(count, {
       minOffset: options.minOffset,
@@ -1588,6 +1671,7 @@ export function createRacingGame({
       maxAttempts: Math.max(1800, count * 32)
     });
     placements.forEach((placement) => {
+      if (placement.position.x > 118) return;
       const model = template.clone(true);
       const groundElevation = freeDriveGroundElevationAt(placement.position, placement.progress);
       model.position.set(placement.position.x, groundElevation, placement.position.y);
@@ -1657,13 +1741,15 @@ export function createRacingGame({
     freeDriveWater = ocean;
     scene.add(ocean);
 
-    const islandGeometry = new THREE.CircleGeometry(sceneBounds.radius + 82, 96, 24);
+    const islandRadius = 188;
+    const islandCenter = new THREE.Vector2(0, 0);
+    const islandGeometry = new THREE.CircleGeometry(islandRadius, 96, 24);
     const positions = islandGeometry.getAttribute("position");
     for (let index = 0; index < positions.count; index += 1) {
       const x = positions.getX(index);
       const y = positions.getY(index);
       const radius = Math.hypot(x, y);
-      const edge = smoothstep(sceneBounds.radius + 34, sceneBounds.radius + 82, radius);
+      const edge = smoothstep(islandRadius - 42, islandRadius, radius);
       positions.setZ(index, -0.18 - edge * 2.4);
     }
     positions.needsUpdate = true;
@@ -1681,7 +1767,7 @@ export function createRacingGame({
       createGrassMaterial(34, 34)
     );
     island.rotation.x = -Math.PI / 2;
-    island.position.set(sceneCenter.x, 0, sceneCenter.y);
+    island.position.set(islandCenter.x, 0, islandCenter.y);
     island.receiveShadow = true;
     scene.add(island);
     const createSandMaterial = (tint) => new THREE.MeshStandardMaterial({
@@ -1692,18 +1778,27 @@ export function createRacingGame({
       roughness: 0.9,
       side: THREE.DoubleSide
     });
-    const coastStart = sceneBounds.radius + 34;
+    const coastStart = islandRadius - 42;
     scene.add(
-      createFreeDriveCoastRing(coastStart, sceneBounds.radius + 66, -0.2, -0.78, createSandMaterial(0xc7ad82)),
-      createFreeDriveCoastRing(sceneBounds.radius + 65, sceneBounds.radius + 84, -0.76, -1.38, createSandMaterial(0x766b5d))
+      createFreeDriveCoastRing(coastStart, islandRadius - 12, -0.2, -0.78, createSandMaterial(0xc7ad82), islandCenter),
+      createFreeDriveCoastRing(islandRadius - 13, islandRadius + 3, -0.76, -1.38, createSandMaterial(0x766b5d), islandCenter)
     );
+    const cityGround = new THREE.Mesh(
+      new THREE.BoxGeometry(250, 0.7, 250),
+      createFreeDrivePbrMaterial("brushed_concrete", { color: 0x737b7c, repeatX: 28, repeatY: 28, roughness: 0.92 })
+    );
+    cityGround.position.set(340, -0.42, 14);
+    cityGround.receiveShadow = true;
+    scene.add(cityGround);
     scene.add(
-      createFreeDriveEmbankmentMesh(1, createGrassMaterial(3, 1)),
-      createFreeDriveEmbankmentMesh(-1, createGrassMaterial(3, 1))
+      createFreeDriveEmbankmentMesh(1, createGrassMaterial(3, 1), (sample) => sample.center.x <= 116),
+      createFreeDriveEmbankmentMesh(-1, createGrassMaterial(3, 1), (sample) => sample.center.x <= 116),
+      createFreeDriveEmbankmentMesh(1, createFreeDrivePbrMaterial("brick_pavement", { color: 0x999d98, repeatX: 4, repeatY: 2 }), (sample) => sample.center.x > 238),
+      createFreeDriveEmbankmentMesh(-1, createFreeDrivePbrMaterial("brick_pavement", { color: 0x999d98, repeatX: 4, repeatY: 2 }), (sample) => sample.center.x > 238)
     );
   }
 
-  function createFreeDriveCoastRing(innerRadius, outerRadius, innerY, outerY, material) {
+  function createFreeDriveCoastRing(innerRadius, outerRadius, innerY, outerY, material, center = sceneCenter) {
     const geometry = new THREE.RingGeometry(innerRadius, outerRadius, 128, 8);
     const positions = geometry.getAttribute("position");
     for (let index = 0; index < positions.count; index += 1) {
@@ -1715,12 +1810,12 @@ export function createRacingGame({
     geometry.computeVertexNormals();
     const ring = new THREE.Mesh(geometry, material);
     ring.rotation.x = -Math.PI / 2;
-    ring.position.set(sceneCenter.x, 0, sceneCenter.y);
+    ring.position.set(center.x, 0, center.y);
     ring.receiveShadow = true;
     return ring;
   }
 
-  function createFreeDriveEmbankmentMesh(side, material) {
+  function createFreeDriveEmbankmentMesh(side, material, segmentFilter = null) {
     const positions = [];
     const uvs = [];
     const indices = [];
@@ -1729,11 +1824,13 @@ export function createRacingGame({
       const elevation = freeDriveElevationAtProgress(progress);
       const inner = sample.center.clone().add(sample.normal.clone().multiplyScalar((sample.halfWidth + 1.4) * side));
       const outer = sample.center.clone().add(sample.normal.clone().multiplyScalar((sample.halfWidth + 18) * side));
-      positions.push(inner.x, elevation - 0.02, inner.y, outer.x, -0.16, outer.y);
+      const outerHeight = sample.center.x > 238 ? -0.05 : sample.center.x > 116 ? -1.22 : -0.16;
+      positions.push(inner.x, elevation - 0.02, inner.y, outer.x, outerHeight, outer.y);
       uvs.push(0, sample.distance / 12, 1, sample.distance / 12);
     });
     for (let index = 0; index < trackModel.segmentCount; index += 1) {
       const next = trackModel.closed ? (index + 1) % trackSamples.length : index + 1;
+      if (segmentFilter && (!segmentFilter(trackSamples[index]) || !segmentFilter(trackSamples[next]))) continue;
       const inner = index * 2;
       const outer = inner + 1;
       const nextInner = next * 2;
@@ -1756,7 +1853,7 @@ export function createRacingGame({
   }
 
   function addFreeDriveLandmarks() {
-    const center = sceneCenter;
+    const center = new THREE.Vector2(0, 0);
     const tower = new THREE.Group();
     const plasterMaterial = createFreeDrivePbrMaterial("painted_plaster_wall", { color: 0xf1e7d4, repeatX: 3, repeatY: 5 });
     const roofMaterial = createFreeDrivePbrMaterial("roof_09", { color: 0xb94838, repeatX: 3, repeatY: 2 });
@@ -1807,6 +1904,7 @@ export function createRacingGame({
         const side = index % 2 === 0 ? 1 : -1;
         const offset = sample.halfWidth + randomBetween(42, 66);
         const position = sample.center.clone().add(sample.normal.clone().multiplyScalar(offset * side));
+        if (position.x > 112) return;
         const cliff = template.clone(true);
         cliff.position.set(position.x, Math.max(-0.5, freeDriveGroundElevationAt(position, progress) - 0.4), position.y);
         cliff.rotation.y = sample.heading + (side > 0 ? Math.PI * 0.5 : -Math.PI * 0.5) + randomBetween(-0.22, 0.22);
@@ -1819,7 +1917,10 @@ export function createRacingGame({
   }
 
   function addFreeDriveResort() {
-    const sample = trackProfileAtProgress(0.61);
+    const sample = trackSamples.reduce((best, candidate) => {
+      const target = new THREE.Vector2(50, 92);
+      return candidate.center.distanceToSquared(target) < best.center.distanceToSquared(target) ? candidate : best;
+    }, trackSamples[0]);
     const anchor = sample.center.clone().add(sample.normal.clone().multiplyScalar(31));
     const group = new THREE.Group();
     group.position.set(anchor.x, 0, anchor.y);
@@ -1850,6 +1951,110 @@ export function createRacingGame({
       group.add(building, roof, windowBand, deck);
     }
     scene.add(group);
+  }
+
+  function addFreeDriveBridge() {
+    const concrete = createFreeDrivePbrMaterial("brushed_concrete", { color: 0xb8bec0, repeatX: 3, repeatY: 2, roughness: 0.82 });
+    const steel = new THREE.MeshStandardMaterial({ color: 0x344b58, roughness: 0.36, metalness: 0.72 });
+    const bridgeSamples = trackSamples.filter((sample) => sample.center.x > 116 && sample.center.x < 240);
+
+    for (let index = 0; index < bridgeSamples.length - 1; index += 3) {
+      const start = bridgeSamples[index];
+      const end = bridgeSamples[Math.min(index + 3, bridgeSamples.length - 1)];
+      if (Math.sign(start.center.y) !== Math.sign(end.center.y) || start.center.distanceTo(end.center) > 18) continue;
+      for (const side of [-1, 1]) {
+        const a = start.center.clone().add(start.normal.clone().multiplyScalar((start.halfWidth + 0.42) * side));
+        const b = end.center.clone().add(end.normal.clone().multiplyScalar((end.halfWidth + 0.42) * side));
+        const segment = b.clone().sub(a);
+        const barrier = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.92, segment.length()), concrete);
+        barrier.position.set((a.x + b.x) * 0.5, freeDriveElevationAtPosition(start.center, start.progress) + 0.46, (a.y + b.y) * 0.5);
+        barrier.rotation.y = Math.atan2(segment.x, segment.y);
+        barrier.castShadow = qualityPreset.shadows;
+        barrier.receiveShadow = true;
+        scene.add(barrier);
+      }
+    }
+
+    const towerCandidates = [];
+    for (const targetX of [154, 204]) {
+      for (const corridorSide of [-1, 1]) {
+        const corridor = bridgeSamples.filter((sample) => Math.sign(sample.center.y || corridorSide) === corridorSide);
+        const target = corridor.reduce((best, sample) => Math.abs(sample.center.x - targetX) < Math.abs(best.center.x - targetX) ? sample : best, corridor[0]);
+        if (target) towerCandidates.push(target);
+      }
+    }
+    towerCandidates.forEach((sample) => {
+      const deckY = freeDriveElevationAtPosition(sample.center, sample.progress);
+      for (const side of [-1, 1]) {
+        const point = sample.center.clone().add(sample.normal.clone().multiplyScalar((sample.halfWidth + 1.15) * side));
+        const pierHeight = deckY + 2.2;
+        const pier = new THREE.Mesh(new THREE.BoxGeometry(2.1, pierHeight, 2.6), concrete);
+        pier.position.set(point.x, pierHeight * 0.5 - 1.35, point.y);
+        pier.rotation.y = sample.heading;
+        const mast = new THREE.Mesh(new THREE.BoxGeometry(1.2, 15, 1.4), steel);
+        mast.position.set(point.x, deckY + 7.4, point.y);
+        mast.rotation.y = sample.heading;
+        pier.castShadow = mast.castShadow = qualityPreset.shadows;
+        scene.add(pier, mast);
+      }
+      const crossbeam = new THREE.Mesh(new THREE.BoxGeometry(sample.halfWidth * 2 + 4, 0.75, 0.9), steel);
+      crossbeam.position.set(sample.center.x, deckY + 14.2, sample.center.y);
+      crossbeam.rotation.y = sample.heading + Math.PI * 0.5;
+      crossbeam.castShadow = qualityPreset.shadows;
+      scene.add(crossbeam);
+    });
+
+  }
+
+  function addFreeDriveCity() {
+    const city = new THREE.Group();
+    const concrete = createFreeDrivePbrMaterial("brushed_concrete", { color: 0xaeb4b3, repeatX: 4, repeatY: 6, roughness: 0.86 });
+    const brick = createFreeDrivePbrMaterial("brick_wall_001", { color: 0xb98268, repeatX: 5, repeatY: 8, roughness: 0.9 });
+    const pavement = createFreeDrivePbrMaterial("brick_pavement", { color: 0x9ca09a, repeatX: 8, repeatY: 4, roughness: 0.92 });
+    const darkGlass = new THREE.MeshPhysicalMaterial({ color: 0x41677a, metalness: 0.18, roughness: 0.2, transmission: 0.12, envMapIntensity: 1.3 });
+    const warmGlass = new THREE.MeshStandardMaterial({ color: 0x92aeb4, emissive: 0x8a7148, emissiveIntensity: 0.16, roughness: 0.25, metalness: 0.18 });
+    const roof = new THREE.MeshStandardMaterial({ color: 0x303b40, roughness: 0.58, metalness: 0.34 });
+    const layouts = [
+      [286,4,18,24,15,"brick"],[313,2,20,38,17,"glass"],[344,0,22,52,19,"glass"],[376,3,20,30,17,"brick"],
+      [400,8,17,42,16,"concrete"],[290,34,20,32,17,"concrete"],[320,34,22,46,18,"brick"],
+      [352,35,24,62,20,"glass"],[386,36,21,38,18,"brick"],[306,64,19,28,16,"brick"],
+      [337,68,22,42,18,"concrete"],[370,68,25,54,20,"glass"],[399,64,18,30,16,"brick"]
+    ];
+    layouts.forEach(([x, z, width, height, depth, type], index) => {
+      const position = new THREE.Vector2(x, z);
+      if (nearestRoadDistance(position) < 30) return;
+      const wall = type === "brick" ? brick : type === "glass" ? darkGlass : concrete;
+      const building = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), wall);
+      building.position.set(x, height * 0.5, z);
+      building.castShadow = qualityPreset.shadows;
+      building.receiveShadow = true;
+      const crown = new THREE.Mesh(new THREE.BoxGeometry(width + 0.8, 0.65, depth + 0.8), roof);
+      crown.position.set(x, height + 0.3, z);
+      crown.castShadow = qualityPreset.shadows;
+      city.add(building, crown);
+      if (type !== "glass") {
+        const rows = Math.max(2, Math.floor(height / 5));
+        for (let row = 0; row < rows; row += 1) {
+          const windows = new THREE.Mesh(new THREE.BoxGeometry(width * 0.72, 1.5, 0.16), warmGlass);
+          windows.position.set(x, 3.2 + row * 4.3, z + depth * 0.5 + 0.09);
+          city.add(windows);
+        }
+      } else {
+        for (let floor = 1; floor < Math.floor(height / 4); floor += 1) {
+          const floorBand = new THREE.Mesh(new THREE.BoxGeometry(width + 0.2, 0.2, depth + 0.2), roof);
+          floorBand.position.set(x, floor * 4, z);
+          city.add(floorBand);
+        }
+      }
+      if (index % 3 === 0) {
+        const podium = new THREE.Mesh(new THREE.BoxGeometry(width + 5, 1.1, depth + 5), pavement);
+        podium.position.set(x, 0.35, z);
+        podium.receiveShadow = true;
+        city.add(podium);
+      }
+    });
+
+    scene.add(city);
   }
 
   function smoothstep(edge0, edge1, value) {
@@ -2060,27 +2265,46 @@ export function createRacingGame({
   }
 
   function addTrackVerges() {
-    const texture = isFreeDrive
-      ? loadFreeDriveTiledTexture("sparse_grass_diff_1k.jpg", THREE.SRGBColorSpace, 2, 1)
-      : createVergeTexture(trackSurface);
-    const vergeColor = isFreeDrive ? 0xffffff : isGravelSurface ? 0x7f7a55 : 0x6f9a4f;
+    if (isFreeDrive) {
+      const zones = [
+        { test: (sample) => sample.center.x <= 116, prefix: "sparse_grass", color: 0xffffff, roughness: 0.94 },
+        { test: (sample) => sample.center.x > 116 && sample.center.x <= 238, prefix: "brushed_concrete", color: 0xb5bbba, roughness: 0.86 },
+        { test: (sample) => sample.center.x > 238, prefix: "brick_pavement", color: 0xa5a7a1, roughness: 0.92 }
+      ];
+      for (const zone of zones) {
+        for (const side of [1, -1]) {
+          const verge = createTrackBandMesh({
+            side,
+            innerOffset: -0.04,
+            outerOffset: zone.prefix === "brick_pavement" ? 4.2 : 1.78,
+            height: zone.prefix === "brick_pavement" ? 0.11 : 0.072,
+            color: zone.color,
+            texture: loadFreeDriveTiledTexture(`${zone.prefix}_diff_1k.jpg`, THREE.SRGBColorSpace, 2, 1),
+            segmentFilter: zone.test
+          });
+          verge.material.normalMap = loadFreeDriveTiledTexture(`${zone.prefix}_nor_gl_1k.jpg`, null, 2, 1);
+          verge.material.roughnessMap = loadFreeDriveTiledTexture(`${zone.prefix}_rough_1k.jpg`, null, 2, 1);
+          verge.material.roughness = zone.roughness;
+          verge.material.needsUpdate = true;
+          verge.receiveShadow = true;
+          scene.add(verge);
+        }
+      }
+      return;
+    }
+    const texture = createVergeTexture(trackSurface);
+    const vergeColor = isGravelSurface ? 0x7f7a55 : 0x6f9a4f;
     const outerOffset = isGravelSurface ? 1.42 : 1.78;
 
     for (const side of [1, -1]) {
       const verge = createTrackBandMesh({
         side,
-        innerOffset: isFreeDrive ? -0.04 : 0.42,
+        innerOffset: 0.42,
         outerOffset,
         height: 0.072,
         color: vergeColor,
         texture
       });
-      if (isFreeDrive) {
-        verge.material.normalMap = loadFreeDriveTiledTexture("sparse_grass_nor_gl_1k.jpg", null, 2, 1);
-        verge.material.roughnessMap = loadFreeDriveTiledTexture("sparse_grass_rough_1k.jpg", null, 2, 1);
-        verge.material.roughness = 0.94;
-        verge.material.needsUpdate = true;
-      }
       verge.receiveShadow = false;
       scene.add(verge);
     }
@@ -2252,8 +2476,8 @@ export function createRacingGame({
     };
 
     const groundCollider = world.createCollider(
-      RAPIER.ColliderDesc.cuboid(180, 0.3, 150)
-        .setTranslation(0, -0.3, 0)
+      RAPIER.ColliderDesc.cuboid(Math.max(180, farFieldWidth * 0.55), 0.3, Math.max(150, farFieldDepth * 0.55))
+        .setTranslation(sceneCenter.x, -0.3, sceneCenter.y)
         .setFriction(1.2)
     );
     physics.colliderTags.set(groundCollider.handle, "ground");
@@ -2261,6 +2485,9 @@ export function createRacingGame({
     if (!isFreeDrive) {
       createRailColliders(1);
       createRailColliders(-1);
+    } else {
+      createRailColliders(1, (sample) => sample.center.x > 116 && sample.center.x < 240);
+      createRailColliders(-1, (sample) => sample.center.x > 116 && sample.center.x < 240);
     }
 
     const playerBodyDesc = RAPIER.RigidBodyDesc.dynamic()
@@ -2301,7 +2528,7 @@ export function createRacingGame({
     physics.colliderTags.set(physics.opponentCollider.handle, "opponent");
   }
 
-  function createRailColliders(side) {
+  function createRailColliders(side, sampleFilter = null) {
     if (!physics) {
       return;
     }
@@ -2310,6 +2537,7 @@ export function createRacingGame({
     for (let index = 0; index < segmentCount; index += 1) {
       const startSample = trackProfileAtProgress(sampleProgressForIndex(index, railConfig.sampleCount));
       const endSample = trackProfileAtProgress(sampleProgressForIndex(index + 1, railConfig.sampleCount));
+      if (sampleFilter && (!sampleFilter(startSample) || !sampleFilter(endSample))) continue;
       const start = startSample.center.clone().add(startSample.normal.clone().multiplyScalar(startSample.railOffset * side));
       const end = endSample.center.clone().add(endSample.normal.clone().multiplyScalar(endSample.railOffset * side));
       const segment = end.clone().sub(start);
@@ -2429,7 +2657,7 @@ export function createRacingGame({
     return new THREE.Mesh(
       geometry,
       new THREE.MeshStandardMaterial({
-        color: 0xffffff,
+        color: isFreeDrive ? 0xa3a9ad : 0xffffff,
         map: roadTextures.color,
         bumpMap: roadTextures.bump ?? null,
         normalMap: roadTextures.normal ?? null,
@@ -2459,7 +2687,7 @@ export function createRacingGame({
     };
   }
 
-  function createTrackBandMesh({ side, innerOffset, outerOffset, height, color, texture }) {
+  function createTrackBandMesh({ side, innerOffset, outerOffset, height, color, texture, segmentFilter = null }) {
     const positions = [];
     const normals = [];
     const uvs = [];
@@ -2477,6 +2705,7 @@ export function createRacingGame({
 
     for (let index = 0; index < trackModel.segmentCount; index += 1) {
       const next = trackModel.closed ? (index + 1) % trackConfig.samples : index + 1;
+      if (segmentFilter && (!segmentFilter(trackSamples[index]) || !segmentFilter(trackSamples[next]))) continue;
       const inner = index * 2;
       const outer = inner + 1;
       const nextInner = next * 2;
@@ -3016,12 +3245,25 @@ export function createRacingGame({
 
   function freeDriveElevationAtProgress(progress) {
     if (!isFreeDrive) return 0;
+    const sample = trackProfileAtProgress(progress);
+    return freeDriveElevationAtPosition(sample.center, progress);
+  }
+
+  function freeDriveElevationAtPosition(position, progress = 0) {
+    if (!isFreeDrive) return 0;
+    if (position.x > 238) return 1.15;
+    if (position.x > 116) {
+      const bridgeProgress = clamp((position.x - 116) / 122, 0, 1);
+      return 4.8 + Math.sin(bridgeProgress * Math.PI) * 3.2;
+    }
     const phase = wrapProgress(progress) * Math.PI * 2;
     return 2.8 + Math.sin(phase - 0.4) * 2.6 + Math.sin(phase * 2 + 0.8) * 1.15;
   }
 
   function freeDriveGroundElevationAt(position, progress) {
     if (!isFreeDrive) return 0;
+    if (position.x > 238) return 0;
+    if (position.x > 116) return -1.2;
     const sample = trackProfileAtProgress(progress);
     const distance = position.distanceTo(sample.center);
     return Math.max(0, freeDriveElevationAtProgress(progress) - smoothstep(8, 30, distance) * 3.8);
@@ -5924,8 +6166,8 @@ export function createRacingGame({
     globalThis.__ackGamesDebug.racing = debugApi;
   }
 
-  function placeCollisionScenario() {
-    const opponentProgress = 0.12;
+  function placeCollisionScenario(progress = 0.12) {
+    const opponentProgress = wrapProgress(Number.isFinite(progress) ? progress : 0.12);
     const laneOffset = 0;
     const playerProgress = wrapProgress(opponentProgress + 0.0065);
     const playerSample = trackProfileAtProgress(playerProgress);

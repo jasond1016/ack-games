@@ -101,18 +101,20 @@ const presetMaps = [
     kind: "preset",
     map: {
       version: MAP_VERSION,
-      name: "海风岛自由驾驶",
+      name: "海风岛·都市自由驾驶",
       activity: RACING_ACTIVITIES.FREE_DRIVE,
       track: {
         shape: TRACK_SHAPES.LOOP,
         surface: TRACK_SURFACES.ASPHALT,
         width: 18,
-        samples: 640,
+        samples: 720,
         startPosition: { progress: 0.03 },
         controlPoints: [
           [-118, -42], [-76, -82], [-18, -96], [46, -82], [104, -44],
-          [126, 8], [98, 58], [48, 92], [-12, 104], [-72, 78],
-          [-112, 38], [-88, 6]
+          [132, -18], [188, -18], [248, -42], [318, -86], [390, -72],
+          [432, -18], [426, 58], [382, 108], [310, 116], [248, 78],
+          [190, 34], [132, 30], [98, 58], [48, 92], [-12, 104],
+          [-72, 78], [-112, 38], [-88, 6]
         ]
       }
     }
