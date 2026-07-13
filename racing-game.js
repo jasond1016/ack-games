@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/loaders/GLTFLoader.js";
 import { DRACOLoader } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/loaders/DRACOLoader.js";
+import { RGBELoader } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/loaders/RGBELoader.js";
 import { toCreasedNormals } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/utils/BufferGeometryUtils.js";
 import RAPIER from "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/+esm";
 import {
@@ -346,9 +347,11 @@ export function createRacingGame({
 
   const visualScale = racingSceneConfig.visualScale || 1;
   const collisionScale = racingSceneConfig.collisionScale || visualScale;
-  const trackWidth = racingSceneConfig.trackWidthOverride ?? mapData.track.width;
   const trackSurface = mapData.track.surface;
   const isFreeDrive = mapData.activity === RACING_ACTIVITIES.FREE_DRIVE;
+  const trackWidth = isFreeDrive
+    ? mapData.track.width
+    : racingSceneConfig.trackWidthOverride ?? mapData.track.width;
   const isGravelSurface = trackSurface === TRACK_SURFACES.GRAVEL;
   const drivingFeelPreset = resolveDrivingFeelPreset(
     racingSceneConfig.drivingFeelPreset ?? defaultDrivingFeelPresetId,
@@ -521,6 +524,8 @@ export function createRacingGame({
   let opponentCar;
   let drivingDust = null;
   let wheelSpinAngle = 0;
+  let playerVisualElevation = 0;
+  let freeDriveWater = null;
   let boostCameraKick = 0;
   const startGateLights = [];
   let initialized = false;
@@ -1215,7 +1220,7 @@ export function createRacingGame({
       renderer.setClearColor(racingSceneConfig.backgroundColor ?? 0x9fc9f3);
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = racingSceneConfig.toneMappingExposure ?? 1;
+      renderer.toneMappingExposure = (racingSceneConfig.toneMappingExposure ?? 1) * (isFreeDrive ? 1.22 : 1);
       renderer.shadowMap.enabled = qualityPreset.shadows;
       renderer.shadowMap.type = THREE.PCFShadowMap;
 
@@ -1229,9 +1234,9 @@ export function createRacingGame({
 
       camera = new THREE.PerspectiveCamera(cameraConfig.fov, 1, 0.1, 500);
 
-      applySceneEnvironment();
+      await applySceneEnvironment();
       createLights();
-      createWorld();
+      await createWorld();
       await initializePhysics();
       if (initializationToken !== runtimeToken) {
         disposeRuntimeResources();
@@ -1404,8 +1409,20 @@ export function createRacingGame({
     scene.add(horizonFill);
   }
 
-  function applySceneEnvironment() {
+  async function applySceneEnvironment() {
     if (!renderer || !scene) {
+      return;
+    }
+
+    if (isFreeDrive) {
+      const texture = await new RGBELoader().loadAsync(
+        new URL("./assets/freedrive/environment/secluded-beach-1k.hdr", import.meta.url).href
+      );
+      texture.mapping = THREE.EquirectangularReflectionMapping;
+      scene.environment = texture;
+      scene.background = texture;
+      scene.backgroundBlurriness = 0.18;
+      scene.environmentIntensity = 0.86;
       return;
     }
 
@@ -1488,9 +1505,9 @@ export function createRacingGame({
     return texture;
   }
 
-  function createWorld() {
+  async function createWorld() {
     startGateLights.length = 0;
-    addSkyDome();
+    if (!isFreeDrive) addSkyDome();
     if (isFreeDrive) addFreeDriveGroundLayers();
     else addGroundLayers();
     addBackdrop();
@@ -1500,46 +1517,144 @@ export function createRacingGame({
     scene.add(road);
 
     addTrackVerges();
-    addInfieldSurface();
+    if (!isFreeDrive) addInfieldSurface();
     if (!isFreeDrive) addStartFinishLines();
     if (isFreeDrive) addFreeDriveLaneMarks();
     else addLaneMarks();
     if (!isFreeDrive) addGuardRails();
     if (!isFreeDrive) addRoadsideProps();
     if (!isFreeDrive) addVenueCluster();
-    addFoliage();
-    if (isFreeDrive) addFreeDriveLandmarks();
+    if (!isFreeDrive) addFoliage();
+    if (isFreeDrive) {
+      addFreeDriveLandmarks();
+      await Promise.all([addRealFreeDriveVegetation(), addFreeDriveCoastalCliffs()]);
+    }
     drivingDust = createDrivingDust();
     scene.add(drivingDust.points);
   }
 
+  async function addRealFreeDriveVegetation() {
+    try {
+      const [tree, shrub, groundCover] = await Promise.all([
+        loadFreeDriveVegetationTemplate("island-tree-lod0.glb", 11),
+        loadFreeDriveVegetationTemplate("shrub-03-lod0.glb", 1.5),
+        loadFreeDriveVegetationTemplate("weed-plant-02-lod0.glb", 0.72)
+      ]);
+      placeFreeDriveVegetation(tree, Math.max(10, Math.round(22 * environmentDensity)), {
+        minOffset: 17, maxOffset: 62, minSpacing: 15, minScale: 0.62, maxScale: 1.28
+      });
+      placeFreeDriveVegetation(shrub, Math.max(28, Math.round(64 * environmentDensity)), {
+        minOffset: 10, maxOffset: 36, minSpacing: 4.2, minScale: 0.72, maxScale: 1.4
+      });
+      placeFreeDriveVegetation(groundCover, Math.max(40, Math.round(96 * environmentDensity)), {
+        minOffset: 8, maxOffset: 30, minSpacing: 2.5, minScale: 0.65, maxScale: 1.5
+      });
+    } catch (error) {
+      console.warn("Free Drive vegetation models failed to load.", error);
+    }
+  }
+
+  async function loadFreeDriveVegetationTemplate(filename, targetHeight) {
+    const url = new URL(`./assets/freedrive/models/${filename}`, import.meta.url).href;
+    const gltf = await carModelLoader.loadAsync(url);
+    const template = gltf.scene || gltf.scenes?.[0];
+    if (!template) throw new Error(`${filename} has no scene.`);
+    template.updateMatrixWorld(true);
+    const bounds = new THREE.Box3().setFromObject(template);
+    const size = bounds.getSize(new THREE.Vector3());
+    const center = bounds.getCenter(new THREE.Vector3());
+    const scale = targetHeight / Math.max(size.y, 0.001);
+    template.scale.setScalar(scale);
+    template.position.set(-center.x * scale, -bounds.min.y * scale, -center.z * scale);
+    template.traverse((child) => {
+      if (!child.isMesh) return;
+      child.castShadow = qualityPreset.shadows;
+      child.receiveShadow = true;
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      materials.forEach((material) => {
+        if (material.map) material.map.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        material.side = THREE.DoubleSide;
+        material.alphaTest = Math.max(material.alphaTest ?? 0, 0.28);
+      });
+    });
+    return template;
+  }
+
+  function placeFreeDriveVegetation(template, count, options) {
+    const placements = buildTracksidePlacements(count, {
+      minOffset: options.minOffset,
+      maxOffset: options.maxOffset,
+      minSpacing: options.minSpacing,
+      maxAttempts: Math.max(1800, count * 32)
+    });
+    placements.forEach((placement) => {
+      const model = template.clone(true);
+      const groundElevation = freeDriveGroundElevationAt(placement.position, placement.progress);
+      model.position.set(placement.position.x, groundElevation, placement.position.y);
+      model.rotation.y = randomBetween(0, Math.PI * 2);
+      model.scale.multiplyScalar(randomBetween(options.minScale, options.maxScale));
+      scene.add(model);
+    });
+  }
+
   function addFreeDriveGroundLayers() {
     const textureLoader = new THREE.TextureLoader();
-    const loadTiled = (path, colorSpace = null, repeat = 42) => {
+    const loadTiled = (path, colorSpace = null, repeatX = 42, repeatY = repeatX) => {
       const texture = textureLoader.load(new URL(path, import.meta.url).href);
       texture.wrapS = THREE.RepeatWrapping;
       texture.wrapT = THREE.RepeatWrapping;
-      texture.repeat.set(repeat, repeat);
+      texture.repeat.set(repeatX, repeatY);
       texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
       if (colorSpace) texture.colorSpace = colorSpace;
       return texture;
     };
 
-    const ocean = new THREE.Mesh(
-      new THREE.CircleGeometry(groundRadius + 220, 96),
-      new THREE.MeshPhysicalMaterial({
-        color: 0x0b84ad,
-        emissive: 0x063d55,
-        emissiveIntensity: 0.22,
-        roughness: 0.12,
-        metalness: 0.05,
-        transmission: 0.08,
-        clearcoat: 0.72,
-        clearcoatRoughness: 0.2
-      })
-    );
+    const waterMaterial = new THREE.ShaderMaterial({
+      fog: false,
+      uniforms: {
+        time: { value: 0 },
+        shallowColor: { value: new THREE.Color(0x20b8bd) },
+        deepColor: { value: new THREE.Color(0x07527f) },
+        skyColor: { value: new THREE.Color(0x9bc9e3) }
+      },
+      vertexShader: `
+        uniform float time;
+        varying vec3 vWorldPosition;
+        varying float vWave;
+        void main() {
+          vec3 displaced = position;
+          float waveA = sin(position.x * 0.055 + time * 0.72);
+          float waveB = sin(position.y * 0.083 - time * 0.54);
+          float waveC = sin((position.x + position.y) * 0.031 + time * 0.34);
+          vWave = waveA * 0.45 + waveB * 0.35 + waveC * 0.2;
+          displaced.z += vWave * 0.22;
+          vec4 world = modelMatrix * vec4(displaced, 1.0);
+          vWorldPosition = world.xyz;
+          gl_Position = projectionMatrix * viewMatrix * world;
+        }
+      `,
+      fragmentShader: `
+        uniform float time;
+        uniform vec3 shallowColor;
+        uniform vec3 deepColor;
+        uniform vec3 skyColor;
+        varying vec3 vWorldPosition;
+        varying float vWave;
+        void main() {
+          vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
+          float fresnel = pow(1.0 - max(dot(viewDirection, vec3(0.0, 1.0, 0.0)), 0.0), 3.0);
+          float detail = sin(vWorldPosition.x * 0.18 + time) * sin(vWorldPosition.z * 0.16 - time * 0.8);
+          vec3 water = mix(deepColor, shallowColor, 0.38 + vWave * 0.12 + detail * 0.035);
+          water = mix(water, skyColor, fresnel * 0.52);
+          float glint = pow(max(0.0, vWave * 0.5 + detail * 0.5), 10.0) * 0.28;
+          gl_FragColor = vec4(water + glint, 1.0);
+        }
+      `
+    });
+    const ocean = new THREE.Mesh(new THREE.CircleGeometry(groundRadius + 220, 128), waterMaterial);
     ocean.rotation.x = -Math.PI / 2;
     ocean.position.set(sceneCenter.x, -1.5, sceneCenter.y);
+    freeDriveWater = ocean;
     scene.add(ocean);
 
     const islandGeometry = new THREE.CircleGeometry(sceneBounds.radius + 82, 96, 24);
@@ -1553,91 +1668,154 @@ export function createRacingGame({
     }
     positions.needsUpdate = true;
     islandGeometry.computeVertexNormals();
+    const createGrassMaterial = (repeatX, repeatY) => new THREE.MeshStandardMaterial({
+      map: loadTiled("./assets/freedrive/textures/sparse_grass_diff_1k.jpg", THREE.SRGBColorSpace, repeatX, repeatY),
+      normalMap: loadTiled("./assets/freedrive/textures/sparse_grass_nor_gl_1k.jpg", null, repeatX, repeatY),
+      roughnessMap: loadTiled("./assets/freedrive/textures/sparse_grass_rough_1k.jpg", null, repeatX, repeatY),
+      color: 0x9aad87,
+      roughness: 0.94,
+      side: THREE.DoubleSide
+    });
     const island = new THREE.Mesh(
       islandGeometry,
-      new THREE.MeshStandardMaterial({
-        map: loadTiled("./assets/freedrive/textures/rocks_ground_03_diff_1k.jpg", THREE.SRGBColorSpace),
-        normalMap: loadTiled("./assets/freedrive/textures/rocks_ground_03_nor_gl_1k.jpg"),
-        roughnessMap: loadTiled("./assets/freedrive/textures/rocks_ground_03_rough_1k.jpg"),
-        color: 0x789164,
-        roughness: 0.92
-      })
+      createGrassMaterial(34, 34)
     );
     island.rotation.x = -Math.PI / 2;
     island.position.set(sceneCenter.x, 0, sceneCenter.y);
     island.receiveShadow = true;
     scene.add(island);
+    const createSandMaterial = (tint) => new THREE.MeshStandardMaterial({
+      map: loadTiled("./assets/freedrive/textures/coast_sand_01_diff_1k.jpg", THREE.SRGBColorSpace, 16, 16),
+      normalMap: loadTiled("./assets/freedrive/textures/coast_sand_01_nor_gl_1k.jpg", null, 16, 16),
+      roughnessMap: loadTiled("./assets/freedrive/textures/coast_sand_01_rough_1k.jpg", null, 16, 16),
+      color: tint,
+      roughness: 0.9,
+      side: THREE.DoubleSide
+    });
+    const coastStart = sceneBounds.radius + 34;
+    scene.add(
+      createFreeDriveCoastRing(coastStart, sceneBounds.radius + 66, -0.2, -0.78, createSandMaterial(0xc7ad82)),
+      createFreeDriveCoastRing(sceneBounds.radius + 65, sceneBounds.radius + 84, -0.76, -1.38, createSandMaterial(0x766b5d))
+    );
+    scene.add(
+      createFreeDriveEmbankmentMesh(1, createGrassMaterial(3, 1)),
+      createFreeDriveEmbankmentMesh(-1, createGrassMaterial(3, 1))
+    );
+  }
+
+  function createFreeDriveCoastRing(innerRadius, outerRadius, innerY, outerY, material) {
+    const geometry = new THREE.RingGeometry(innerRadius, outerRadius, 128, 8);
+    const positions = geometry.getAttribute("position");
+    for (let index = 0; index < positions.count; index += 1) {
+      const radius = Math.hypot(positions.getX(index), positions.getY(index));
+      const blend = smoothstep(innerRadius, outerRadius, radius);
+      positions.setZ(index, THREE.MathUtils.lerp(innerY, outerY, blend));
+    }
+    positions.needsUpdate = true;
+    geometry.computeVertexNormals();
+    const ring = new THREE.Mesh(geometry, material);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(sceneCenter.x, 0, sceneCenter.y);
+    ring.receiveShadow = true;
+    return ring;
+  }
+
+  function createFreeDriveEmbankmentMesh(side, material) {
+    const positions = [];
+    const uvs = [];
+    const indices = [];
+    trackSamples.forEach((sample, index) => {
+      const progress = sampleProgressForIndex(index, trackSamples.length);
+      const elevation = freeDriveElevationAtProgress(progress);
+      const inner = sample.center.clone().add(sample.normal.clone().multiplyScalar((sample.halfWidth + 1.4) * side));
+      const outer = sample.center.clone().add(sample.normal.clone().multiplyScalar((sample.halfWidth + 18) * side));
+      positions.push(inner.x, elevation - 0.02, inner.y, outer.x, -0.16, outer.y);
+      uvs.push(0, sample.distance / 12, 1, sample.distance / 12);
+    });
+    for (let index = 0; index < trackModel.segmentCount; index += 1) {
+      const next = trackModel.closed ? (index + 1) % trackSamples.length : index + 1;
+      const inner = index * 2;
+      const outer = inner + 1;
+      const nextInner = next * 2;
+      const nextOuter = nextInner + 1;
+      indices.push(inner, nextInner, outer, outer, nextInner, nextOuter);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+
+  function updateFreeDriveWater(deltaSeconds) {
+    if (!freeDriveWater?.material?.uniforms?.time) return;
+    freeDriveWater.material.uniforms.time.value += deltaSeconds;
   }
 
   function addFreeDriveLandmarks() {
     const center = sceneCenter;
-    const rockMaterial = new THREE.MeshStandardMaterial({ color: 0x5c665f, roughness: 0.96, flatShading: true });
-    for (let index = 0; index < 18; index += 1) {
-      const angle = (index / 18) * Math.PI * 2 + randomBetween(-0.12, 0.12);
-      const radius = randomBetween(38, 72);
-      const height = randomBetween(5, 17);
-      const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 1), rockMaterial);
-      rock.position.set(center.x + Math.cos(angle) * radius, height * 0.35 - 0.1, center.y + Math.sin(angle) * radius);
-      rock.scale.set(randomBetween(3, 7), height, randomBetween(3, 8));
-      rock.rotation.set(randomBetween(-0.2, 0.2), randomBetween(0, Math.PI), randomBetween(-0.15, 0.15));
-      rock.castShadow = qualityPreset.shadows;
-      rock.receiveShadow = true;
-      scene.add(rock);
-    }
-
     const tower = new THREE.Group();
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(4.6, 6.2, 13, 12), new THREE.MeshStandardMaterial({ color: 0xf0e4cf, roughness: 0.78 }));
+    const plasterMaterial = createFreeDrivePbrMaterial("painted_plaster_wall", { color: 0xf1e7d4, repeatX: 3, repeatY: 5 });
+    const roofMaterial = createFreeDrivePbrMaterial("roof_09", { color: 0xb94838, repeatX: 3, repeatY: 2 });
+    const woodMaterial = createFreeDrivePbrMaterial("wood_planks_grey", { color: 0x8d6d54, repeatX: 2, repeatY: 3 });
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(4.6, 6.2, 13, 24), plasterMaterial);
     base.position.y = 6.5;
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(5.4, 5.4, 2.2, 12), new THREE.MeshStandardMaterial({ color: 0xe64c3c, roughness: 0.55 }));
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(5.4, 5.4, 2.2, 24), roofMaterial);
     cap.position.y = 13.8;
-    const beacon = new THREE.Mesh(new THREE.SphereGeometry(1.25, 18, 12), new THREE.MeshStandardMaterial({ color: 0xfff1b5, emissive: 0xffb43b, emissiveIntensity: 2.2 }));
+    const beacon = new THREE.Mesh(new THREE.SphereGeometry(1.25, 18, 12), new THREE.MeshPhysicalMaterial({ color: 0xfff1b5, emissive: 0xffb43b, emissiveIntensity: 2.2, transmission: 0.38, roughness: 0.12 }));
     beacon.position.y = 16;
-    tower.add(base, cap, beacon);
+    const balcony = new THREE.Mesh(new THREE.TorusGeometry(4.9, 0.14, 8, 32), new THREE.MeshStandardMaterial({ color: 0x4d5558, roughness: 0.42, metalness: 0.55 }));
+    balcony.rotation.x = Math.PI / 2;
+    balcony.position.y = 14.8;
+    const door = new THREE.Mesh(new THREE.BoxGeometry(1.7, 3.1, 0.25), woodMaterial);
+    door.position.set(0, 1.6, 5.22);
+    tower.add(base, cap, beacon, balcony, door);
     tower.position.set(center.x - 18, 0, center.y + 5);
     tower.traverse((child) => { if (child.isMesh) child.castShadow = qualityPreset.shadows; });
     scene.add(tower);
-    addFreeDrivePalms();
     addFreeDriveResort();
   }
 
-  function addFreeDrivePalms() {
-    const placements = buildTracksidePlacements(Math.round(38 * environmentDensity), {
-      minOffset: 15,
-      maxOffset: 42,
-      minSpacing: 10,
-      maxAttempts: 1600
-    }).map((placement) => ({ ...placement, height: randomBetween(7, 12) }));
-    const trunkGeometry = new THREE.CylinderGeometry(0.22, 0.42, 1, 7);
-    const leafGeometry = new THREE.ConeGeometry(1.8, 1.1, 9);
-    const trunks = new THREE.InstancedMesh(
-      trunkGeometry,
-      new THREE.MeshStandardMaterial({ color: 0x8a6242, roughness: 0.92 }),
-      placements.length
-    );
-    const leavesPerPalm = 1;
-    const leaves = new THREE.InstancedMesh(
-      leafGeometry,
-      new THREE.MeshStandardMaterial({ color: 0x2f8b55, roughness: 0.86, flatShading: true }),
-      placements.length * leavesPerPalm
-    );
-    const dummy = new THREE.Object3D();
-    placements.forEach((palm, palmIndex) => {
-      dummy.position.set(palm.position.x, palm.height * 0.5, palm.position.y);
-      dummy.rotation.set(0, randomBetween(0, Math.PI * 2), randomBetween(-0.08, 0.08));
-      dummy.scale.set(1, palm.height, 1);
-      dummy.updateMatrix();
-      trunks.setMatrixAt(palmIndex, dummy.matrix);
-      dummy.position.set(palm.position.x, palm.height, palm.position.y);
-      dummy.rotation.set(0, randomBetween(0, Math.PI * 2), Math.PI);
-      dummy.scale.set(1.8, 0.8, 1.8);
-      dummy.updateMatrix();
-      leaves.setMatrixAt(palmIndex, dummy.matrix);
-    });
-    trunks.instanceMatrix.needsUpdate = true;
-    leaves.instanceMatrix.needsUpdate = true;
-    trunks.castShadow = qualityPreset.shadows;
-    leaves.castShadow = qualityPreset.shadows;
-    scene.add(trunks, leaves);
+  async function addFreeDriveCoastalCliffs() {
+    try {
+      const url = new URL("./assets/freedrive/models/coastal-cliff-lod0.glb", import.meta.url).href;
+      const gltf = await carModelLoader.loadAsync(url);
+      const template = gltf.scene || gltf.scenes?.[0];
+      if (!template) return;
+      template.updateMatrixWorld(true);
+      const bounds = new THREE.Box3().setFromObject(template);
+      const size = bounds.getSize(new THREE.Vector3());
+      const center = bounds.getCenter(new THREE.Vector3());
+      const scale = 38 / Math.max(size.x, size.z, 0.001);
+      template.scale.setScalar(scale);
+      template.position.set(-center.x * scale, -bounds.min.y * scale, -center.z * scale);
+      template.traverse((child) => {
+        if (!child.isMesh) return;
+        child.castShadow = qualityPreset.shadows;
+        child.receiveShadow = true;
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach((material) => {
+          if (material.map) material.map.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        });
+      });
+      const placements = [0.12, 0.29, 0.48, 0.7, 0.88];
+      placements.forEach((progress, index) => {
+        const sample = trackProfileAtProgress(progress);
+        const side = index % 2 === 0 ? 1 : -1;
+        const offset = sample.halfWidth + randomBetween(42, 66);
+        const position = sample.center.clone().add(sample.normal.clone().multiplyScalar(offset * side));
+        const cliff = template.clone(true);
+        cliff.position.set(position.x, Math.max(-0.5, freeDriveGroundElevationAt(position, progress) - 0.4), position.y);
+        cliff.rotation.y = sample.heading + (side > 0 ? Math.PI * 0.5 : -Math.PI * 0.5) + randomBetween(-0.22, 0.22);
+        cliff.scale.multiplyScalar(randomBetween(0.72, 1.18));
+        scene.add(cliff);
+      });
+    } catch (error) {
+      console.warn("Free Drive coastal cliff model failed to load.", error);
+    }
   }
 
   function addFreeDriveResort() {
@@ -1646,22 +1824,30 @@ export function createRacingGame({
     const group = new THREE.Group();
     group.position.set(anchor.x, 0, anchor.y);
     group.rotation.y = sample.heading + Math.PI * 0.5;
-    const colors = [0xf3b56b, 0xe77d6d, 0x69b6bd];
+    const colors = [0xe7c39b, 0xd99a85, 0x8fb7b3];
+    const glassMaterial = new THREE.MeshPhysicalMaterial({ color: 0x8ab8ca, roughness: 0.12, metalness: 0.05, transmission: 0.28 });
+    const deckMaterial = createFreeDrivePbrMaterial("wood_planks_grey", { color: 0xa88a6c, repeatX: 4, repeatY: 2 });
     for (let index = 0; index < 3; index += 1) {
+      const height = 4 + index * 0.8;
       const building = new THREE.Mesh(
-        new THREE.BoxGeometry(8, 4 + index * 0.8, 6),
-        new THREE.MeshStandardMaterial({ color: colors[index], roughness: 0.78 })
+        new THREE.BoxGeometry(8, height, 6),
+        createFreeDrivePbrMaterial("painted_plaster_wall", { color: colors[index], repeatX: 3, repeatY: 2 })
       );
-      building.position.set((index - 1) * 9, building.geometry.parameters.height * 0.5, 0);
+      building.position.set((index - 1) * 9, height * 0.5, 0);
       building.castShadow = qualityPreset.shadows;
       building.receiveShadow = true;
       const roof = new THREE.Mesh(
-        new THREE.BoxGeometry(8.7, 0.35, 6.7),
-        new THREE.MeshStandardMaterial({ color: 0xf5efe3, roughness: 0.68 })
+        new THREE.BoxGeometry(8.9, 0.42, 6.9),
+        createFreeDrivePbrMaterial("roof_09", { color: index === 1 ? 0xb95c42 : 0x9b5d47, repeatX: 3, repeatY: 2 })
       );
-      roof.position.set((index - 1) * 9, building.geometry.parameters.height + 0.18, 0);
+      roof.position.set((index - 1) * 9, height + 0.2, 0);
       roof.castShadow = qualityPreset.shadows;
-      group.add(building, roof);
+      const windowBand = new THREE.Mesh(new THREE.BoxGeometry(5.4, 1.15, 0.16), glassMaterial);
+      windowBand.position.set((index - 1) * 9, height * 0.58, 3.04);
+      const deck = new THREE.Mesh(new THREE.BoxGeometry(7.2, 0.22, 2.1), deckMaterial);
+      deck.position.set((index - 1) * 9, 0.14, 4.0);
+      deck.receiveShadow = true;
+      group.add(building, roof, windowBand, deck);
     }
     scene.add(group);
   }
@@ -1753,7 +1939,7 @@ export function createRacingGame({
       positionAttribute,
       particle.index * 3,
       rear.x + randomBetween(-0.18, 0.18),
-      randomBetween(0.18, 0.42),
+      playerVisualElevation + randomBetween(0.18, 0.42),
       rear.y + randomBetween(-0.18, 0.18)
     );
     particle.maxLife = randomBetween(dustySurface ? 0.7 : 0.4, dustySurface ? 1.35 : 0.82);
@@ -1874,22 +2060,59 @@ export function createRacingGame({
   }
 
   function addTrackVerges() {
-    const texture = createVergeTexture(trackSurface);
-    const vergeColor = isGravelSurface ? 0x7f7a55 : 0x6f9a4f;
+    const texture = isFreeDrive
+      ? loadFreeDriveTiledTexture("sparse_grass_diff_1k.jpg", THREE.SRGBColorSpace, 2, 1)
+      : createVergeTexture(trackSurface);
+    const vergeColor = isFreeDrive ? 0xffffff : isGravelSurface ? 0x7f7a55 : 0x6f9a4f;
     const outerOffset = isGravelSurface ? 1.42 : 1.78;
 
     for (const side of [1, -1]) {
       const verge = createTrackBandMesh({
         side,
-        innerOffset: 0.42,
+        innerOffset: isFreeDrive ? -0.04 : 0.42,
         outerOffset,
         height: 0.072,
         color: vergeColor,
         texture
       });
+      if (isFreeDrive) {
+        verge.material.normalMap = loadFreeDriveTiledTexture("sparse_grass_nor_gl_1k.jpg", null, 2, 1);
+        verge.material.roughnessMap = loadFreeDriveTiledTexture("sparse_grass_rough_1k.jpg", null, 2, 1);
+        verge.material.roughness = 0.94;
+        verge.material.needsUpdate = true;
+      }
       verge.receiveShadow = false;
       scene.add(verge);
     }
+  }
+
+  function loadFreeDriveTiledTexture(filename, colorSpace = null, repeatX = 1, repeatY = repeatX) {
+    const texture = new THREE.TextureLoader().load(
+      new URL(`./assets/freedrive/textures/${filename}`, import.meta.url).href
+    );
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(repeatX, repeatY);
+    texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    if (colorSpace) texture.colorSpace = colorSpace;
+    return texture;
+  }
+
+  function createFreeDrivePbrMaterial(prefix, {
+    color = 0xffffff,
+    repeatX = 2,
+    repeatY = repeatX,
+    roughness = 0.86,
+    metalness = 0
+  } = {}) {
+    return new THREE.MeshStandardMaterial({
+      color,
+      map: loadFreeDriveTiledTexture(`${prefix}_diff_1k.jpg`, THREE.SRGBColorSpace, repeatX, repeatY),
+      normalMap: loadFreeDriveTiledTexture(`${prefix}_nor_gl_1k.jpg`, null, repeatX, repeatY),
+      roughnessMap: loadFreeDriveTiledTexture(`${prefix}_rough_1k.jpg`, null, repeatX, repeatY),
+      roughness,
+      metalness
+    });
   }
 
   function addInfieldSurface() {
@@ -2175,15 +2398,16 @@ export function createRacingGame({
     const indices = [];
     const roadTextures = isFreeDrive ? createFreeDriveRoadTextures() : createRoadTextures(trackSurface);
 
-    for (const sample of trackSamples) {
+    trackSamples.forEach((sample, sampleIndex) => {
+      const roadHeight = 0.06 + freeDriveElevationAtProgress(sampleProgressForIndex(sampleIndex, trackSamples.length));
       const left = sample.center.clone().add(sample.normal.clone().multiplyScalar(sample.halfWidth));
       const right = sample.center.clone().add(sample.normal.clone().multiplyScalar(-sample.halfWidth));
 
-      positions.push(left.x, 0.06, left.y);
-      positions.push(right.x, 0.06, right.y);
+      positions.push(left.x, roadHeight, left.y);
+      positions.push(right.x, roadHeight, right.y);
       normals.push(0, 1, 0, 0, 1, 0);
       uvs.push(0, sample.distance / 7.5, 1, sample.distance / 7.5);
-    }
+    });
 
     for (let index = 0; index < trackModel.segmentCount; index += 1) {
       const next = trackModel.closed ? (index + 1) % trackConfig.samples : index + 1;
@@ -2241,14 +2465,15 @@ export function createRacingGame({
     const uvs = [];
     const indices = [];
 
-    for (const sample of trackSamples) {
+    trackSamples.forEach((sample, sampleIndex) => {
+      const bandHeight = height + freeDriveElevationAtProgress(sampleProgressForIndex(sampleIndex, trackSamples.length));
       const inner = sample.center.clone().add(sample.normal.clone().multiplyScalar((sample.halfWidth + innerOffset) * side));
       const outer = sample.center.clone().add(sample.normal.clone().multiplyScalar((sample.halfWidth + outerOffset) * side));
-      positions.push(inner.x, height, inner.y);
-      positions.push(outer.x, height, outer.y);
+      positions.push(inner.x, bandHeight, inner.y);
+      positions.push(outer.x, bandHeight, outer.y);
       normals.push(0, 1, 0, 0, 1, 0);
       uvs.push(0, sample.distance / 5.5, 1, sample.distance / 5.5);
-    }
+    });
 
     for (let index = 0; index < trackModel.segmentCount; index += 1) {
       const next = trackModel.closed ? (index + 1) % trackConfig.samples : index + 1;
@@ -2770,9 +2995,10 @@ export function createRacingGame({
     const edgeGeometry = new THREE.BoxGeometry(0.14, 0.025, 4.8);
     for (let index = 0; index < 140; index += 1) {
       const sample = trackProfileAtProgress(sampleProgressForIndex(index, 140));
+      const markHeight = 0.105 + freeDriveElevationAtProgress(sampleProgressForIndex(index, 140));
       if (index % 2 === 0) {
         const dash = new THREE.Mesh(dashGeometry, centerMaterial);
-        dash.position.set(sample.center.x, 0.105, sample.center.y);
+        dash.position.set(sample.center.x, markHeight, sample.center.y);
         dash.rotation.y = sample.heading;
         dash.receiveShadow = true;
         scene.add(dash);
@@ -2780,12 +3006,25 @@ export function createRacingGame({
       for (const side of [-1, 1]) {
         const point = sample.center.clone().add(sample.normal.clone().multiplyScalar((sample.halfWidth - 0.55) * side));
         const edge = new THREE.Mesh(edgeGeometry, edgeMaterial);
-        edge.position.set(point.x, 0.102, point.y);
+        edge.position.set(point.x, markHeight - 0.003, point.y);
         edge.rotation.y = sample.heading;
         edge.receiveShadow = true;
         scene.add(edge);
       }
     }
+  }
+
+  function freeDriveElevationAtProgress(progress) {
+    if (!isFreeDrive) return 0;
+    const phase = wrapProgress(progress) * Math.PI * 2;
+    return 2.8 + Math.sin(phase - 0.4) * 2.6 + Math.sin(phase * 2 + 0.8) * 1.15;
+  }
+
+  function freeDriveGroundElevationAt(position, progress) {
+    if (!isFreeDrive) return 0;
+    const sample = trackProfileAtProgress(progress);
+    const distance = position.distanceTo(sample.center);
+    return Math.max(0, freeDriveElevationAtProgress(progress) - smoothstep(8, 30, distance) * 3.8);
   }
 
   function addGuardRails() {
@@ -3554,11 +3793,12 @@ export function createRacingGame({
         backdropConfig.innerTreeHeightMax ?? 28
       )
     }));
-    addBillboardTreeInstances(innerBackdropTrees, 0x738572);
+    if (!isFreeDrive) addBillboardTreeInstances(innerBackdropTrees, 0x738572);
   }
 
   function createBackdropRidge({ bounds, depth, segments, minHeight, maxHeight, color }) {
     const positions = [];
+    const uvs = [];
     const indices = [];
 
     const outline = buildRectPerimeterPoints(bounds, segments);
@@ -3578,6 +3818,8 @@ export function createRacingGame({
         backPoint.x, 0, backPoint.y,
         backPoint.x, height * 0.78, backPoint.y
       );
+      const u = index / Math.max(1, outline.length - 1) * 10;
+      uvs.push(u, 0, u, 1, u + 0.35, 0, u + 0.35, 0.78);
     }
 
     for (let index = 0; index < outline.length - 1; index += 1) {
@@ -3590,20 +3832,22 @@ export function createRacingGame({
 
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
     geometry.setIndex(indices);
     geometry.computeVertexNormals();
 
-    return new THREE.Mesh(
-      geometry,
-      new THREE.MeshStandardMaterial({
-        color,
-        roughness: 0.98,
-        metalness: 0,
-        flatShading: true,
-        fog: true,
-        side: THREE.DoubleSide
-      })
-    );
+    const material = new THREE.MeshStandardMaterial({
+      color: isFreeDrive ? 0x9b9b8b : color,
+      map: isFreeDrive ? loadFreeDriveTiledTexture("rocks_ground_03_diff_1k.jpg", THREE.SRGBColorSpace, 1, 1) : null,
+      normalMap: isFreeDrive ? loadFreeDriveTiledTexture("rocks_ground_03_nor_gl_1k.jpg") : null,
+      roughnessMap: isFreeDrive ? loadFreeDriveTiledTexture("rocks_ground_03_rough_1k.jpg") : null,
+      roughness: 0.98,
+      metalness: 0,
+      flatShading: !isFreeDrive,
+      fog: true,
+      side: THREE.DoubleSide
+    });
+    return new THREE.Mesh(geometry, material);
   }
 
   function buildBackdropTreePlacements(count, bounds, jitter = 0) {
@@ -4218,6 +4462,7 @@ export function createRacingGame({
       updateBoostEffect(timestamp);
       updateStartGateLights();
       updateDrivingDust(deltaSeconds);
+      updateFreeDriveWater(deltaSeconds);
       updateOpponentTransform();
       updateCamera(deltaSeconds);
       updateCollisionDebugVisuals();
@@ -4859,7 +5104,12 @@ export function createRacingGame({
   }
 
   function updateCarTransform(deltaSeconds = 0) {
-    car.position.set(state.position.x, 0, state.position.y);
+    const targetElevation = state.onRoad
+      ? freeDriveElevationAtProgress(state.trackProgress)
+      : freeDriveGroundElevationAt(state.position, state.trackProgress);
+    const elevationFollow = 1 - Math.exp(-Math.max(deltaSeconds, 1 / 120) * (state.onRoad ? 10 : 3.2));
+    playerVisualElevation += (targetElevation - playerVisualElevation) * elevationFollow;
+    car.position.set(state.position.x, playerVisualElevation, state.position.y);
     car.rotation.set(0, state.heading, 0);
 
     const visualRoot = car.userData.visualRoot;
@@ -4895,7 +5145,11 @@ export function createRacingGame({
       return;
     }
 
-    opponentCar.position.set(opponentState.position.x, 0, opponentState.position.y);
+    opponentCar.position.set(
+      opponentState.position.x,
+      freeDriveElevationAtProgress(opponentState.progress),
+      opponentState.position.y
+    );
     opponentCar.rotation.set(0, opponentState.heading, 0);
 
     const visualRoot = opponentCar.userData.visualRoot;
@@ -5046,10 +5300,11 @@ export function createRacingGame({
     );
     const forward = new THREE.Vector3(Math.sin(cameraHeading), 0, Math.cos(cameraHeading));
     const right = new THREE.Vector3(Math.cos(cameraHeading), 0, -Math.sin(cameraHeading));
-    const target = new THREE.Vector3(state.position.x, cameraConfig.targetHeight, state.position.y)
+    const elevation = playerVisualElevation;
+    const target = new THREE.Vector3(state.position.x, cameraConfig.targetHeight + elevation, state.position.y)
       .addScaledVector(forward, dynamicLookAhead)
       .addScaledVector(right, state.steering * speedRatio * (state.drifting ? 0.85 : 0.3));
-    const desired = new THREE.Vector3(state.position.x, 0, state.position.y)
+    const desired = new THREE.Vector3(state.position.x, elevation, state.position.y)
       .addScaledVector(forward, -cameraConfig.followDistance)
       .addScaledVector(forward, -boostCameraKick * 0.9)
       .addScaledVector(right, -state.steering * speedRatio * (state.drifting ? 1.25 : 0.42))
@@ -5078,7 +5333,7 @@ export function createRacingGame({
     const forward = new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading));
     const right = new THREE.Vector3(Math.cos(state.heading), 0, -Math.sin(state.heading));
     const speedRatio = clamp(state.velocity.length() / Math.max(playerMaxForwardSpeed(), 0.0001), 0, 1);
-    const desired = new THREE.Vector3(state.position.x, 0, state.position.y)
+    const desired = new THREE.Vector3(state.position.x, playerVisualElevation, state.position.y)
       .addScaledVector(right, localX)
       .addScaledVector(forward, localZ)
       .add(new THREE.Vector3(0, localY + Math.sin(wheelSpinAngle * 0.18) * speedRatio * 0.018, 0));
@@ -5195,6 +5450,7 @@ export function createRacingGame({
     state.boostSeconds = 0;
     state.boostCharges = boostConfig.charges;
     state.drifting = false;
+    playerVisualElevation = freeDriveElevationAtProgress(raceConfig.startProgress);
 
     opponentState.progress = opponentConfig.startProgress;
     opponentState.laneOffset = opponentConfig.laneOffset;
