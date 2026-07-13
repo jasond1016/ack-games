@@ -85,10 +85,10 @@ const drivingFeelPresets = {
     },
     car: (isGravelSurface) => ({
       maxForwardSpeed: 50,
-      maxReverseSpeed: 40 / 3.6,
+      maxReverseSpeed: 60 / 3.6,
       engineForce: 35,
       brakeForce: isGravelSurface ? 31 : 40,
-      reverseForce: 15,
+      reverseForce: 24,
       drag: 0.028,
       rollingResistance: 0.76,
       roadGrip: isGravelSurface ? 6.4 : 9.4,
@@ -156,10 +156,10 @@ const drivingFeelPresets = {
     },
     car: (isGravelSurface) => ({
       maxForwardSpeed: 50,
-      maxReverseSpeed: 40 / 3.6,
+      maxReverseSpeed: 60 / 3.6,
       engineForce: 42,
       brakeForce: isGravelSurface ? 35 : 44,
-      reverseForce: 16,
+      reverseForce: 26,
       drag: 0.024,
       rollingResistance: 0.68,
       roadGrip: isGravelSurface ? 8 : 11.2,
@@ -445,7 +445,7 @@ export function createRacingGame({
   const railImpactConfig = drivingFeelPreset.railImpact;
 
   const opponentConfig = {
-    speed: isGravelSurface ? Math.min(7.1, 26 / 3.6) : Math.min(8.2, 30 / 3.6),
+    speed: carConfig.maxForwardSpeed,
     laneOffset: -2.7,
     startProgress: raceMode === "lap" || isFreeDrive ? raceConfig.startProgress : 0
   };
@@ -522,6 +522,7 @@ export function createRacingGame({
   let cameraHeading = 0;
   let car;
   let opponentCar;
+  const freeDriveTraffic = [];
   let drivingDust = null;
   let wheelSpinAngle = 0;
   let playerVisualElevation = 0;
@@ -571,7 +572,7 @@ export function createRacingGame({
     resetRace,
     toggleCamera: toggleCameraMode,
     finishRace: (winner = "player") => finishLapRace(winner === "opponent" ? "opponent" : "player"),
-    placeCollisionScenario: (progress) => placeCollisionScenario(progress),
+    placeCollisionScenario: (progress, laneOffset, progressGap) => placeCollisionScenario(progress, laneOffset, progressGap),
     toggleOpponent,
     toggleCollisionDebug: () => setCollisionDebugEnabled(!collisionDebug.enabled),
     getState: () => ({
@@ -600,6 +601,13 @@ export function createRacingGame({
       opponentHoldSeconds: Number(opponentState.collisionHoldSeconds.toFixed(2)),
       opponentLaneImpact: Number(opponentState.collisionLaneOffset.toFixed(2)),
       opponentYawImpact: Number(opponentState.collisionYawOffset.toFixed(2)),
+      traffic: freeDriveTraffic.map((traffic) => ({
+        progress: Number(traffic.progress.toFixed(3)),
+        speedKmh: Math.round(traffic.currentSpeed * 3.6),
+        direction: traffic.direction,
+        collisionHoldSeconds: Number(traffic.collisionHoldSeconds.toFixed(2)),
+        position: { x: Number(traffic.position.x.toFixed(1)), y: Number(traffic.position.y.toFixed(1)) }
+      })),
       carDistance: Number(state.position.distanceTo(opponentState.position).toFixed(2)),
       playerCar: formatCarLabel(selectedCar()),
       opponentCar: formatCarLabel(opponentCarSelection()),
@@ -1254,6 +1262,11 @@ export function createRacingGame({
 
       scene.add(car);
       scene.add(opponentCar);
+      if (isFreeDrive) await initializeFreeDriveTraffic();
+      if (initializationToken !== runtimeToken) {
+        disposeRuntimeResources();
+        return;
+      }
       ensureCollisionDebugVisuals();
       updateCollisionDebugVisuals();
       updateCollisionDebugHud();
@@ -1297,6 +1310,7 @@ export function createRacingGame({
       disposeObject3DTree(opponentCar);
       opponentCar = null;
     }
+    freeDriveTraffic.length = 0;
     if (scene) {
       disposeSceneResources(scene);
       scene = null;
@@ -4252,6 +4266,134 @@ export function createRacingGame({
     }
   }
 
+  async function initializeFreeDriveTraffic() {
+    if (!physics?.world || freeDriveTraffic.length > 0) return;
+    const trafficCount = qualityPreset.id === "low" ? 4 : 6;
+    const palette = [0x2f5e8d, 0xd8d6ce, 0x9b2533, 0x33383c, 0xc18b2e, 0x58705a];
+    const specs = Array.from({ length: trafficCount }, (_, index) =>
+      racingCarCatalog[(index + 1) % racingCarCatalog.length]
+    );
+    const trafficSpecs = specs.map((spec) => ({
+      ...spec,
+      id: `traffic-lod:${spec.id}`,
+      modelUrl: spec.previewModelUrl ?? spec.modelUrl
+    }));
+    const visuals = await Promise.all(
+      trafficSpecs.map((spec, index) => createCar(spec, palette[index % palette.length]))
+    );
+    visuals.forEach((visual, index) => {
+      const direction = index % 3 === 2 ? -1 : 1;
+      const traffic = {
+        index,
+        visual,
+        body: null,
+        collider: null,
+        initialProgress: wrapProgress(0.13 + index / trafficCount),
+        progress: 0,
+        direction,
+        laneOffset: direction > 0 ? -3.15 : 3.15,
+        cruiseSpeed: carConfig.maxForwardSpeed * (
+          trafficCount > 1 ? 0.55 + (index / (trafficCount - 1)) * 0.45 : 1
+        ),
+        currentSpeed: 0,
+        collisionHoldSeconds: 0,
+        contactCooldownSeconds: 0,
+        wheelSpin: 0,
+        position: new THREE.Vector2(),
+        heading: 0
+      };
+      const body = physics.world.createRigidBody(
+        RAPIER.RigidBodyDesc.kinematicPositionBased()
+          .setTranslation(0, physicsConfig.fixedHeight, 0)
+          .enabledRotations(false, true, false)
+          .setCanSleep(false)
+      );
+      const collider = physics.world.createCollider(
+        RAPIER.ColliderDesc.cuboid(
+          physicsConfig.carHalfWidth,
+          physicsConfig.carHalfHeight,
+          physicsConfig.carHalfLength
+        )
+          .setFriction(0.18)
+          .setRestitution(0.02)
+          .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
+        body
+      );
+      traffic.body = body;
+      traffic.collider = collider;
+      physics.colliderTags.set(collider.handle, { type: "traffic", index });
+      freeDriveTraffic.push(traffic);
+      scene.add(visual);
+    });
+    resetFreeDriveTraffic();
+  }
+
+  function resetFreeDriveTraffic() {
+    for (const traffic of freeDriveTraffic) {
+      traffic.progress = traffic.initialProgress;
+      traffic.currentSpeed = traffic.cruiseSpeed;
+      traffic.collisionHoldSeconds = 0;
+      traffic.contactCooldownSeconds = 0;
+      traffic.wheelSpin = 0;
+      syncFreeDriveTrafficPose(traffic, true);
+    }
+  }
+
+  function syncFreeDriveTrafficPose(traffic, immediate = false) {
+    const sample = trackProfileAtProgress(traffic.progress);
+    traffic.position.copy(sample.center).add(sample.normal.clone().multiplyScalar(traffic.laneOffset));
+    traffic.heading = sample.heading + (traffic.direction < 0 ? Math.PI : 0);
+    const translation = { x: traffic.position.x, y: physicsConfig.fixedHeight, z: traffic.position.y };
+    const rotation = rapierRotationFromYaw(traffic.heading);
+    if (immediate) {
+      traffic.body.setTranslation(translation, true);
+      traffic.body.setRotation(rotation, true);
+    } else {
+      traffic.body.setNextKinematicTranslation(translation);
+      traffic.body.setNextKinematicRotation(rotation);
+    }
+    traffic.visual.position.set(
+      traffic.position.x,
+      freeDriveElevationAtProgress(traffic.progress),
+      traffic.position.y
+    );
+    traffic.visual.rotation.set(0, traffic.heading, 0);
+  }
+
+  function updateFreeDriveTraffic(deltaSeconds) {
+    if (!isFreeDrive || freeDriveTraffic.length === 0) return;
+    for (const traffic of freeDriveTraffic) {
+      traffic.collisionHoldSeconds = Math.max(0, traffic.collisionHoldSeconds - deltaSeconds);
+      traffic.contactCooldownSeconds = Math.max(0, traffic.contactCooldownSeconds - deltaSeconds);
+      let targetSpeed = traffic.collisionHoldSeconds > 0 ? 1.5 : traffic.cruiseSpeed;
+      let nearestAhead = Infinity;
+      for (const other of freeDriveTraffic) {
+        if (other === traffic || other.direction !== traffic.direction) continue;
+        const progressGap = traffic.direction > 0
+          ? wrapProgress(other.progress - traffic.progress)
+          : wrapProgress(traffic.progress - other.progress);
+        const laneGap = Math.abs(other.laneOffset - traffic.laneOffset);
+        if (laneGap < 1.2) nearestAhead = Math.min(nearestAhead, progressGap * trackLength);
+      }
+      if (nearestAhead < 24) {
+        targetSpeed *= clamp((nearestAhead - 7) / 17, 0, 1);
+      }
+      const playerGap = traffic.direction > 0
+        ? wrapProgress(state.trackProgress - traffic.progress)
+        : wrapProgress(traffic.progress - state.trackProgress);
+      if (state.onRoad && playerGap * trackLength < 18 && Math.abs(state.position.distanceTo(traffic.position)) < 22) {
+        targetSpeed = Math.min(targetSpeed, Math.max(0, state.velocity.length() - 1));
+      }
+      traffic.currentSpeed = moveToward(traffic.currentSpeed, targetSpeed, deltaSeconds * 5.5);
+      traffic.progress = wrapProgress(
+        traffic.progress + traffic.direction * traffic.currentSpeed * deltaSeconds / Math.max(trackLength, 0.001)
+      );
+      traffic.wheelSpin += traffic.direction * traffic.currentSpeed * deltaSeconds / 0.36;
+      syncFreeDriveTrafficPose(traffic);
+      animateWheelNodes(traffic.visual.userData.wheelNodes, traffic.wheelSpin);
+    }
+  }
+
   function loadCarTemplate(carSpec) {
     return carTemplateLeases.acquire(carSpec.id, { carSpec, prepare: prepareCarTemplate });
   }
@@ -4822,9 +4964,11 @@ export function createRacingGame({
     drivePlayerBody(deltaSeconds, verticalVelocity, impactRecovery);
 
     updateOpponent(deltaSeconds);
+    updateFreeDriveTraffic(deltaSeconds);
     physics.world.step(physics.eventQueue);
     drainPhysicsEvents();
     syncPlayerPhysicsState(state.previousTrackIndex);
+    resolveFreeDriveTrafficContacts();
     syncOpponentPhysicsState();
   }
 
@@ -5030,12 +5174,18 @@ export function createRacingGame({
           collisionConfig.opponentPauseSeconds
         );
         applyOpponentCollisionReaction(impactNormal);
+      } else if (tag?.type === "traffic" && isFreeDrive) {
+        const traffic = freeDriveTraffic[tag.index];
+        if (!traffic) return;
+        const result = applyFreeDriveTrafficCollision(traffic, current);
+        impactNormal = result.impactNormal;
+        responseVelocity = result.responseVelocity;
       }
 
       if (responseVelocity) {
         applyCollisionHeading(responseVelocity);
         recordCollisionDebug({
-          tag: tag ?? "unknown",
+          tag: tag?.type === "traffic" ? "traffic" : tag ?? "unknown",
           handle: otherHandle,
           currentVelocity: new THREE.Vector2(current.x, current.z),
           responseVelocity,
@@ -5045,6 +5195,50 @@ export function createRacingGame({
         });
       }
     });
+  }
+
+  function resolveFreeDriveTrafficContacts() {
+    if (!isFreeDrive || !physics?.playerBody) return;
+    for (const traffic of freeDriveTraffic) {
+      if (traffic.contactCooldownSeconds > 0) continue;
+      const delta = state.position.clone().sub(traffic.position);
+      const forward = new THREE.Vector2(Math.sin(traffic.heading), Math.cos(traffic.heading));
+      const right = new THREE.Vector2(forward.y, -forward.x);
+      const longitudinal = Math.abs(delta.dot(forward));
+      const lateral = Math.abs(delta.dot(right));
+      if (longitudinal > physicsConfig.carHalfLength * 1.82 || lateral > physicsConfig.carHalfWidth * 1.72) continue;
+      const current = physics.playerBody.linvel();
+      const result = applyFreeDriveTrafficCollision(traffic, current);
+      applyCollisionHeading(result.responseVelocity);
+      recordCollisionDebug({
+        tag: "traffic",
+        handle: traffic.collider.handle,
+        currentVelocity: new THREE.Vector2(current.x, current.z),
+        responseVelocity: result.responseVelocity,
+        impactNormal: result.impactNormal,
+        headingBefore: state.heading,
+        headingAfter: state.heading
+      });
+      break;
+    }
+  }
+
+  function applyFreeDriveTrafficCollision(traffic, currentVelocity) {
+    const trafficDelta = state.position.clone().sub(traffic.position);
+    const impactNormal = trafficDelta.lengthSq() > 0.0001 ? trafficDelta.normalize() : forwardVector();
+    const responseVelocity = resolveOpponentCarImpactVelocity(
+      new THREE.Vector2(currentVelocity.x, currentVelocity.z),
+      impactNormal,
+      traffic.currentSpeed
+    );
+    physics.playerBody.setLinvel({ x: responseVelocity.x, y: currentVelocity.y, z: responseVelocity.y }, true);
+    separatePlayerFromImpact(impactNormal, 0.2);
+    state.boostSeconds = 0;
+    state.drifting = false;
+    state.stoppedByImpactSeconds = Math.max(state.stoppedByImpactSeconds, collisionConfig.carStopSeconds);
+    traffic.collisionHoldSeconds = Math.max(traffic.collisionHoldSeconds, 0.72);
+    traffic.contactCooldownSeconds = 0.55;
+    return { impactNormal, responseVelocity };
   }
 
   function currentRailImpactNormal() {
@@ -5072,7 +5266,10 @@ export function createRacingGame({
       railImpactConfig.bounceFactor
     );
 
-    return slideVelocity.add(bounceVelocity).clampLength(0, playerMaxForwardSpeed() * railImpactConfig.maxSpeedMultiplier);
+    return clampVector2Length(
+      slideVelocity.add(bounceVelocity),
+      playerMaxForwardSpeed() * railImpactConfig.maxSpeedMultiplier
+    );
   }
 
   function resolveOpponentCarImpactVelocity(velocity, surfaceNormal, opponentForwardSpeed) {
@@ -5089,11 +5286,15 @@ export function createRacingGame({
     const shoveVelocity = shoveDirection.multiplyScalar(collisionConfig.playerOpponentSideShove * relativeSpeedBoost);
     const bounceVelocity = resolveImpactVelocity(velocity, surfaceNormal, 0.58, 0.2);
 
-    return forwardDirection
+    return clampVector2Length(forwardDirection
       .multiplyScalar(preservedForwardSpeed)
       .add(shoveVelocity)
-      .add(bounceVelocity)
-      .clampLength(0, playerMaxForwardSpeed() * 0.78);
+      .add(bounceVelocity), playerMaxForwardSpeed() * 0.78);
+  }
+
+  function clampVector2Length(vector, maxLength) {
+    const length = vector.length();
+    return length > maxLength && length > 0 ? vector.multiplyScalar(maxLength / length) : vector;
   }
 
   function separatePlayerFromImpact(surfaceNormal, distance) {
@@ -5720,6 +5921,7 @@ export function createRacingGame({
 
     syncPlayerTrackMetrics();
     syncOpponentPose();
+    resetFreeDriveTraffic();
     setPlayerBodyPose(startPosition, start.heading);
     setOpponentBodyPose(opponentState.position, opponentState.heading);
     if (physics?.opponentCollider) {
@@ -6166,10 +6368,10 @@ export function createRacingGame({
     globalThis.__ackGamesDebug.racing = debugApi;
   }
 
-  function placeCollisionScenario(progress = 0.12) {
+  function placeCollisionScenario(progress = 0.12, requestedLaneOffset = 0, progressGap = 0.0065) {
     const opponentProgress = wrapProgress(Number.isFinite(progress) ? progress : 0.12);
-    const laneOffset = 0;
-    const playerProgress = wrapProgress(opponentProgress + 0.0065);
+    const laneOffset = clamp(Number.isFinite(requestedLaneOffset) ? requestedLaneOffset : 0, -4.5, 4.5);
+    const playerProgress = wrapProgress(opponentProgress + (Number.isFinite(progressGap) ? progressGap : 0.0065));
     const playerSample = trackProfileAtProgress(playerProgress);
 
     opponentState.progress = opponentProgress;

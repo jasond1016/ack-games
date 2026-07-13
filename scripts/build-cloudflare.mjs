@@ -52,7 +52,7 @@ try {
   const modelAssetVersion = shortHash(Buffer.from(serializedManifest));
   await writeFile(path.join(pagesDir, "racing-model-manifest.js"), `export const racingModelManifest = Object.freeze(${serializedManifest});\n`);
   await writeFile(path.join(stagingRoot, "r2-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-  await writeFile(path.join(pagesDir, "racing-deployment-config.js"), `export const racingDeploymentConfig = Object.freeze({\n  modelAssetBaseUrl: ${JSON.stringify(new URL("./", modelBaseUrl).href)},\n  modelAssetVersion: ${JSON.stringify(modelAssetVersion)},\n  useHashedModelAssets: true\n});\n`);
+  await writeFile(path.join(pagesDir, "racing-deployment-config.js"), `export const racingDeploymentConfig = Object.freeze({\n  modelAssetBaseUrl: ${JSON.stringify(new URL("./", modelBaseUrl).href)},\n  previewModelAssetBaseUrl: ${JSON.stringify(new URL("./", modelBaseUrl).href)},\n  modelAssetVersion: ${JSON.stringify(modelAssetVersion)},\n  useHashedModelAssets: true\n});\n`);
   await writeFile(path.join(pagesDir, "_headers"), buildHeaders());
   await validateStaging();
   await promoteStaging();

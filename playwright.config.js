@@ -20,6 +20,7 @@ const executablePath = resolveExecutablePath();
 
 module.exports = defineConfig({
   testDir: path.join(__dirname, "tests"),
+  testMatch: "**/*.spec.js",
   fullyParallel: false,
   reporter: "list",
   retries: process.env.CI ? 2 : 0,
