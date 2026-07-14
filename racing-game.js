@@ -642,7 +642,10 @@ export function createRacingGame({
       lastCollision: collisionDebug.lastCollision,
       flameStates: (car?.userData.boostFlames || []).map((flame) => ({
         visible: flame.visible,
-        opacity: Number((flame.material.opacity || 0).toFixed(2))
+        opacity: Number((flame.material.opacity || 0).toFixed(2)),
+        layer: flame.userData.boostLayer,
+        color: `#${flame.material.color.getHexString()}`,
+        exhaustPosition: flame.userData.exhaustPosition
       }))
     })
   };
@@ -1569,19 +1572,15 @@ export function createRacingGame({
 
   async function addRealFreeDriveVegetation() {
     try {
-      const [tree, shrub, groundCover] = await Promise.all([
+      const [tree, shrub] = await Promise.all([
         loadFreeDriveVegetationTemplate("island-tree-lod0.glb", 11),
-        loadFreeDriveVegetationTemplate("shrub-03-lod0.glb", 1.5),
-        loadFreeDriveVegetationTemplate("weed-plant-02-lod0.glb", 0.72)
+        loadFreeDriveVegetationTemplate("shrub-03-lod0.glb", 1.5)
       ]);
       placeFreeDriveVegetation(tree, Math.max(10, Math.round(22 * environmentDensity)), {
         minOffset: 17, maxOffset: 62, minSpacing: 15, minScale: 0.62, maxScale: 1.28
       });
       placeFreeDriveVegetation(shrub, Math.max(28, Math.round(64 * environmentDensity)), {
         minOffset: 10, maxOffset: 36, minSpacing: 4.2, minScale: 0.72, maxScale: 1.4
-      });
-      placeFreeDriveVegetation(groundCover, Math.max(40, Math.round(96 * environmentDensity)), {
-        minOffset: 8, maxOffset: 30, minSpacing: 2.5, minScale: 0.65, maxScale: 1.5
       });
     } catch (error) {
       console.warn("Free Drive vegetation models failed to load.", error);
@@ -4306,7 +4305,7 @@ export function createRacingGame({
       visualRoot.add(model);
       const box = new THREE.Box3().setFromObject(model);
       const size = box.getSize(new THREE.Vector3());
-      const boostGroup = createBoostGroup(size, box.min.z);
+      const boostGroup = createBoostGroup(carSpec, size, box.min.z);
       visualRoot.position.y = racingSceneConfig.groundOffset;
       group.userData.visualRoot = visualRoot;
       group.userData.model = model;
@@ -4724,13 +4723,18 @@ export function createRacingGame({
     return patterns.some((pattern) => label.includes(pattern));
   }
 
-  function createBoostGroup(carSize, rearZ) {
+  function createBoostGroup(carSpec, carSize, rearZ) {
     const boostGroup = new THREE.Group();
-    boostGroup.position.set(0, carSize.y * 0.54, rearZ - 0.18);
     boostGroup.visible = false;
+    const exhausts = Array.isArray(carSpec?.boostExhausts)
+      ? carSpec.boostExhausts
+      : [
+          { x: -carSize.x * 0.24, y: carSize.y * 0.42, z: rearZ - 0.02 },
+          { x: carSize.x * 0.24, y: carSize.y * 0.42, z: rearZ - 0.02 }
+        ];
 
     const flameMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff8f36,
+      color: 0x168cff,
       transparent: true,
       opacity: 0,
       depthTest: false,
@@ -4738,7 +4742,7 @@ export function createRacingGame({
       blending: THREE.AdditiveBlending
     });
     const coreMaterial = new THREE.MeshBasicMaterial({
-      color: 0x8de9ff,
+      color: 0xd9fbff,
       transparent: true,
       opacity: 0,
       depthTest: false,
@@ -4746,7 +4750,7 @@ export function createRacingGame({
       blending: THREE.AdditiveBlending
     });
     const glowMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffc15c,
+      color: 0x2f6bff,
       transparent: true,
       opacity: 0,
       depthTest: false,
@@ -4754,36 +4758,53 @@ export function createRacingGame({
       blending: THREE.AdditiveBlending
     });
 
-    const flameRadius = Math.max(0.18, carSize.x * 0.11);
-    const glowRadius = Math.max(0.28, carSize.x * 0.18);
-    const flameGeometry = new THREE.SphereGeometry(flameRadius, 12, 12);
-    const glowGeometry = new THREE.SphereGeometry(glowRadius, 14, 14);
-    const flameOffsets = [-carSize.x * 0.28, carSize.x * 0.28];
+    const flameGeometry = new THREE.SphereGeometry(1, 12, 12);
+    const glowGeometry = new THREE.SphereGeometry(1, 14, 14);
+    const rearward = new THREE.Vector3(0, 0, -1);
     const flames = [];
 
-    for (const offsetX of flameOffsets) {
+    for (const exhaust of exhausts) {
+      const radius = exhaust.radius ?? Math.max(0.11, carSize.x * 0.035);
+      const outlet = new THREE.Group();
+      outlet.position.set(exhaust.x, exhaust.y, exhaust.z);
+      const [directionX, directionY, directionZ] = exhaust.direction ?? [0, 0, -1];
+      const direction = new THREE.Vector3(directionX, directionY, directionZ);
+      if (direction.lengthSq() < 0.0001) direction.copy(rearward);
+      direction.normalize();
+      outlet.quaternion.setFromUnitVectors(rearward, direction);
+
       const outer = new THREE.Mesh(flameGeometry, flameMaterial.clone());
-      outer.position.set(offsetX, -0.03, -0.38);
-      outer.scale.set(1.35, 1.35, 4.2);
+      outer.position.set(0, 0, -radius * 3.8);
+      outer.scale.set(radius * 1.18, radius * 1.18, radius * 5.4);
+      outer.userData.boostLayer = "outer";
+      outer.userData.baseScale = outer.scale.clone();
 
       const core = new THREE.Mesh(flameGeometry, coreMaterial.clone());
-      core.position.set(offsetX, -0.03, -0.22);
-      core.scale.set(0.76, 0.76, 2.8);
+      core.position.set(0, 0, -radius * 2.45);
+      core.scale.set(radius * 0.62, radius * 0.62, radius * 3.5);
+      core.userData.boostLayer = "core";
+      core.userData.baseScale = core.scale.clone();
 
-      flames.push(outer, core);
-      boostGroup.add(outer, core);
+      const glow = new THREE.Mesh(glowGeometry, glowMaterial.clone());
+      glow.position.set(0, 0, -radius * 1.2);
+      glow.scale.set(radius * 1.8, radius * 1.35, radius * 2.3);
+      glow.userData.boostLayer = "glow";
+      glow.userData.baseScale = glow.scale.clone();
+
+      for (const flame of [outer, core, glow]) {
+        flame.userData.exhaustPosition = [exhaust.x, exhaust.y, exhaust.z];
+      }
+      flames.push(outer, core, glow);
+      outlet.add(outer, core, glow);
+      boostGroup.add(outlet);
     }
 
-    const glow = new THREE.Mesh(glowGeometry, glowMaterial);
-    glow.position.set(0, -0.04, -0.3);
-    glow.scale.set(1.95, 1.15, 3.1);
-    flames.push(glow);
-    boostGroup.add(glow);
     boostGroup.userData.flames = flames;
+    boostGroup.userData.outletCount = exhausts.length;
     return boostGroup;
   }
 
-  function createFallbackCar(_carSpec, color = 0xa81f34) {
+  function createFallbackCar(carSpec, color = 0xa81f34) {
     const group = new THREE.Group();
     const visualRoot = new THREE.Group();
     const bodyMaterial = new THREE.MeshStandardMaterial({
@@ -4842,58 +4863,18 @@ export function createRacingGame({
       fallbackWheelNodes.push({ node: wheel, baseQuaternion: wheel.quaternion.clone() });
     }
 
-    const boostGroup = new THREE.Group();
-    boostGroup.position.set(0, 0.7, -2.42);
-    boostGroup.visible = false;
-
-    const flameMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff8f36,
-      transparent: true,
-      opacity: 0,
-      depthTest: false,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending
-    });
-    const coreMaterial = new THREE.MeshBasicMaterial({
-      color: 0x8de9ff,
-      transparent: true,
-      opacity: 0,
-      depthTest: false,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending
-    });
-    const glowMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffc15c,
-      transparent: true,
-      opacity: 0,
-      depthTest: false,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending
-    });
-
-    const flameGeometry = new THREE.SphereGeometry(0.22, 12, 12);
-    const glowGeometry = new THREE.SphereGeometry(0.36, 14, 14);
-    const flameOffsets = [-0.54, 0.54];
-    const flames = [];
-
-    for (const offsetX of flameOffsets) {
-      const outer = new THREE.Mesh(flameGeometry, flameMaterial.clone());
-      outer.position.set(offsetX, -0.03, -0.38);
-      outer.scale.set(1.35, 1.35, 4.2);
-
-      const core = new THREE.Mesh(flameGeometry, coreMaterial.clone());
-      core.position.set(offsetX, -0.03, -0.22);
-      core.scale.set(0.76, 0.76, 2.8);
-
-      flames.push(outer, core);
-      boostGroup.add(outer, core);
-    }
-
-    const glow = new THREE.Mesh(glowGeometry, glowMaterial);
-    glow.position.set(0, -0.04, -0.3);
-    glow.scale.set(1.95, 1.15, 3.1);
-    flames.push(glow);
-    boostGroup.add(glow);
+    const fallbackExhausts = carSpec?.boostExhausts?.length === 0
+      ? []
+      : [
+          { x: -0.54, y: 0.7, z: -2.14, radius: 0.16 },
+          { x: 0.54, y: 0.7, z: -2.14, radius: 0.16 }
+        ];
+    const boostGroup = createBoostGroup(
+      { boostExhausts: fallbackExhausts },
+      { x: 2.3, y: 1.56, z: 4.25 },
+      -2.125
+    );
+    const flames = boostGroup.userData.flames;
 
     visualRoot.position.y = racingSceneConfig.groundOffset;
     group.userData.boostFlames = flames;
@@ -5009,8 +4990,7 @@ export function createRacingGame({
     }
     const pulse = 0.84 + Math.sin(timestamp * 0.022) * 0.16;
 
-    for (let index = 0; index < flames.length; index += 1) {
-      const flame = flames[index];
+    for (const flame of flames) {
       flame.visible = active;
 
       if (!active) {
@@ -5018,16 +4998,19 @@ export function createRacingGame({
         continue;
       }
 
-      const isGlow = index === flames.length - 1;
-      flame.material.opacity = isGlow ? 0.72 * pulse : 1 * pulse;
+      const layer = flame.userData.boostLayer;
+      const baseScale = flame.userData.baseScale;
+      flame.material.opacity = (layer === "glow" ? 0.58 : layer === "outer" ? 0.88 : 1) * pulse;
+      if (!baseScale) continue;
 
-      if (isGlow) {
-        flame.scale.set(1.9 + pulse * 0.36, 1.12 + pulse * 0.18, 3.1 + pulse * 0.78);
-      } else if (index % 2 === 0) {
-        flame.scale.set(1.35, 1.35, 4.2 + pulse * 1.65);
-      } else {
-        flame.scale.set(0.76, 0.76, 2.8 + pulse * 1.18);
-      }
+      const widthPulse = 1 + pulse * (layer === "glow" ? 0.18 : 0.08);
+      const heightPulse = 1 + pulse * (layer === "glow" ? 0.12 : 0.08);
+      const lengthPulse = 1 + pulse * (layer === "outer" ? 0.42 : layer === "core" ? 0.3 : 0.28);
+      flame.scale.set(
+        baseScale.x * widthPulse,
+        baseScale.y * heightPulse,
+        baseScale.z * lengthPulse
+      );
     }
   }
 

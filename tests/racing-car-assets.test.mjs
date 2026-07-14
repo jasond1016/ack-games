@@ -17,3 +17,23 @@ test("local racing cars load optimized full and preview models", () => {
     );
   }
 });
+
+test("every racing car declares its own nitro exhaust layout", () => {
+  for (const car of racingCarCatalog) {
+    assert.ok(Array.isArray(car.boostExhausts), `${car.id} should declare boostExhausts`);
+    if (car.id === "terzo-millennio") {
+      assert.equal(car.boostExhausts.length, 0, "electric Terzo Millennio should not fake exhaust flames");
+      continue;
+    }
+    assert.ok(car.boostExhausts.length > 0, `${car.id} should have at least one exhaust outlet`);
+    for (const exhaust of car.boostExhausts) {
+      for (const coordinate of [exhaust.x, exhaust.y, exhaust.z]) {
+        assert.ok(Number.isFinite(coordinate), `${car.id} exhaust coordinates must be finite`);
+      }
+      if (exhaust.direction) {
+        assert.equal(exhaust.direction.length, 3, `${car.id} exhaust direction must be a 3D vector`);
+        assert.ok(exhaust.direction.every(Number.isFinite), `${car.id} exhaust direction must be finite`);
+      }
+    }
+  }
+});

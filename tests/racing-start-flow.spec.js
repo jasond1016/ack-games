@@ -57,6 +57,32 @@ test("racing start flow stays usable across selection, race start, pause, and re
     .toBe(false);
 });
 
+test("nitro renders blue flames from every configured Veneno exhaust", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#racingGameCard").click();
+  await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
+  await page.locator("#racingMapSelectRaceButton").click();
+
+  const startOverlay = page.locator("#racingStartOverlay");
+  await expect(startOverlay).toBeVisible({ timeout: 25_000 });
+  await page.locator('#racingCarOptions .race-car-option[data-car-id="veneno"]').click();
+  await page.locator("#racingStartRaceButton").click();
+  await expect(startOverlay).toBeHidden();
+
+  await page.keyboard.down("KeyW");
+  await expect.poll(() => page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().speedKmh)).toBeGreaterThan(8);
+  await page.keyboard.press("Numpad0");
+  await expect.poll(() => page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().boostSeconds)).toBeGreaterThan(0);
+
+  const flameStates = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().flameStates);
+  await page.keyboard.up("KeyW");
+  expect(flameStates).toHaveLength(12);
+  expect(flameStates.every((flame) => flame.visible && flame.opacity > 0)).toBe(true);
+  expect(new Set(flameStates.map((flame) => flame.layer))).toEqual(new Set(["outer", "core", "glow"]));
+  expect(new Set(flameStates.map((flame) => flame.color))).toEqual(new Set(["#168cff", "#d9fbff", "#2f6bff"]));
+  expect(new Set(flameStates.map((flame) => flame.exhaustPosition.join(","))).size).toBe(4);
+});
+
 test("jsDelivr failure is isolated to racing and can be retried", async ({ page }) => {
   await page.route("https://cdn.jsdelivr.net/**", (route) => route.abort("failed"));
   await page.goto("/");

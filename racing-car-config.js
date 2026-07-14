@@ -127,7 +127,11 @@ export const racingCarCatalog = [
       "./assets/cars/lamborghini_aventador_lp720-4_50th_anniversary/lamborghini_aventador_lp720-4_50th_anniversary.glb"
     ),
     targetLength: 4.78,
-    modelRotationDegrees: 0
+    modelRotationDegrees: 0,
+    boostExhausts: [
+      { x: -0.24, y: 0.82, z: -4.7, radius: 0.18 },
+      { x: 0.24, y: 0.82, z: -4.7, radius: 0.18 }
+    ]
   },
   {
     id: "urus-se",
@@ -140,7 +144,13 @@ export const racingCarCatalog = [
       "./assets/cars/2025_lamborghini_urus_se.glb"
     ),
     targetLength: 5.12,
-    modelRotationDegrees: 0
+    modelRotationDegrees: 0,
+    boostExhausts: [
+      { x: -1.68, y: 0.62, z: -4.94, radius: 0.13 },
+      { x: -1.42, y: 0.62, z: -4.94, radius: 0.13 },
+      { x: 1.42, y: 0.62, z: -4.94, radius: 0.13 },
+      { x: 1.68, y: 0.62, z: -4.94, radius: 0.13 }
+    ]
   },
   {
     id: "miura-p400",
@@ -153,7 +163,13 @@ export const racingCarCatalog = [
       "./assets/cars/1968_lamborghini_miura_p400.glb"
     ),
     targetLength: 4.37,
-    modelRotationDegrees: 0
+    modelRotationDegrees: 0,
+    boostExhausts: [
+      { x: -1.22, y: 0.36, z: -4.25, radius: 0.11 },
+      { x: -0.96, y: 0.36, z: -4.25, radius: 0.11 },
+      { x: 0.96, y: 0.36, z: -4.25, radius: 0.11 },
+      { x: 1.22, y: 0.36, z: -4.25, radius: 0.11 }
+    ]
   },
   {
     id: "countach-lpi-800-4",
@@ -166,7 +182,13 @@ export const racingCarCatalog = [
       "./assets/cars/2022_lamborghini_countach_lpi_800-4.optimized.glb"
     ),
     targetLength: 4.87,
-    modelRotationDegrees: 0
+    modelRotationDegrees: 0,
+    boostExhausts: [
+      { x: -0.66, y: 0.48, z: -4.72, radius: 0.12 },
+      { x: -0.24, y: 0.48, z: -4.72, radius: 0.12 },
+      { x: 0.24, y: 0.48, z: -4.72, radius: 0.12 },
+      { x: 0.66, y: 0.48, z: -4.72, radius: 0.12 }
+    ]
   },
   {
     id: "dbr9",
@@ -179,7 +201,11 @@ export const racingCarCatalog = [
       "./assets/cars/2008-aston-martin-009-aston-martin-racing-dbr9/source/2008 Aston Martin 009 Aston Martin Racing DBR9.glb"
     ),
     targetLength: 4.72,
-    modelRotationDegrees: 180
+    modelRotationDegrees: 180,
+    boostExhausts: [
+      { x: -1.7, y: 0.33, z: -0.27, radius: 0.12, direction: [-1, 0, 0] },
+      { x: 1.7, y: 0.33, z: -0.27, radius: 0.12, direction: [1, 0, 0] }
+    ]
   },
   {
     id: "bolide",
@@ -194,7 +220,13 @@ export const racingCarCatalog = [
       "./assets/cars/bugatti_bolide.glb"
     ),
     targetLength: 4.76,
-    modelRotationDegrees: 0
+    modelRotationDegrees: 0,
+    boostExhausts: [
+      { x: -0.25, y: 0.88, z: -4.67, radius: 0.11 },
+      { x: 0.25, y: 0.88, z: -4.67, radius: 0.11 },
+      { x: -0.25, y: 1.18, z: -4.67, radius: 0.11 },
+      { x: 0.25, y: 1.18, z: -4.67, radius: 0.11 }
+    ]
   },
   {
     id: "centodieci",
@@ -207,7 +239,11 @@ export const racingCarCatalog = [
       "./assets/cars/2020_bugatti_centodieci.glb"
     ),
     targetLength: 4.54,
-    modelRotationDegrees: 0
+    modelRotationDegrees: 0,
+    boostExhausts: [
+      { x: -1.2, y: 0.43, z: -4.43, radius: 0.2 },
+      { x: 1.2, y: 0.43, z: -4.43, radius: 0.2 }
+    ]
   },
   {
     id: "revuelto",
@@ -220,7 +256,11 @@ export const racingCarCatalog = [
       "./assets/cars/free_lamborghini_revuelto.glb"
     ),
     targetLength: 4.95,
-    modelRotationDegrees: 0
+    modelRotationDegrees: 0,
+    boostExhausts: [
+      { x: -0.38, y: 1.69, z: -4.89, radius: 0.18 },
+      { x: 0.38, y: 1.69, z: -4.89, radius: 0.18 }
+    ]
   },
   {
     id: "aventador-classic",
@@ -233,7 +273,11 @@ export const racingCarCatalog = [
       "./assets/cars/lamborghini_aventador.glb"
     ),
     targetLength: 4.78,
-    modelRotationDegrees: 0
+    modelRotationDegrees: 0,
+    boostExhausts: [
+      { x: -0.34, y: 1.06, z: -4.53, radius: 0.17 },
+      { x: 0.34, y: 1.06, z: -4.53, radius: 0.17 }
+    ]
   },
   {
     id: "countach-5000qv",
@@ -246,7 +290,13 @@ export const racingCarCatalog = [
       "./assets/cars/lamborghini_countach_5000qv__www.vecarz.com.glb"
     ),
     targetLength: 4.14,
-    modelRotationDegrees: 0
+    modelRotationDegrees: 0,
+    boostExhausts: [
+      { x: -1.08, y: 0.34, z: -4.05, radius: 0.11 },
+      { x: -0.78, y: 0.34, z: -4.05, radius: 0.11 },
+      { x: 0.78, y: 0.34, z: -4.05, radius: 0.11 },
+      { x: 1.08, y: 0.34, z: -4.05, radius: 0.11 }
+    ]
   },
   {
     id: "huracan-sto",
@@ -259,7 +309,11 @@ export const racingCarCatalog = [
       "./assets/cars/lamborghini_huracan_sto_2020.glb"
     ),
     targetLength: 4.55,
-    modelRotationDegrees: 0
+    modelRotationDegrees: 0,
+    boostExhausts: [
+      { x: -0.72, y: 1.08, z: -4.44, radius: 0.17 },
+      { x: 0.72, y: 1.08, z: -4.44, radius: 0.17 }
+    ]
   },
   {
     id: "terzo-millennio",
@@ -272,7 +326,8 @@ export const racingCarCatalog = [
       "./assets/cars/lamborghini_terzo.glb"
     ),
     targetLength: 4.73,
-    modelRotationDegrees: 0
+    modelRotationDegrees: 0,
+    boostExhausts: []
   },
   {
     id: "veneno",
@@ -285,7 +340,13 @@ export const racingCarCatalog = [
       "./assets/cars/lamborghini_venevo.glb"
     ),
     targetLength: 5.02,
-    modelRotationDegrees: 0
+    modelRotationDegrees: 0,
+    boostExhausts: [
+      { x: -0.28, y: 0.76, z: -4.93, radius: 0.11 },
+      { x: 0.28, y: 0.76, z: -4.93, radius: 0.11 },
+      { x: -0.28, y: 1.02, z: -4.93, radius: 0.11 },
+      { x: 0.28, y: 1.02, z: -4.93, radius: 0.11 }
+    ]
   }
 ];
 

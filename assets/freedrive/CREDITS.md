@@ -16,7 +16,6 @@ The textures in `textures/` are distributed under the CC0 1.0 license.
 - `environment/qwantani-noon-puresky-1k.hdr`: [Qwantani Noon (Pure Sky)](https://polyhaven.com/a/qwantani_noon_puresky), Greg Zaal and Jarod Guest / Poly Haven.
 - `models/island-tree-lod0.glb`: optimized derivative of [Island Tree 01](https://polyhaven.com/a/island_tree_01), Rico Cilliers and Rob Tuytel / Poly Haven. The web-ready derivative uses 1K source textures, strong mesh simplification, WebP texture compression, and Draco geometry compression.
 - `models/shrub-03-lod0.glb`: optimized derivative of [Shrub 03](https://polyhaven.com/a/shrub_03), Rico Cilliers / Poly Haven.
-- `models/weed-plant-02-lod0.glb`: optimized derivative of [Weed Plant 02](https://polyhaven.com/a/weed_plant_02), Rico Cilliers and Rob Tuytel / Poly Haven.
 - `models/coastal-cliff-lod0.glb`: optimized derivative of [Coastal Cliff 01](https://polyhaven.com/a/coastal_cliff_01), Rico Cilliers and Rob Tuytel / Poly Haven.
 - `models/street_lamp_01-lod0.glb`: optimized derivative of [Street Lamp 01](https://polyhaven.com/a/street_lamp_01), Josh Dean / Poly Haven.
 - `models/modular_street_seating-lod0.glb`: optimized derivative of [Modular Street Seating](https://polyhaven.com/a/modular_street_seating), Stuart Attenborrow / Poly Haven.
