@@ -7,6 +7,7 @@ import { createCloudflareAssetGraph, createCloudflareBuildPlan } from "./cloudfl
 
 const pagesDir = path.resolve("_deploy/pages");
 const r2Dir = path.resolve("_deploy/r2");
+const pagesUrl = process.env.PAGES_VERIFY_URL ?? "http://127.0.0.1:4173/_deploy/pages/";
 const assetGraph = createCloudflareAssetGraph(racingCarCatalog);
 async function findGlbs(directory) {
   const matches = [];
@@ -18,9 +19,13 @@ async function findGlbs(directory) {
   return matches;
 }
 const pageGlbs = await findGlbs(pagesDir);
-if (pageGlbs.length) throw new Error(`Pages output contains GLBs:\n${pageGlbs.join("\n")}`);
+const unexpectedPageGlbs = pageGlbs.filter((file) =>
+  !path.relative(pagesDir, file).replaceAll("\\", "/").startsWith("assets/freedrive/models/")
+);
+if (unexpectedPageGlbs.length) throw new Error(`Pages output contains unexpected GLBs:\n${unexpectedPageGlbs.join("\n")}`);
 await verifyPagesAllowlist();
 await verifyLocalReferences();
+await verifyFreeDriveAssets();
 await verifyR2Manifest();
 
 const browser = await chromium.launch({ headless: true });
@@ -34,17 +39,23 @@ try {
     if (response.url().includes(".glb") && !response.ok()) failures.push(`${response.url()}: HTTP ${response.status()}`);
   });
   page.on("console", (message) => {
-    if (message.type() === "warning" && message.text().startsWith("Failed to load")) failures.push(message.text());
+    if (
+      (message.type() === "warning" && message.text().startsWith("Failed to load"))
+      || (message.type() === "error" && message.text().includes("Failed to start racing session"))
+    ) failures.push(message.text());
   });
-  await page.goto("http://127.0.0.1:4173/_deploy/pages/");
+  page.on("pageerror", (error) => failures.push(error.message));
+  await page.goto(pagesUrl);
   await page.locator("#racingGameCard").click();
+  await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-island-freedrive"] .map-select-card-button').click();
   await page.locator("#racingMapSelectRaceButton").click();
   await page.locator("#racingCarOptions .race-car-option").last().click();
   await page.waitForTimeout(3_000);
   await page.locator("#racingStartRaceButton").click();
+  await page.waitForFunction(() => document.getElementById("racingStartOverlay")?.hidden === true, null, { timeout: 45_000 });
   await page.waitForTimeout(3_000);
   if (failures.length) throw new Error(`Cloudflare build load failures:\n${failures.join("\n")}`);
-  console.log("Verified Pages split and optimized preview/race GLB loading.");
+  console.log("Verified Pages free-drive assets and optimized preview/race GLB loading.");
 } finally {
   await browser.close();
 }
@@ -75,6 +86,20 @@ async function verifyLocalReferences() {
       const clean = reference.split(/[?#]/)[0];
       const target = path.resolve(path.dirname(file), clean);
       if (!target.startsWith(pagesDir) || !await exists(target)) throw new Error(`Missing local reference from ${path.relative(pagesDir, file)}: ${reference}`);
+    }
+  }
+}
+
+async function verifyFreeDriveAssets() {
+  const hdrPath = path.join(pagesDir, "assets/freedrive/environment/qwantani-noon-puresky-1k.hdr");
+  const hdr = await readFile(hdrPath);
+  if (!hdr.subarray(0, 10).equals(Buffer.from("#?RADIANCE"))) {
+    throw new Error("Free-drive HDR is missing or invalid in the Pages output.");
+  }
+  const requiredDirectories = ["environment", "models", "textures"];
+  for (const directory of requiredDirectories) {
+    if (!await exists(path.join(pagesDir, "assets/freedrive", directory))) {
+      throw new Error(`Free-drive Pages directory is missing: ${directory}`);
     }
   }
 }

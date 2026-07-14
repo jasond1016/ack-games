@@ -36,7 +36,11 @@ import {
 } from "./racing-session.mjs";
 import { createBrowserRacingClock, createBrowserRacingInput } from "./racing-runtime-adapters.mjs";
 import { createResourceLeaseCache } from "./racing-resource-leases.mjs";
-import { calculateDriveRetention, calculateEngineForce } from "./racing-driving-dynamics.mjs";
+import {
+  calculateDriveRetention,
+  calculateEngineForce,
+  shouldActivateComputerBoost
+} from "./racing-driving-dynamics.mjs";
 import {
   FREE_DRIVE_JUMP,
   freeDriveJumpRampRise,
@@ -419,6 +423,10 @@ export function createRacingGame({
     topSpeedMultiplier: 2,
     engineForceMultiplier: 2.15
   };
+  const opponentBoostConfig = {
+    charges: 3,
+    activationTimesSeconds: [2, 10, 18]
+  };
 
   const railConfig = {
     sampleCount: 200,
@@ -517,7 +525,9 @@ export function createRacingGame({
     finishTimeSeconds: null,
     completedLaps: 0,
     lapLockSeconds: 0,
-    lapArmed: false
+    lapArmed: false,
+    boostSeconds: 0,
+    boostCharges: opponentBoostConfig.charges
   };
   const raceState = {
     finished: false,
@@ -601,6 +611,7 @@ export function createRacingGame({
       lapArmed: state.lapArmed,
       boostSeconds: Number(state.boostSeconds.toFixed(2)),
       boostCharges: state.boostCharges,
+      playerBoostUnlimited: boostConfig.unlimited,
       drifting: state.drifting,
       airborne: freeDriveJumpState.airborne,
       speedKmh: Math.round(state.velocity.length() * 3.6),
@@ -614,6 +625,9 @@ export function createRacingGame({
         y: Number(opponentState.position.y.toFixed(2))
       },
       opponentHoldSeconds: Number(opponentState.collisionHoldSeconds.toFixed(2)),
+      opponentSpeedKmh: Math.round(opponentState.currentSpeed * 3.6),
+      opponentBoostSeconds: Number(opponentState.boostSeconds.toFixed(2)),
+      opponentBoostCharges: opponentState.boostCharges,
       opponentLaneImpact: Number(opponentState.collisionLaneOffset.toFixed(2)),
       opponentYawImpact: Number(opponentState.collisionYawOffset.toFixed(2)),
       traffic: freeDriveTraffic.map((traffic) => ({
@@ -621,6 +635,9 @@ export function createRacingGame({
         speedKmh: Math.round(traffic.currentSpeed * 3.6),
         direction: traffic.direction,
         airborne: traffic.airborne,
+        boostSeconds: Number(traffic.boostSeconds.toFixed(2)),
+        boostCharges: traffic.boostCharges,
+        boostVisible: (traffic.visual.userData.boostFlames || []).some((flame) => flame.visible),
         collisionHoldSeconds: Number(traffic.collisionHoldSeconds.toFixed(2)),
         position: { x: Number(traffic.position.x.toFixed(1)), y: Number(traffic.position.y.toFixed(1)) }
       })),
@@ -641,6 +658,13 @@ export function createRacingGame({
       collisionDebugEnabled: collisionDebug.enabled,
       lastCollision: collisionDebug.lastCollision,
       flameStates: (car?.userData.boostFlames || []).map((flame) => ({
+        visible: flame.visible,
+        opacity: Number((flame.material.opacity || 0).toFixed(2)),
+        layer: flame.userData.boostLayer,
+        color: `#${flame.material.color.getHexString()}`,
+        exhaustPosition: flame.userData.exhaustPosition
+      })),
+      opponentFlameStates: (opponentCar?.userData.boostFlames || []).map((flame) => ({
         visible: flame.visible,
         opacity: Number((flame.material.opacity || 0).toFixed(2)),
         layer: flame.userData.boostLayer,
@@ -4350,6 +4374,11 @@ export function createRacingGame({
           trafficCount > 1 ? 0.55 + (index / (trafficCount - 1)) * 0.45 : 1
         ),
         currentSpeed: 0,
+        boostSeconds: 0,
+        boostCharges: opponentBoostConfig.charges,
+        boostActivationTimesSeconds: opponentBoostConfig.activationTimesSeconds.map(
+          (activationTime) => activationTime + index * 0.65
+        ),
         collisionHoldSeconds: 0,
         contactCooldownSeconds: 0,
         wheelSpin: 0,
@@ -4390,6 +4419,8 @@ export function createRacingGame({
     for (const traffic of freeDriveTraffic) {
       traffic.progress = traffic.initialProgress;
       traffic.currentSpeed = traffic.cruiseSpeed;
+      traffic.boostSeconds = 0;
+      traffic.boostCharges = opponentBoostConfig.charges;
       traffic.collisionHoldSeconds = 0;
       traffic.contactCooldownSeconds = 0;
       traffic.wheelSpin = 0;
@@ -4430,6 +4461,7 @@ export function createRacingGame({
     if (!isFreeDrive || freeDriveTraffic.length === 0) return;
     for (const traffic of freeDriveTraffic) {
       traffic.collisionHoldSeconds = Math.max(0, traffic.collisionHoldSeconds - deltaSeconds);
+      traffic.boostSeconds = Math.max(0, traffic.boostSeconds - deltaSeconds);
       traffic.contactCooldownSeconds = Math.max(0, traffic.contactCooldownSeconds - deltaSeconds);
       traffic.jumpCooldownSeconds = Math.max(0, traffic.jumpCooldownSeconds - deltaSeconds);
       let targetSpeed = traffic.collisionHoldSeconds > 0 ? 1.5 : traffic.cruiseSpeed;
@@ -4451,7 +4483,25 @@ export function createRacingGame({
       if (state.onRoad && playerGap * trackLength < 18 && Math.abs(state.position.distanceTo(traffic.position)) < 22) {
         targetSpeed = Math.min(targetSpeed, Math.max(0, state.velocity.length() - 1));
       }
-      traffic.currentSpeed = moveToward(traffic.currentSpeed, targetSpeed, deltaSeconds * 5.5);
+      const safeToBoost = traffic.collisionHoldSeconds <= 0
+        && nearestAhead >= 32
+        && (!state.onRoad || state.position.distanceTo(traffic.position) >= 26);
+      if (shouldActivateComputerBoost({
+        elapsedSeconds: raceState.elapsedSeconds,
+        boostSeconds: traffic.boostSeconds,
+        boostCharges: traffic.boostCharges,
+        totalCharges: opponentBoostConfig.charges,
+        activationTimesSeconds: traffic.boostActivationTimesSeconds,
+        eligible: safeToBoost
+      })) {
+        traffic.boostCharges -= 1;
+        traffic.boostSeconds = boostConfig.durationSeconds;
+      }
+      if (traffic.boostSeconds > 0 && traffic.collisionHoldSeconds <= 0 && nearestAhead >= 24) {
+        targetSpeed = Math.max(targetSpeed, traffic.cruiseSpeed * boostConfig.topSpeedMultiplier);
+      }
+      const speedRecovery = traffic.boostSeconds > 0 ? 16 : 5.5;
+      traffic.currentSpeed = moveToward(traffic.currentSpeed, targetSpeed, deltaSeconds * speedRecovery);
       if (!traffic.airborne && traffic.jumpCooldownSeconds <= 0) {
         const launch = resolveFreeDriveJumpLaunch(traffic.position, {
           x: Math.sin(traffic.heading) * traffic.currentSpeed,
@@ -4978,13 +5028,26 @@ export function createRacingGame({
   }
 
   function updateBoostEffect(timestamp) {
-    const flames = car?.userData.boostFlames;
-    const boostGroup = car?.userData.boostGroup;
+    const playerActive = state.boostSeconds > 0
+      && !(raceState.finished && raceConfig.mode === "sprint")
+      && state.velocity.length() > 2;
+    const opponentActive = raceState.opponentEnabled
+      && !raceState.finished
+      && opponentState.boostSeconds > 0
+      && opponentState.currentSpeed > 2;
+    updateCarBoostEffect(car, playerActive, timestamp);
+    updateCarBoostEffect(opponentCar, opponentActive, timestamp + 73);
+    for (const traffic of freeDriveTraffic) {
+      const trafficActive = isFreeDrive && traffic.boostSeconds > 0 && traffic.currentSpeed > 2;
+      updateCarBoostEffect(traffic.visual, trafficActive, timestamp + 137 + traffic.index * 97);
+    }
+  }
+
+  function updateCarBoostEffect(targetCar, active, timestamp) {
+    const flames = targetCar?.userData.boostFlames;
+    const boostGroup = targetCar?.userData.boostGroup;
     if (!flames) return;
 
-    const activeBoost = state.boostSeconds > 0 && !(raceState.finished && raceConfig.mode === "sprint");
-    const moving = state.velocity.length() > 2;
-    const active = activeBoost && moving;
     if (boostGroup) {
       boostGroup.visible = active;
     }
@@ -5080,6 +5143,7 @@ export function createRacingGame({
     }
 
     opponentState.collisionHoldSeconds = Math.max(0, opponentState.collisionHoldSeconds - deltaSeconds);
+    opponentState.boostSeconds = Math.max(0, opponentState.boostSeconds - deltaSeconds);
     opponentState.collisionLaneOffset = moveToward(
       opponentState.collisionLaneOffset,
       0,
@@ -5097,16 +5161,32 @@ export function createRacingGame({
     }
 
     if (!raceState.finished) {
-      const targetSpeed = opponentConfig.speed * (
+      if (shouldActivateComputerBoost({
+        elapsedSeconds: raceState.elapsedSeconds,
+        boostSeconds: opponentState.boostSeconds,
+        boostCharges: opponentState.boostCharges,
+        totalCharges: opponentBoostConfig.charges,
+        activationTimesSeconds: opponentBoostConfig.activationTimesSeconds,
+        eligible: opponentState.collisionHoldSeconds <= 0
+      })) {
+        opponentState.boostCharges -= 1;
+        opponentState.boostSeconds = boostConfig.durationSeconds;
+      }
+      const boostMultiplier = opponentState.boostSeconds > 0 ? boostConfig.topSpeedMultiplier : 1;
+      const targetSpeed = opponentConfig.speed * boostMultiplier * (
         opponentState.collisionHoldSeconds > 0
           ? collisionConfig.opponentImpactSpeedMultiplier
           : 1
       );
-      const speedRecovery = opponentState.collisionHoldSeconds > 0 ? 8.4 : 6;
+      const speedRecovery = opponentState.collisionHoldSeconds > 0
+        ? 8.4
+        : opponentState.boostSeconds > 0 ? 18 : 6;
       opponentState.currentSpeed = moveToward(opponentState.currentSpeed, targetSpeed, deltaSeconds * speedRecovery);
     } else if (raceConfig.mode === "sprint") {
+      opponentState.boostSeconds = 0;
       opponentState.currentSpeed = Math.max(0, opponentState.currentSpeed - deltaSeconds * 6.5);
     } else {
+      opponentState.boostSeconds = 0;
       opponentState.currentSpeed = 0;
     }
 
@@ -6044,6 +6124,8 @@ export function createRacingGame({
     opponentState.completedLaps = 0;
     opponentState.lapLockSeconds = 0;
     opponentState.lapArmed = false;
+    opponentState.boostSeconds = 0;
+    opponentState.boostCharges = opponentBoostConfig.charges;
 
     raceState.finished = false;
     raceState.resultVisible = false;
@@ -6513,6 +6595,7 @@ export function createRacingGame({
     opponentState.collisionLaneOffset = 0;
     opponentState.collisionYawOffset = 0;
     opponentState.collisionHoldSeconds = 0;
+    opponentState.boostSeconds = 0;
     syncOpponentPose();
 
     state.position.copy(playerSample.center.clone().add(playerSample.normal.clone().multiplyScalar(laneOffset)));

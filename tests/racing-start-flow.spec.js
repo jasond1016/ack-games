@@ -81,6 +81,41 @@ test("nitro renders blue flames from every configured Veneno exhaust", async ({ 
   expect(new Set(flameStates.map((flame) => flame.layer))).toEqual(new Set(["outer", "core", "glow"]));
   expect(new Set(flameStates.map((flame) => flame.color))).toEqual(new Set(["#168cff", "#d9fbff", "#2f6bff"]));
   expect(new Set(flameStates.map((flame) => flame.exhaustPosition.join(","))).size).toBe(4);
+
+  await expect.poll(() => page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().opponentBoostSeconds)).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().opponentSpeedKmh)).toBeGreaterThan(180);
+  const boostState = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState());
+  expect(boostState.playerBoostUnlimited).toBe(true);
+  expect(boostState.boostCharges).toBe(5);
+  expect(boostState.opponentBoostCharges).toBe(2);
+  expect(boostState.opponentFlameStates).toHaveLength(6);
+  expect(boostState.opponentFlameStates.every((flame) => flame.visible && flame.opacity > 0)).toBe(true);
+});
+
+test("free-drive traffic uses its own limited blue nitro", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#racingGameCard").click();
+  await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
+  await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-island-freedrive"] .map-select-card-button').click();
+  await page.locator("#racingMapSelectRaceButton").click();
+
+  const startOverlay = page.locator("#racingStartOverlay");
+  await expect(startOverlay).toBeVisible({ timeout: 25_000 });
+  await page.locator("#racingStartRaceButton").click();
+  await expect(startOverlay).toBeHidden({ timeout: 45_000 });
+  await expect(page.locator("#racingHudOverlay")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().traffic.length), {
+    timeout: 25_000
+  }).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() =>
+    globalThis.__ackGamesDebug.racing.getState().traffic.some((traffic) =>
+      traffic.boostSeconds > 0 && traffic.boostCharges === 2 && traffic.boostVisible
+    )
+  )).toBe(true);
+
+  const state = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState());
+  expect(state.playerBoostUnlimited).toBe(true);
+  expect(state.traffic.every((traffic) => traffic.boostCharges >= 0 && traffic.boostCharges <= 3)).toBe(true);
 });
 
 test("jsDelivr failure is isolated to racing and can be retried", async ({ page }) => {

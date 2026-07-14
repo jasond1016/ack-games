@@ -316,20 +316,6 @@ export const racingCarCatalog = [
     ]
   },
   {
-    id: "terzo-millennio",
-    make: "Lamborghini",
-    name: "Terzo Millennio",
-    tag: "概念车",
-    summary: "未来感极强的概念车型，用来提供与量产车完全不同的造型语言。",
-    accentColor: "#4ab3c3",
-    ...createCarAssetUrls("terzo-millennio",
-      "./assets/cars/lamborghini_terzo.glb"
-    ),
-    targetLength: 4.73,
-    modelRotationDegrees: 0,
-    boostExhausts: []
-  },
-  {
     id: "veneno",
     make: "Lamborghini",
     name: "Veneno",

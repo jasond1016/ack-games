@@ -43,7 +43,7 @@ pnpm run assets:build
 
 This produces:
 
-- `_deploy/pages`: fail-closed Pages runtime files, with no GLBs or repository internals.
+- `_deploy/pages`: fail-closed Pages runtime files plus the free-drive environment assets; only the small free-drive scene GLBs are allowed, never racing-car GLBs or repository internals.
 - `_deploy/r2/cars`: content-hashed full and preview GLBs.
 - `_deploy/r2-manifest.json`: object keys, sizes, and checksums.
 

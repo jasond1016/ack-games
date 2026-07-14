@@ -49,7 +49,9 @@ try {
   }
 
   const serializedManifest = JSON.stringify(manifest, null, 2);
-  const modelAssetVersion = shortHash(Buffer.from(serializedManifest));
+  // Bump the cache generation when response metadata such as R2 CORS changes,
+  // even if the immutable model bytes themselves stay identical.
+  const modelAssetVersion = shortHash(Buffer.from(`${serializedManifest}\ncors-v2`));
   await writeFile(path.join(pagesDir, "racing-model-manifest.js"), `export const racingModelManifest = Object.freeze(${serializedManifest});\n`);
   await writeFile(path.join(stagingRoot, "r2-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   await writeFile(path.join(pagesDir, "racing-deployment-config.js"), `export const racingDeploymentConfig = Object.freeze({\n  modelAssetBaseUrl: ${JSON.stringify(new URL("./", modelBaseUrl).href)},\n  previewModelAssetBaseUrl: ${JSON.stringify(new URL("./", modelBaseUrl).href)},\n  modelAssetVersion: ${JSON.stringify(modelAssetVersion)},\n  useHashedModelAssets: true\n});\n`);
@@ -86,7 +88,10 @@ async function validateStaging() {
   for (const file of files) {
     const info = await stat(file);
     if (info.size > assetGraph.pages.limits.maxFileBytes) throw new Error(`Pages asset exceeds 25 MiB: ${path.relative(pagesDir, file)}`);
-    if (file.toLowerCase().endsWith(".glb")) throw new Error(`GLB leaked into Pages: ${file}`);
+    const relative = path.relative(pagesDir, file).replaceAll("\\", "/");
+    if (file.toLowerCase().endsWith(".glb") && !relative.startsWith("assets/freedrive/models/")) {
+      throw new Error(`Unexpected GLB leaked into Pages: ${relative}`);
+    }
   }
   for (const relative of ["package.json", "CONTEXT.md", "docs", "tests", "scripts"]) {
     if (await exists(path.join(pagesDir, relative))) throw new Error(`Forbidden repository content leaked into Pages: ${relative}`);

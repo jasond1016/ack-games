@@ -10,7 +10,7 @@ export const cloudflarePagesAssetGraph = Object.freeze({
       "racing-runtime-adapters.mjs", "racing-session.mjs", "racing-start-config.js",
       "racing-track.mjs"
     ]),
-    directories: Object.freeze(["assets/typing-garage"]),
+    directories: Object.freeze(["assets/typing-garage", "assets/freedrive"]),
     generated: Object.freeze(["racing-model-manifest.js", "racing-deployment-config.js", "_headers"]),
     limits: Object.freeze({ maxFiles: 20_000, maxFileBytes: 25 * 1024 * 1024 })
   })
