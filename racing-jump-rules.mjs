@@ -1,11 +1,14 @@
 export const FREE_DRIVE_JUMP = Object.freeze({
-  corridorMinY: 8,
-  rampMinX: 154,
+  corridorMinAbsY: 8,
+  rampMinX: 146,
   gapMinX: 178,
   gapMaxX: 202,
-  rampMaxX: 226,
-  rampRise: 3.6,
+  rampMaxX: 234,
+  rampRise: 5,
+  landingRun: 10,
   minLaunchSpeed: 25,
+  minVerticalSpeed: 5.5,
+  maxVerticalSpeed: 14,
   gravity: 18
 });
 
@@ -19,13 +22,13 @@ function smootherstep(value) {
 }
 
 export function isFreeDriveJumpCorridor(position) {
-  return position.y > FREE_DRIVE_JUMP.corridorMinY
+  return Math.abs(position.y) > FREE_DRIVE_JUMP.corridorMinAbsY
     && position.x >= FREE_DRIVE_JUMP.rampMinX
     && position.x <= FREE_DRIVE_JUMP.rampMaxX;
 }
 
 export function isFreeDriveJumpGap(position) {
-  return position.y > FREE_DRIVE_JUMP.corridorMinY
+  return isFreeDriveJumpCorridor(position)
     && position.x > FREE_DRIVE_JUMP.gapMinX
     && position.x < FREE_DRIVE_JUMP.gapMaxX;
 }
@@ -66,9 +69,14 @@ export function resolveFreeDriveJumpLaunch(position, velocity) {
     && position.x <= FREE_DRIVE_JUMP.gapMaxX + 3;
   if (!movingTowardGapFromLeft && !movingTowardGapFromRight) return null;
 
-  const flightSeconds = (FREE_DRIVE_JUMP.gapMaxX - FREE_DRIVE_JUMP.gapMinX) / Math.abs(velocity.x);
+  const flightDistance = FREE_DRIVE_JUMP.gapMaxX - FREE_DRIVE_JUMP.gapMinX
+    + FREE_DRIVE_JUMP.landingRun;
+  const flightSeconds = flightDistance / Math.abs(velocity.x);
   return {
-    verticalSpeed: Math.max(4.4, Math.min(9.5, FREE_DRIVE_JUMP.gravity * flightSeconds * 0.5)),
+    verticalSpeed: Math.max(
+      FREE_DRIVE_JUMP.minVerticalSpeed,
+      Math.min(FREE_DRIVE_JUMP.maxVerticalSpeed, FREE_DRIVE_JUMP.gravity * flightSeconds * 0.5)
+    ),
     direction: movingTowardGapFromLeft ? 1 : -1
   };
 }

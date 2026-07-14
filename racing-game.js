@@ -2036,27 +2036,33 @@ export function createRacingGame({
     });
 
     const warningMaterial = new THREE.MeshStandardMaterial({ color: 0xf2c94c, roughness: 0.54, metalness: 0.08 });
-    for (const edgeX of [FREE_DRIVE_JUMP.gapMinX, FREE_DRIVE_JUMP.gapMaxX]) {
-      const edgeSample = bridgeSamples
-        .filter((sample) => sample.center.y > FREE_DRIVE_JUMP.corridorMinY)
-        .reduce((best, sample) => Math.abs(sample.center.x - edgeX) < Math.abs(best.center.x - edgeX) ? sample : best);
-      if (!edgeSample) continue;
-      const deckY = freeDriveElevationAtPosition(edgeSample.center, edgeSample.progress);
-      const endFace = new THREE.Mesh(
-        new THREE.BoxGeometry(edgeSample.halfWidth * 2, 1.5, 0.72),
-        concrete
+    for (const corridorSide of [-1, 1]) {
+      const corridorSamples = bridgeSamples.filter(
+        (sample) => Math.sign(sample.center.y || corridorSide) === corridorSide
       );
-      endFace.position.set(edgeSample.center.x, deckY - 0.72, edgeSample.center.y);
-      endFace.rotation.y = edgeSample.heading;
-      endFace.castShadow = endFace.receiveShadow = qualityPreset.shadows;
-      const warningBar = new THREE.Mesh(
-        new THREE.BoxGeometry(edgeSample.halfWidth * 1.7, 0.12, 0.9),
-        warningMaterial
-      );
-      warningBar.position.set(edgeSample.center.x, deckY + 0.1, edgeSample.center.y);
-      warningBar.rotation.y = edgeSample.heading;
-      warningBar.receiveShadow = true;
-      scene.add(endFace, warningBar);
+      for (const edgeX of [FREE_DRIVE_JUMP.gapMinX, FREE_DRIVE_JUMP.gapMaxX]) {
+        const edgeSample = corridorSamples.reduce(
+          (best, sample) => Math.abs(sample.center.x - edgeX) < Math.abs(best.center.x - edgeX) ? sample : best,
+          corridorSamples[0]
+        );
+        if (!edgeSample) continue;
+        const deckY = freeDriveElevationAtPosition(edgeSample.center, edgeSample.progress);
+        const endFace = new THREE.Mesh(
+          new THREE.BoxGeometry(edgeSample.halfWidth * 2, 1.5, 0.72),
+          concrete
+        );
+        endFace.position.set(edgeSample.center.x, deckY - 0.72, edgeSample.center.y);
+        endFace.rotation.y = edgeSample.heading;
+        endFace.castShadow = endFace.receiveShadow = qualityPreset.shadows;
+        const warningBar = new THREE.Mesh(
+          new THREE.BoxGeometry(edgeSample.halfWidth * 1.7, 0.12, 0.9),
+          warningMaterial
+        );
+        warningBar.position.set(edgeSample.center.x, deckY + 0.1, edgeSample.center.y);
+        warningBar.rotation.y = edgeSample.heading;
+        warningBar.receiveShadow = true;
+        scene.add(endFace, warningBar);
+      }
     }
 
   }
