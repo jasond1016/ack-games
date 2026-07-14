@@ -1,6 +1,5 @@
 import { racingSceneConfig } from "./racing-car-config.js";
 import {
-  cloneRacingMap,
   createLoopStartPosition,
   exportRacingMap,
   getTrackSurfaceLabel,
@@ -18,12 +17,14 @@ import {
 const pointRadius = 8;
 const nudgeStep = 0.8;
 const startLineHitPadding = 2.6;
+const editorPreviewSamples = 240;
 const trackWidthOverride = racingSceneConfig.trackWidthOverride ?? null;
 
 function buildEditorPreviewModel(track) {
   const semantics = inspectRacingTrack({
     ...track,
-    width: trackWidthOverride ?? track.width
+    width: trackWidthOverride ?? track.width,
+    samples: Math.min(track.samples, editorPreviewSamples)
   });
   return {
     ...semantics.summary,
@@ -33,6 +34,14 @@ function buildEditorPreviewModel(track) {
     project: semantics.project,
     findInsertion: semantics.findInsertion
   };
+}
+
+function cloneEditorMap(map) {
+  return JSON.parse(JSON.stringify(map));
+}
+
+function serializeEditorMap(map) {
+  return JSON.stringify(map, null, 2);
 }
 
 export function createRacingEditor({ onPlay, onMapChanged } = {}) {
@@ -61,7 +70,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
   let active = false;
   let listening = false;
   let mapData = racingMapLibrary.beginEditingSelected().selected.map;
-  let lastValidMap = cloneRacingMap(mapData);
+  let lastValidMap = cloneEditorMap(mapData);
   let previewModel = buildEditorPreviewModel(mapData.track);
   let viewport = null;
   let selectedPointIndex = 0;
@@ -71,7 +80,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
   function start() {
     active = true;
     mapData = racingMapLibrary.beginEditingSelected().selected.map;
-    lastValidMap = cloneRacingMap(mapData);
+    lastValidMap = cloneEditorMap(mapData);
     previewModel = buildEditorPreviewModel(mapData.track);
     selectedPointIndex = 0;
     startLineSelected = false;
@@ -167,7 +176,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
   }
 
   function handleNameCommit() {
-    const candidate = cloneRacingMap(mapData);
+    const candidate = cloneEditorMap(mapData);
     candidate.name = mapNameInput.value.trim() || "未命名赛道";
     commitCandidate(candidate, "已更新地图名称。");
   }
@@ -184,7 +193,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
       return;
     }
 
-    const candidate = cloneRacingMap(mapData);
+    const candidate = cloneEditorMap(mapData);
     candidate.track.shape = nextShape;
 
     if (isLoopTrackShape(nextShape)) {
@@ -206,7 +215,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
       return;
     }
 
-    const candidate = cloneRacingMap(mapData);
+    const candidate = cloneEditorMap(mapData);
     candidate.track.surface = nextSurface;
     commitCandidate(candidate, `已切换为${getTrackSurfaceLabel(nextSurface)}。`);
   }
@@ -217,7 +226,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
       return;
     }
 
-    const candidate = cloneRacingMap(mapData);
+    const candidate = cloneEditorMap(mapData);
     candidate.track.controlPoints.reverse();
     selectedPointIndex = mapData.track.controlPoints.length - 1 - selectedPointIndex;
     commitCandidate(candidate, "已反转赛道方向。");
@@ -246,7 +255,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
   function handleDuplicate() {
     const duplicated = racingMapLibrary.duplicateEditingMap();
     mapData = duplicated.selected.map;
-    lastValidMap = cloneRacingMap(mapData);
+    lastValidMap = cloneEditorMap(mapData);
     previewModel = buildEditorPreviewModel(mapData.track);
     selectedPointIndex = 0;
     startLineSelected = false;
@@ -281,7 +290,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
 
     try {
       mapData = racingMapLibrary.importEditingMap(await file.text()).selected.map;
-      lastValidMap = cloneRacingMap(mapData);
+      lastValidMap = cloneEditorMap(mapData);
       previewModel = buildEditorPreviewModel(mapData.track);
       selectedPointIndex = 0;
       startLineSelected = false;
@@ -310,6 +319,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
 
     const pointIndex = findPointAtScreen(screen.x, screen.y);
     if (pointIndex >= 0) {
+      mapData = cloneEditorMap(mapData);
       selectedPointIndex = pointIndex;
       startLineSelected = false;
       dragState = {
@@ -323,6 +333,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
     }
 
     if (isLoopTrackShape(mapData.track.shape) && startLineHitTest(world)) {
+      mapData = cloneEditorMap(mapData);
       startLineSelected = true;
       dragState = {
         type: "start-line"
@@ -333,6 +344,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
     }
 
     if (event.shiftKey) {
+      mapData = cloneEditorMap(mapData);
       const insertion = previewModel.findInsertion(world);
       mapData.track.controlPoints.splice(
         insertion.index,
@@ -377,7 +389,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
       previewModel = buildEditorPreviewModel(mapData.track);
       startLineSelected = false;
       syncUiState(false);
-      render();
+      render({ preserveViewport: true });
       return;
     }
 
@@ -385,7 +397,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
     mapData.track.startPosition.progress = projection.progress;
     startLineSelected = true;
     syncUiState(false);
-    render();
+    render({ preserveViewport: true });
   }
 
   function handlePointerUp(event) {
@@ -440,7 +452,6 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
 
   function syncControlsFromMap() {
     mapNameInput.value = mapData.name;
-    jsonValue.value = exportRacingMap(mapData);
     syncUiState();
     render();
   }
@@ -463,14 +474,15 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
     reverseButton.disabled = isLoopTrackShape(mapData.track.shape);
 
     if (updateJson) {
-      jsonValue.value = exportRacingMap(mapData);
+      jsonValue.value = serializeEditorMap(mapData);
     }
   }
 
   function commitCandidate(candidateMap, successMessage, invalidMessage = "") {
     try {
-      mapData = racingMapLibrary.saveEditingMap(candidateMap).selected.map;
-      lastValidMap = cloneRacingMap(saved);
+      const saved = racingMapLibrary.saveEditingMap(candidateMap).selected.map;
+      mapData = saved;
+      lastValidMap = cloneEditorMap(saved);
       previewModel = buildEditorPreviewModel(saved.track);
       selectedPointIndex = clampPointSelection(selectedPointIndex);
       syncUiState();
@@ -487,7 +499,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
   }
 
   function restoreLastValidMap() {
-    mapData = cloneRacingMap(lastValidMap);
+    mapData = cloneEditorMap(lastValidMap);
     previewModel = buildEditorPreviewModel(mapData.track);
     selectedPointIndex = clampPointSelection(selectedPointIndex);
     dragState = null;
@@ -527,7 +539,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
       return;
     }
 
-    const candidate = cloneRacingMap(mapData);
+    const candidate = cloneEditorMap(mapData);
     candidate.track.controlPoints.splice(selectedPointIndex, 1);
     selectedPointIndex = Math.max(0, Math.min(selectedPointIndex, candidate.track.controlPoints.length - 1));
     commitCandidate(candidate, "已删除控制点。");
@@ -544,7 +556,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
       return;
     }
 
-    const candidate = cloneRacingMap(mapData);
+    const candidate = cloneEditorMap(mapData);
     candidate.track.controlPoints[selectedPointIndex][0] = roundCoordinate(point[0] + delta.x);
     candidate.track.controlPoints[selectedPointIndex][1] = roundCoordinate(point[1] + delta.z);
     commitCandidate(candidate, "已微调控制点。");
@@ -562,7 +574,7 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
 
     const progressStep = 1 / mapData.track.samples;
     const sign = Math.abs(delta.x) > 0 ? Math.sign(delta.x) : Math.sign(delta.z);
-    const candidate = cloneRacingMap(mapData);
+    const candidate = cloneEditorMap(mapData);
     candidate.track.startPosition.progress = ((candidate.track.startPosition.progress + sign * progressStep) % 1 + 1) % 1;
     commitCandidate(candidate, "已微调闭环起跑位置。");
   }
@@ -637,13 +649,14 @@ export function createRacingEditor({ onPlay, onMapChanged } = {}) {
     return previewModel.sample(progress);
   }
 
-  function render() {
+  function render({ preserveViewport = false } = {}) {
     if (!ctx || !active) {
       return;
     }
 
-    previewModel = buildEditorPreviewModel(mapData.track);
-    viewport = computeViewport(previewModel);
+    if (!preserveViewport || !viewport) {
+      viewport = computeViewport(previewModel);
+    }
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     drawBackground();

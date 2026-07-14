@@ -108,6 +108,75 @@ test("editing a preset map creates a user-map copy before entering the editor", 
   await expect(page.locator("#racingUserMaps .map-select-card").first()).toContainText("F1 练习场 副本");
 });
 
+test("dragging a control point keeps the editor preview in sync with the saved map", async ({ page }) => {
+  const pageErrors = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.addInitScript(() => {
+    const map = {
+      version: 3,
+      name: "拖拽回归地图",
+      track: {
+        shape: "open",
+        surface: "asphalt",
+        width: 14,
+        samples: 240,
+        controlPoints: [[0, 0], [30, 0], [60, 20], [90, 20]]
+      }
+    };
+    localStorage.setItem("ack-games:racing-map-library-state:v1", JSON.stringify({
+      version: 1,
+      selectedMapId: "user-drag-regression",
+      userEntries: [{
+        mapId: "user-drag-regression",
+        kind: "user",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        map
+      }]
+    }));
+  });
+
+  await page.goto("/#racing-editor");
+  await expect(page.locator("#racingEditorView")).toBeVisible();
+
+  const selectedPoint = await page.locator("#racingEditorCanvas").evaluate((canvas) => {
+    const context = canvas.getContext("2d");
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    let totalX = 0;
+    let totalY = 0;
+    let count = 0;
+    for (let y = 0; y < canvas.height; y += 1) {
+      for (let x = 0; x < canvas.width; x += 1) {
+        const offset = (y * canvas.width + x) * 4;
+        if (pixels[offset] === 242 && pixels[offset + 1] === 183 && pixels[offset + 2] === 5) {
+          totalX += x;
+          totalY += y;
+          count += 1;
+        }
+      }
+    }
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: rect.left + (totalX / count) * rect.width / canvas.width,
+      y: rect.top + (totalY / count) * rect.height / canvas.height
+    };
+  });
+  await page.mouse.move(selectedPoint.x, selectedPoint.y);
+  await page.mouse.down();
+  await page.mouse.move(selectedPoint.x + 24, selectedPoint.y, { steps: 4 });
+  await page.mouse.up();
+
+  const previewMap = JSON.parse(await page.locator("#racingEditorJsonValue").inputValue());
+  const savedMap = await page.evaluate(() => {
+    const state = JSON.parse(localStorage.getItem("ack-games:racing-map-library-state:v1"));
+    return state.userEntries.find((entry) => entry.mapId === state.selectedMapId).map;
+  });
+  expect(previewMap.track.controlPoints[0]).not.toEqual([0, 0]);
+  expect(savedMap.track.controlPoints[0]).toEqual(previewMap.track.controlPoints[0]);
+  expect(pageErrors).toEqual([]);
+  await expect(page.locator("#racingEditorStatusValue")).toHaveText("已更新路线。");
+});
+
 test("legacy racing map keys migrate atomically to one library state", async ({ page }) => {
   await page.addInitScript(() => {
     const map = {
