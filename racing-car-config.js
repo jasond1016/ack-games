@@ -120,9 +120,13 @@ export const racingCarCatalog = [
     id: "aventador",
     make: "Lamborghini",
     name: "Aventador LP720-4 50th",
-    tag: "中置超跑",
-    summary: "线条低矮的公路超跑，作为当前默认参赛车提供。",
+    tag: "漂移特调",
+    summary: "唯一采用漂移调校的赛车，大油门配合转向即可轻松甩尾。",
     accentColor: "#d64545",
+    drift: {
+      enabled: true,
+      throttleThreshold: 0.7
+    },
     ...createCarAssetUrls("aventador",
       "./assets/cars/lamborghini_aventador_lp720-4_50th_anniversary/lamborghini_aventador_lp720-4_50th_anniversary.glb"
     ),
