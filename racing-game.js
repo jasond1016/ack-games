@@ -339,7 +339,13 @@ export function createRacingGame({
       if (!isStartOverlayVisible()) setPaused(!raceState.paused);
     },
     onBoost: () => {
-      if (!isStartOverlayVisible() && !raceState.paused) activateBoost();
+      if (isStartOverlayVisible()) {
+        beginRace();
+      } else if (raceState.resultVisible) {
+        void requestSessionIntent({ type: "replace-session", snapshot: activeSnapshot });
+      } else if (!raceState.paused) {
+        activateBoost();
+      }
     },
     onToggleOpponent: () => {
       if (!isStartOverlayVisible() && !raceState.paused) toggleOpponent();
@@ -353,6 +359,9 @@ export function createRacingGame({
       }
     },
     onToggleDebug: () => setCollisionDebugEnabled(!collisionDebug.enabled),
+    onGamepadDrive: (gamepadState) => {
+      gamepadDrive = gamepadState;
+    },
     onBlur: handleBlur,
     onHidden: handleVisibilityChange
   });
@@ -478,6 +487,7 @@ export function createRacingGame({
   };
 
   const keyState = new Set();
+  let gamepadDrive = Object.freeze({ connected: false, steering: 0, throttle: 0, brake: 0 });
   const state = {
     position: new THREE.Vector2(),
     velocity: new THREE.Vector2(),
@@ -776,7 +786,7 @@ export function createRacingGame({
         button.addEventListener("click", () => {
           selectedCarId = carConfig.id;
           renderCarOptions();
-          setStartStatus(`已选择 ${formatCarLabel(selectedCar())}。`);
+          setStartStatus(`已选择 ${formatCarLabel(selectedCar())}。Xbox 360 手柄按 A 开赛。`);
         });
         const thumbnail = button.querySelector(".race-car-thumbnail");
         if (thumbnail instanceof HTMLImageElement) {
@@ -1114,7 +1124,7 @@ export function createRacingGame({
     startEditorButton.disabled = false;
     startHomeButton.disabled = false;
     renderCarOptions();
-    setStartStatus(`已选择 ${formatCarLabel(selectedCar())}。`);
+    setStartStatus(`已选择 ${formatCarLabel(selectedCar())}。Xbox 360 手柄按 A 开赛。`);
   }
 
   function hideStartOverlay() {
@@ -4948,6 +4958,7 @@ export function createRacingGame({
 
     const deltaSeconds = Math.min((timestamp - lastFrameTime) / 1000, 0.04);
     lastFrameTime = timestamp;
+    input.pollGamepad();
     if (!raceState.paused) {
       const sprintGlide = raceConfig.mode === "sprint" && raceState.finished && !raceState.resultVisible;
 
@@ -5017,10 +5028,11 @@ export function createRacingGame({
     const rightPressed = keyState.has("KeyD") || keyState.has("ArrowRight");
     const sprintGlide = raceConfig.mode === "sprint" && raceState.finished && !raceState.resultVisible;
 
-    state.throttle = sprintGlide ? 0 : throttlePressed ? 1 : 0;
-    state.brake = sprintGlide ? 0 : brakePressed ? 1 : 0;
+    state.throttle = sprintGlide ? 0 : Math.max(throttlePressed ? 1 : 0, gamepadDrive.throttle);
+    state.brake = sprintGlide ? 0 : Math.max(brakePressed ? 1 : 0, gamepadDrive.brake);
 
-    const targetSteer = (leftPressed ? 1 : 0) - (rightPressed ? 1 : 0);
+    const keyboardSteer = (leftPressed ? 1 : 0) - (rightPressed ? 1 : 0);
+    const targetSteer = keyboardSteer || gamepadDrive.steering;
     const steeringResponse = targetSteer === 0
       ? handlingConfig.steeringReleaseResponse
       : handlingConfig.steeringResponse;

@@ -23,6 +23,8 @@ pnpm run serve
 
 Open [http://127.0.0.1:4173](http://127.0.0.1:4173).
 
+赛车支持键盘和标准 Xbox 360 手柄。手柄映射：左摇杆或十字键转向，RT 油门，LT 刹车/倒车，A 开赛/氮气/再跑一场，Y 切换镜头，X 切换对手，Start 暂停/继续，Back 重开比赛。
+
 If you want the browser opened automatically:
 
 ```bash
