@@ -1,4 +1,5 @@
 import { createDrivetrainState, updateAutomaticDrivetrain } from "./racing-drivetrain.mjs";
+import { calculateTireDynamics } from "./racing-tire-dynamics.mjs";
 
 export const physicalVehicleConfig = Object.freeze({
   id: "aventador",
@@ -111,6 +112,7 @@ export function createPhysicalVehicle({ world, chassis, config = physicalVehicle
     config,
     drivenWheelIndexes: drivenWheelIndexesFor(config),
     drivetrain: createDrivetrainState(config),
+    tireDynamics: calculateTireDynamics(),
     controller,
     wheelPositions,
     contactCount: 0,
@@ -176,7 +178,9 @@ export function updatePhysicalVehicle({
   steering,
   boostActive,
   maxForwardSpeed,
-  acceptsGroundCollider
+  acceptsGroundCollider,
+  surfaceId = "road",
+  grounded = true
 }) {
   const config = vehicle.config ?? physicalVehicleConfig;
   const controller = vehicle.controller;
@@ -198,7 +202,7 @@ export function updatePhysicalVehicle({
     reverseInput: brake,
     deltaSeconds
   });
-  const { engineForce, brakeImpulse } = resolvePhysicalVehicleDriveForces({
+  const driveForces = resolvePhysicalVehicleDriveForces({
     signedSpeed,
     throttle,
     brake,
@@ -207,8 +211,28 @@ export function updatePhysicalVehicle({
     config,
     driveScale: vehicle.drivetrain.driveScale
   });
+  const rotation = chassis.rotation();
+  const forwardX = 2 * (rotation.x * rotation.z + rotation.w * rotation.y);
+  const forwardZ = 1 - 2 * (rotation.x * rotation.x + rotation.y * rotation.y);
+  const lateralSpeed = velocity.x * forwardZ - velocity.z * forwardX;
+  vehicle.tireDynamics = calculateTireDynamics({
+    signedSpeed,
+    lateralSpeed,
+    throttle,
+    brake,
+    steering,
+    surfaceId,
+    grounded,
+    mass: config.mass,
+    engineForcePerWheel: config.engineForcePerWheel,
+    driveScale: vehicle.drivetrain.driveScale,
+    drivenWheelIndexes: vehicle.drivenWheelIndexes
+  });
+  const engineForce = driveForces.engineForce * vehicle.tireDynamics.engineScale;
+  const brakeImpulse = driveForces.brakeImpulse * vehicle.tireDynamics.brakeScale;
 
   for (let index = 0; index < vehicle.wheelPositions.length; index += 1) {
+    controller.setWheelFrictionSlip(index, config.frictionSlip * vehicle.tireDynamics.grip);
     controller.setWheelSteering(index, vehicle.wheelPositions[index].front ? steeringAngle : 0);
     controller.setWheelEngineForce(index, vehicle.drivenWheelIndexes.includes(index) ? engineForce : 0);
     controller.setWheelBrake(index, brakeImpulse);
@@ -256,4 +280,5 @@ export function resetPhysicalVehicleControls(vehicle) {
   vehicle.speed = 0;
   vehicle.steeringAngle = 0;
   vehicle.drivetrain = createDrivetrainState(vehicle.config ?? physicalVehicleConfig);
+  vehicle.tireDynamics = calculateTireDynamics();
 }

@@ -40,3 +40,8 @@ test("存在动力系统转速时音效直接使用真实 RPM", () => {
   assert.equal(state.rpm, 6420);
   assert.ok(state.rpmRatio > 0.7);
 });
+
+test("明显轮胎滑移会产生独立尖叫声部", () => {
+  assert.ok(calculateRacingAudioState({ tireSlip: 0.75 }).tireGain > 0);
+  assert.equal(calculateRacingAudioState({ tireSlip: 0.02 }).tireGain, 0);
+});

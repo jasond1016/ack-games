@@ -47,3 +47,10 @@ test("控制器持续刷新双马达振动并可发送碰撞脉冲", () => {
   controller.stop();
   assert.equal(effects.at(-1).type, "reset");
 });
+
+test("轮胎滑移与 ABS 会增加手柄反馈", () => {
+  const calm = calculateRacingHapticsState({ connected: true, signedSpeed: 20 });
+  const sliding = calculateRacingHapticsState({ connected: true, signedSpeed: 20, tireSlip: 0.8, absActive: true });
+  assert.ok(sliding.weakMagnitude > calm.weakMagnitude);
+  assert.ok(sliding.strongMagnitude > calm.strongMagnitude);
+});

@@ -16,7 +16,8 @@ export function calculateRacingAudioState({
   maxForwardSpeed = 50,
   engineRpm = null,
   idleRpm = RACING_ENGINE_AUDIO.idleRpm,
-  maximumRpm = RACING_ENGINE_AUDIO.maximumRpm
+  maximumRpm = RACING_ENGINE_AUDIO.maximumRpm,
+  tireSlip = 0
 } = {}) {
   const speedRatio = clamp(Math.abs(signedSpeed) / Math.max(maxForwardSpeed, 0.001), 0, 1);
   const throttleAmount = clamp(throttle, 0, 1);
@@ -42,6 +43,7 @@ export function calculateRacingAudioState({
     boostGain: enabled && boostActive ? 0.13 : 0,
     boostFrequency: 72 + resolvedRpmRatio * 68,
     boostActive: Boolean(enabled && boostActive),
+    tireGain: enabled ? clamp((tireSlip - 0.08) * 0.18, 0, 0.12) : 0,
     enabled: Boolean(enabled)
   });
 }
@@ -105,6 +107,16 @@ export function createRacingAudioController({
     boostNoise.buffer = noiseBuffer;
     boostNoise.loop = true;
     boostNoise.connect(boostFilter);
+
+    const tireFilter = context.createBiquadFilter();
+    tireFilter.type = "bandpass";
+    tireFilter.frequency.value = 1450;
+    tireFilter.Q.value = 1.8;
+    const tireGain = context.createGain();
+    tireGain.gain.value = 0;
+    boostNoise.connect(tireFilter);
+    tireFilter.connect(tireGain);
+    tireGain.connect(masterGain);
     boostNoise.start();
 
     const boostToneGain = context.createGain();
@@ -125,7 +137,9 @@ export function createRacingAudioController({
       boostFilter,
       boostGain,
       boostNoise,
-      boostOscillator
+      boostOscillator,
+      tireFilter,
+      tireGain
     };
     applyState();
     return graph;
@@ -146,6 +160,7 @@ export function createRacingAudioController({
     setTarget(graph.boostGain.gain, state.boostGain, state.boostActive ? 0.025 : 0.09);
     setTarget(graph.boostOscillator.frequency, state.boostFrequency, 0.06);
     setTarget(graph.boostFilter.frequency, 760 + state.rpmRatio * 980, 0.08);
+    setTarget(graph.tireGain.gain, state.tireGain, 0.035);
   }
 
   return Object.freeze({

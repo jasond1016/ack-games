@@ -620,6 +620,14 @@ export function createRacingGame({
         torqueRatio: Number(physics.playerVehicle.drivetrain.torqueRatio.toFixed(3)),
         clutch: Number(physics.playerVehicle.drivetrain.clutch.toFixed(3))
       } : null,
+      tireDynamics: physics?.playerVehicle?.tireDynamics ? {
+        surfaceGrip: Number(physics.playerVehicle.tireDynamics.grip.toFixed(2)),
+        maximumSlip: Number(physics.playerVehicle.tireDynamics.maximumSlip.toFixed(3)),
+        squeal: Number(physics.playerVehicle.tireDynamics.squeal.toFixed(3)),
+        absActive: physics.playerVehicle.tireDynamics.absActive,
+        tractionControlActive: physics.playerVehicle.tireDynamics.tractionControlActive,
+        wheelSlip: physics.playerVehicle.tireDynamics.wheels.map((wheel) => Number(wheel.combinedSlip.toFixed(3)))
+      } : null,
       wheelAnimation: {
         wheelCount: car?.userData.wheelCount ?? 0,
         shaderBindings: car?.userData.wheelShaderBindings?.length ?? 0,
@@ -2584,9 +2592,10 @@ export function createRacingGame({
     if (!drivingDust || deltaSeconds <= 0) return;
 
     const speed = state.velocity.length();
-    const dustySurface = isGravelSurface || !state.onRoad;
+    const tireSlip = physics?.playerVehicle?.tireDynamics?.maximumSlip ?? 0;
+    const dustySurface = isGravelSurface || !state.onRoad || tireSlip > 0.22;
     const emissionRate = dustySurface
-      ? clamp((speed - 2) * 2.1, 0, 52)
+      ? clamp((speed - 2) * 2.1 + tireSlip * 24, 0, 58)
       : 0;
     drivingDust.emissionCarry += emissionRate * deltaSeconds;
     while (drivingDust.emissionCarry >= 1) {
@@ -5643,6 +5652,7 @@ export function createRacingGame({
 
   function updateRacingAudio() {
     const drivetrain = physics?.playerVehicle?.drivetrain;
+    const tireDynamics = physics?.playerVehicle?.tireDynamics;
     const vehicleSpec = playerVehicleSpec();
     racingAudio.update({
       signedSpeed: physics?.playerVehicle?.speed ?? state.velocity.length(),
@@ -5652,11 +5662,13 @@ export function createRacingGame({
       maxForwardSpeed: playerMaxForwardSpeed(),
       engineRpm: drivetrain?.engineRpm,
       idleRpm: vehicleSpec.idleRpm,
-      maximumRpm: vehicleSpec.redlineRpm
+      maximumRpm: vehicleSpec.redlineRpm,
+      tireSlip: tireDynamics?.squeal ?? 0
     });
   }
 
   function updateRacingHaptics() {
+    const tireDynamics = physics?.playerVehicle?.tireDynamics;
     racingHaptics.update({
       gamepadIndex: gamepadDrive.index ?? -1,
       signedSpeed: physics?.playerVehicle?.speed ?? state.velocity.length(),
@@ -5666,7 +5678,10 @@ export function createRacingGame({
       boostActive: state.boostSeconds > 0,
       grounded: playerSurfaceState.grounded,
       surfaceId: playerSurfaceState.surfaceId,
-      enabled: active && !raceState.paused && !raceState.resultVisible
+      enabled: active && !raceState.paused && !raceState.resultVisible,
+      tireSlip: tireDynamics?.maximumSlip ?? 0,
+      absActive: tireDynamics?.absActive ?? false,
+      tractionControlActive: tireDynamics?.tractionControlActive ?? false
     });
   }
 
@@ -5771,7 +5786,9 @@ export function createRacingGame({
       acceptsGroundCollider: (collider) => {
         const tag = physics.colliderTags.get(collider.handle);
         return isPhysicalVehicleSurface(tag);
-      }
+      },
+      surfaceId: playerSurfaceState.surfaceId,
+      grounded: playerSurfaceState.grounded
     });
     syncPhysicalVehicleState();
   }

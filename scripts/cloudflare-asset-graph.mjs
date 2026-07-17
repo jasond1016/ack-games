@@ -8,7 +8,7 @@ export const cloudflarePagesAssetGraph = Object.freeze({
       "racing-map-select.js", "racing-map.js",
       "racing-physical-vehicle.mjs", "racing-surface-contact.mjs",
       "racing-resource-cleanup.mjs", "racing-resource-leases.mjs",
-      "racing-runtime-adapters.mjs", "racing-session.mjs", "racing-start-config.js",
+      "racing-runtime-adapters.mjs", "racing-session.mjs", "racing-start-config.js", "racing-tire-dynamics.mjs",
       "racing-wheel-animation.mjs",
       "racing-track.mjs"
     ]),

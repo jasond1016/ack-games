@@ -11,7 +11,10 @@ export function calculateRacingHapticsState({
   brake = 0,
   boostActive = false,
   grounded = true,
-  surfaceId = "road"
+  surfaceId = "road",
+  tireSlip = 0,
+  absActive = false,
+  tractionControlActive = false
 } = {}) {
   if (!connected || !enabled) {
     return Object.freeze({ weakMagnitude: 0, strongMagnitude: 0, boostActive: false, enabled: false });
@@ -22,13 +25,20 @@ export function calculateRacingHapticsState({
   const contactScale = grounded ? 1 : 0.28;
   const weakMagnitude = clamp((
     0.035 + speedRatio * 0.16 + clamp(throttle) * 0.07 + (roughSurface ? 0.18 : 0)
-    + (boostActive ? 0.42 : 0)
+    + (boostActive ? 0.42 : 0) + clamp(tireSlip) * 0.22 + (tractionControlActive ? 0.08 : 0)
   ) * contactScale);
   const strongMagnitude = clamp((
     speedRatio * 0.08 + clamp(brake) * 0.24 + (roughSurface ? 0.08 : 0)
-    + (boostActive ? 0.64 : 0)
+    + (boostActive ? 0.64 : 0) + clamp(tireSlip) * 0.11 + (absActive ? 0.18 : 0)
   ) * contactScale);
-  return Object.freeze({ weakMagnitude, strongMagnitude, boostActive: Boolean(boostActive), enabled: true });
+  return Object.freeze({
+    weakMagnitude,
+    strongMagnitude,
+    boostActive: Boolean(boostActive),
+    absActive: Boolean(absActive),
+    tractionControlActive: Boolean(tractionControlActive),
+    enabled: true
+  });
 }
 
 export function createRacingHapticsController({
