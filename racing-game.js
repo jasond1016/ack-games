@@ -39,6 +39,11 @@ import { createResourceLeaseCache } from "./racing-resource-leases.mjs";
 import { createRacingAudioController } from "./racing-audio.mjs";
 import { createRacingHapticsController } from "./racing-haptics.mjs";
 import {
+  partitionSurfaceTrianglesBySlope,
+  validateDrivableRibbon,
+  validateDrivableSurfaceSet
+} from "./racing-drivable-surface-validation.mjs";
+import {
   FREE_DRIVE_RALLY,
   FREE_DRIVE_TUNNEL,
   createFreeDriveRallyRibbon,
@@ -378,6 +383,14 @@ export function createRacingGame({
   const staticWorldColliderSpecs = [];
   const staticWorldMeshColliderSpecs = [];
   let roadCollisionMeshData = null;
+  let surfaceValidationReport = Object.freeze({
+    valid: true,
+    surfaceCount: 0,
+    triangleCount: 0,
+    errors: Object.freeze([]),
+    warnings: Object.freeze([])
+  });
+  const surfaceRibbonReports = [];
 
   const keyState = new Set();
   let gamepadDrive = Object.freeze({ connected: false, steering: 0, throttle: 0, brake: 0 });
@@ -510,6 +523,7 @@ export function createRacingGame({
     placeStuntJumpScenario: (direction = 1) => placeStuntJumpScenario(direction),
     placeTunnelScenario: () => placeTunnelScenario(),
     placeRallyScenario: () => placeRallyScenario(),
+    placeTrackScenario: (progress = 0) => placeTrackScenario(progress),
     placeWorldScenario: (x, z, heading = 0) => placeWorldScenario(x, z, heading),
     toggleOpponent,
     toggleCollisionDebug: () => setCollisionDebugEnabled(!collisionDebug.enabled),
@@ -545,6 +559,14 @@ export function createRacingGame({
         buildings: staticWorldColliderSpecs
           .filter((spec) => spec.tag === "building")
           .map((spec) => ({ x: spec.x, z: spec.z, width: spec.width, depth: spec.depth }))
+      },
+      surfaceValidation: {
+        valid: surfaceValidationReport.valid,
+        surfaceCount: surfaceValidationReport.surfaceCount,
+        triangleCount: surfaceValidationReport.triangleCount,
+        errorCount: surfaceValidationReport.errors.length,
+        warningCount: surfaceValidationReport.warnings.length,
+        errors: surfaceValidationReport.errors.slice(0, 6)
       },
       speedKmh: Math.round(state.velocity.length() * 3.6),
       playerMaxForwardSpeed: playerMaxForwardSpeed(),
@@ -1525,6 +1547,7 @@ export function createRacingGame({
     staticWorldColliderSpecs.length = 0;
     staticWorldMeshColliderSpecs.length = 0;
     roadCollisionMeshData = null;
+    surfaceRibbonReports.length = 0;
     freeDriveRallyRoute = [];
     startGateLights.length = 0;
     if (!isFreeDrive) addSkyDome();
@@ -1554,6 +1577,7 @@ export function createRacingGame({
       addFreeDriveCity();
       await Promise.all([addRealFreeDriveVegetation(), addFreeDriveCoastalCliffs(), addRealFreeDriveCityProps()]);
     }
+    validateWorldDrivableSurfaces();
     drivingDust = createDrivingDust();
     scene.add(drivingDust.points);
   }
@@ -1874,7 +1898,7 @@ export function createRacingGame({
     geometry.computeVertexNormals();
     const mesh = new THREE.Mesh(geometry, material);
     mesh.receiveShadow = true;
-    registerStaticWorldMesh(mesh, "embankment");
+    registerStaticWorldMesh(mesh, "embankment", { partitionSteep: true });
     return mesh;
   }
 
@@ -2282,6 +2306,10 @@ export function createRacingGame({
     road.name = "free-drive-rally-dirt-road";
     road.receiveShadow = true;
     registerStaticWorldMesh(road, FREE_DRIVE_RALLY.surfaceId);
+    surfaceRibbonReports.push(validateDrivableRibbon({
+      id: "rally-dirt-ribbon",
+      vertices: road.geometry.getAttribute("position").array
+    }));
     scene.add(road);
 
     const rutMaterial = new THREE.MeshStandardMaterial({
@@ -2410,7 +2438,7 @@ export function createRacingGame({
     staticWorldColliderSpecs.push(Object.freeze({ x, y, z, width, height, depth, yaw, pitch, roll, tag }));
   }
 
-  function registerStaticWorldMesh(mesh, tag = "world") {
+  function registerStaticWorldMesh(mesh, tag = "world", { partitionSteep = false } = {}) {
     const geometry = mesh?.geometry;
     const position = geometry?.getAttribute("position");
     if (!position?.count) return;
@@ -2427,7 +2455,52 @@ export function createRacingGame({
     const indices = geometry.index
       ? new Uint32Array(geometry.index.array)
       : Uint32Array.from({ length: position.count }, (_, index) => index);
+    if (partitionSteep) {
+      const partition = partitionSurfaceTrianglesBySlope(vertices, indices);
+      if (partition.drivableIndices.length) {
+        staticWorldMeshColliderSpecs.push(Object.freeze({ vertices, indices: partition.drivableIndices, tag }));
+      }
+      if (partition.barrierIndices.length) {
+        staticWorldMeshColliderSpecs.push(Object.freeze({
+          vertices,
+          indices: partition.barrierIndices,
+          tag: "surface-barrier"
+        }));
+      }
+      return;
+    }
     staticWorldMeshColliderSpecs.push(Object.freeze({ vertices, indices, tag }));
+  }
+
+  function validateWorldDrivableSurfaces() {
+    const surfaces = [];
+    if (roadCollisionMeshData?.vertices?.length && roadCollisionMeshData.indices?.length) {
+      surfaces.push({
+        id: "road:0",
+        tag: "road",
+        vertices: roadCollisionMeshData.vertices,
+        indices: roadCollisionMeshData.indices
+      });
+    }
+    for (let index = 0; index < staticWorldMeshColliderSpecs.length; index += 1) {
+      const spec = staticWorldMeshColliderSpecs[index];
+      if (!isPhysicalVehicleSurface(spec.tag)) continue;
+      surfaces.push({ id: `${spec.tag}:${index}`, ...spec });
+    }
+    const meshReport = validateDrivableSurfaceSet(surfaces);
+    const ribbonErrors = surfaceRibbonReports.flatMap((report) => report.errors);
+    surfaceValidationReport = Object.freeze({
+      ...meshReport,
+      valid: meshReport.valid && ribbonErrors.length === 0,
+      errors: Object.freeze([...meshReport.errors, ...ribbonErrors])
+    });
+    if (!surfaceValidationReport.valid) {
+      const summary = surfaceValidationReport.errors
+        .slice(0, 4)
+        .map((entry) => `${entry.surfaceId}: ${entry.message}`)
+        .join("；");
+      throw new Error(`可驾驶表面校验失败：${summary}`);
+    }
   }
 
   function smoothstep(edge0, edge1, value) {
@@ -3173,6 +3246,11 @@ export function createRacingGame({
       vertices: new Float32Array(collisionPositions),
       indices: new Uint32Array(indices)
     };
+    surfaceRibbonReports.push(validateDrivableRibbon({
+      id: "road-ribbon",
+      vertices: roadCollisionMeshData.vertices,
+      closed: trackModel.closed
+    }));
 
     return new THREE.Mesh(
       geometry,
@@ -3773,11 +3851,21 @@ export function createRacingGame({
 
   function freeDriveElevationAtPosition(position, progress = 0) {
     if (!isFreeDrive) return 0;
-    if (position.x > 238) return 1.15;
+    const islandElevation = freeDriveIslandElevation(progress);
+    const stuntRampRise = freeDriveJumpRampRise(position);
+    if (position.x >= 238) return 1.15 + stuntRampRise;
     if (position.x > 116) {
       const bridgeProgress = clamp((position.x - 116) / 122, 0, 1);
-      return 4.8 + Math.sin(bridgeProgress * Math.PI) * 3.2 + freeDriveJumpRampRise(position);
+      const bridgeElevation = 4.8 + Math.sin(bridgeProgress * Math.PI) * 3.2;
+      const entryBlend = smoothstep(116, 140, position.x);
+      const exitBlend = smoothstep(214, 238, position.x);
+      const entryElevation = THREE.MathUtils.lerp(islandElevation, bridgeElevation, entryBlend);
+      return THREE.MathUtils.lerp(entryElevation, 1.15, exitBlend) + stuntRampRise;
     }
+    return islandElevation;
+  }
+
+  function freeDriveIslandElevation(progress) {
     const phase = wrapProgress(progress) * Math.PI * 2;
     return 2.8 + Math.sin(phase - 0.4) * 2.6 + Math.sin(phase * 2 + 0.8) * 1.15;
   }
@@ -7012,6 +7100,14 @@ ${shader.vertexShader}`
       sample.z,
       Math.atan2(sample.tangentX, sample.tangentZ)
     );
+  }
+
+  function placeTrackScenario(requestedProgress = 0) {
+    if (!physics?.playerBody) return false;
+    const progress = Number(requestedProgress);
+    if (!Number.isFinite(progress)) return false;
+    const sample = trackProfileAtProgress(wrapProgress(progress));
+    return placeWorldScenario(sample.center.x, sample.center.y, sample.heading);
   }
 
   function placeWorldScenario(requestedX, requestedZ, requestedHeading = 0) {

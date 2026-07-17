@@ -32,6 +32,19 @@ test("泥土拉力支线从主路驶入并重新接回主路", () => {
   assert.ok(route.every((sample) => sample.y === 1.5 + FREE_DRIVE_RALLY.surfaceOffset));
 });
 
+test("拉力支线路面高度变化不超过安全坡度", () => {
+  const route = createFreeDriveRallyRoute({
+    sampleTrack: straightTrack,
+    elevationAt: (x) => x > 94 ? 8 : 0
+  });
+  for (let index = 1; index < route.length; index += 1) {
+    const previous = route[index - 1];
+    const sample = route[index];
+    const planarDistance = Math.hypot(sample.x - previous.x, sample.z - previous.z);
+    assert.ok(Math.abs(sample.y - previous.y) <= planarDistance * FREE_DRIVE_RALLY.maximumGrade + 0.0001);
+  }
+});
+
 test("拉力道路生成连续的可碰撞三角带", () => {
   const route = createFreeDriveRallyRoute({ sampleTrack: straightTrack, elevationAt: () => 0 });
   const ribbon = createFreeDriveRallyRibbon(route);

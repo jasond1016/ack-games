@@ -14,6 +14,7 @@ export const FREE_DRIVE_RALLY = Object.freeze({
   sampleCount: 72,
   halfWidth: 4.6,
   surfaceOffset: 0.09,
+  maximumGrade: 0.42,
   surfaceId: "rally-dirt",
   waypoints: Object.freeze([
     Object.freeze({ x: -91, z: 48 }),
@@ -21,8 +22,7 @@ export const FREE_DRIVE_RALLY = Object.freeze({
     Object.freeze({ x: -61, z: 21 }),
     Object.freeze({ x: -75, z: 7 }),
     Object.freeze({ x: -63, z: -11 }),
-    Object.freeze({ x: -76, z: -30 }),
-    Object.freeze({ x: -95, z: -43 })
+    Object.freeze({ x: -76, z: -30 })
   ])
 });
 
@@ -129,6 +129,8 @@ export function createFreeDriveRallyRoute({
     });
   }
 
+  constrainRouteGrade(route, config.maximumGrade);
+
   for (let index = 0; index < route.length; index += 1) {
     const previous = route[Math.max(0, index - 1)];
     const next = route[Math.min(route.length - 1, index + 1)];
@@ -141,6 +143,30 @@ export function createFreeDriveRallyRoute({
     route[index].normalZ = -dx / length;
   }
   return Object.freeze(route.map((sample) => Object.freeze(sample)));
+}
+
+function constrainRouteGrade(route, maximumGrade) {
+  if (route.length < 3 || !Number.isFinite(maximumGrade) || maximumGrade <= 0) return;
+  const startHeight = route[0].y;
+  const endHeight = route.at(-1).y;
+  for (let pass = 0; pass < 3; pass += 1) {
+    route[0].y = startHeight;
+    for (let index = 1; index < route.length; index += 1) {
+      const previous = route[index - 1];
+      const sample = route[index];
+      const planarDistance = Math.hypot(sample.x - previous.x, sample.z - previous.z);
+      const maximumDelta = planarDistance * maximumGrade;
+      sample.y = Math.max(previous.y - maximumDelta, Math.min(previous.y + maximumDelta, sample.y));
+    }
+    route.at(-1).y = endHeight;
+    for (let index = route.length - 2; index > 0; index -= 1) {
+      const next = route[index + 1];
+      const sample = route[index];
+      const planarDistance = Math.hypot(next.x - sample.x, next.z - sample.z);
+      const maximumDelta = planarDistance * maximumGrade;
+      sample.y = Math.max(next.y - maximumDelta, Math.min(next.y + maximumDelta, sample.y));
+    }
+  }
 }
 
 export function createFreeDriveRallyRibbon(route, {
