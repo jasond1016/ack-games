@@ -1,0 +1,45 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { createFreeDriveTimeTrial, sampleGhostPose } from "../racing-free-drive-challenge.mjs";
+
+function memoryStorage() {
+  const values = new Map();
+  return { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+}
+
+const checkpoints = [{ x: 0, z: 0 }, { x: 10, z: 0 }, { x: 20, z: 0 }];
+
+test("进入起点后依次通过检查点完成计时", () => {
+  const trial = createFreeDriveTimeTrial({ checkpoints, storage: memoryStorage() });
+  trial.update({ x: 0, z: 0 });
+  assert.equal(trial.getState().phase, "running");
+  trial.update({ x: 10, z: 0, deltaSeconds: 4 });
+  assert.equal(trial.getState().nextCheckpoint, 2);
+  trial.update({ x: 20, z: 0, deltaSeconds: 3 });
+  assert.equal(trial.getState().phase, "finished");
+  assert.equal(trial.getState().bestTimeSeconds, 7);
+});
+
+test("更快成绩覆盖最佳幽灵，较慢成绩不会覆盖", () => {
+  const storage = memoryStorage();
+  const first = createFreeDriveTimeTrial({ checkpoints, storage, storageKey: "test" });
+  first.update({ x: 0, z: 0 });
+  first.update({ x: 10, z: 0, deltaSeconds: 5 });
+  first.update({ x: 20, z: 0, deltaSeconds: 5 });
+
+  const second = createFreeDriveTimeTrial({ checkpoints, storage, storageKey: "test" });
+  assert.equal(second.getState().bestTimeSeconds, 10);
+  second.update({ x: 0, z: 0 });
+  second.update({ x: 10, z: 0, deltaSeconds: 6 });
+  second.update({ x: 20, z: 0, deltaSeconds: 6 });
+  assert.equal(second.getState().bestTimeSeconds, 10);
+});
+
+test("幽灵车在相邻记录点之间插值并处理航向回绕", () => {
+  const pose = sampleGhostPose([
+    { time: 0, x: 0, z: 0, heading: Math.PI * 0.95 },
+    { time: 2, x: 10, z: 4, heading: -Math.PI * 0.95 }
+  ], 1);
+  assert.deepEqual({ x: pose.x, z: pose.z }, { x: 5, z: 2 });
+  assert.ok(Math.abs(pose.heading) > 3);
+});

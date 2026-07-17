@@ -51,6 +51,10 @@ import {
   createFreeDriveTunnelSegments
 } from "./racing-free-drive-features.mjs";
 import {
+  createFreeDriveTimeTrial,
+  sampleGhostPose
+} from "./racing-free-drive-challenge.mjs";
+import {
   advanceWheelSpin,
   createWheelAnimationState,
   findWheelGeometryLayout,
@@ -473,6 +477,9 @@ export function createRacingGame({
   let playerVisualElevation = 0;
   let freeDriveWater = null;
   let freeDriveRallyRoute = [];
+  let freeDriveRallyCheckpoints = [];
+  let freeDriveRallyChallenge = null;
+  let freeDriveRallyGhost = null;
   let boostCameraKick = 0;
   const startGateLights = [];
   let initialized = false;
@@ -523,6 +530,8 @@ export function createRacingGame({
     placeStuntJumpScenario: (direction = 1) => placeStuntJumpScenario(direction),
     placeTunnelScenario: () => placeTunnelScenario(),
     placeRallyScenario: () => placeRallyScenario(),
+    startRallyChallengeScenario: () => startRallyChallengeScenario(),
+    completeRallyChallengeScenario: () => completeRallyChallengeScenario(),
     placeTrackScenario: (progress = 0) => placeTrackScenario(progress),
     placeWorldScenario: (x, z, heading = 0) => placeWorldScenario(x, z, heading),
     toggleOpponent,
@@ -628,6 +637,7 @@ export function createRacingGame({
         tractionControlActive: physics.playerVehicle.tireDynamics.tractionControlActive,
         wheelSlip: physics.playerVehicle.tireDynamics.wheels.map((wheel) => Number(wheel.combinedSlip.toFixed(3)))
       } : null,
+      rallyChallenge: freeDriveRallyChallenge ? formatRallyChallengeDebugState() : null,
       wheelAnimation: {
         wheelCount: car?.userData.wheelCount ?? 0,
         shaderBindings: car?.userData.wheelShaderBindings?.length ?? 0,
@@ -1573,6 +1583,9 @@ export function createRacingGame({
     roadCollisionMeshData = null;
     surfaceRibbonReports.length = 0;
     freeDriveRallyRoute = [];
+    freeDriveRallyCheckpoints = [];
+    freeDriveRallyChallenge = null;
+    freeDriveRallyGhost = null;
     startGateLights.length = 0;
     if (!isFreeDrive) addSkyDome();
     if (isFreeDrive) addFreeDriveGroundLayers();
@@ -2378,6 +2391,119 @@ export function createRacingGame({
         scene.add(marker);
       }
     }
+
+    addFreeDriveRallyChallenge();
+  }
+
+  function addFreeDriveRallyChallenge() {
+    const lastIndex = freeDriveRallyRoute.length - 1;
+    const checkpointIndexes = [0, 0.25, 0.5, 0.75, 1]
+      .map((ratio) => Math.round(lastIndex * ratio));
+    freeDriveRallyCheckpoints = checkpointIndexes.map((index) => {
+      const sample = freeDriveRallyRoute[index];
+      return Object.freeze({
+        x: sample.x,
+        y: sample.y,
+        z: sample.z,
+        heading: Math.atan2(sample.tangentX, sample.tangentZ),
+        normalX: sample.normalX,
+        normalZ: sample.normalZ
+      });
+    });
+    freeDriveRallyChallenge = createFreeDriveTimeTrial({
+      checkpoints: freeDriveRallyCheckpoints,
+      gateRadius: FREE_DRIVE_RALLY.halfWidth + 1.8,
+      storageKey: `ack-games:racing:rally-ghost:v1:${selectedCarId}`
+    });
+
+    const gateColors = [0x5cff9d, 0x58d8ff, 0xffd45a, 0xff9a54, 0xff5d73];
+    freeDriveRallyCheckpoints.forEach((checkpoint, index) => {
+      const gate = createRallyCheckpointGate(checkpoint, gateColors[index], index);
+      scene.add(gate);
+    });
+
+    freeDriveRallyGhost = createRallyGhostCar();
+    scene.add(freeDriveRallyGhost);
+  }
+
+  function createRallyCheckpointGate(checkpoint, color, index) {
+    const gate = new THREE.Group();
+    gate.name = `rally-checkpoint-${index}`;
+    const material = new THREE.MeshStandardMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: 0.85,
+      roughness: 0.34,
+      metalness: 0.18
+    });
+    const gateHalfWidth = FREE_DRIVE_RALLY.halfWidth + 0.72;
+    const height = 3.4;
+    const postGeometry = new THREE.CylinderGeometry(0.12, 0.16, height, 10);
+    for (const side of [-1, 1]) {
+      const post = new THREE.Mesh(postGeometry, material);
+      post.position.set(
+        checkpoint.x + checkpoint.normalX * side * gateHalfWidth,
+        checkpoint.y + height * 0.5,
+        checkpoint.z + checkpoint.normalZ * side * gateHalfWidth
+      );
+      post.castShadow = qualityPreset.shadows;
+      gate.add(post);
+    }
+    const beam = new THREE.Mesh(
+      new THREE.BoxGeometry(gateHalfWidth * 2 + 0.3, 0.25, 0.24),
+      material
+    );
+    beam.position.set(checkpoint.x, checkpoint.y + height, checkpoint.z);
+    beam.rotation.y = checkpoint.heading;
+    beam.castShadow = qualityPreset.shadows;
+    gate.add(beam);
+
+    const beacon = new THREE.Mesh(
+      new THREE.RingGeometry(0.42, 0.62, 20),
+      new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, transparent: true, opacity: 0.84 })
+    );
+    beacon.position.set(checkpoint.x, checkpoint.y + height + 0.72, checkpoint.z);
+    beacon.rotation.y = checkpoint.heading;
+    gate.add(beacon);
+    return gate;
+  }
+
+  function createRallyGhostCar() {
+    const ghost = new THREE.Group();
+    ghost.name = "rally-best-ghost";
+    ghost.visible = false;
+    const vehicleSpec = playerVehicleSpec();
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x62e8ff,
+      emissive: 0x2fb8e5,
+      emissiveIntensity: 0.78,
+      transparent: true,
+      opacity: 0.3,
+      depthWrite: false,
+      roughness: 0.24,
+      metalness: 0.3
+    });
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(
+        vehicleSpec.chassisHalfWidth * 1.72,
+        vehicleSpec.chassisHalfHeight * 0.92,
+        vehicleSpec.chassisHalfLength * 1.78
+      ),
+      material
+    );
+    body.position.y = vehicleSpec.chassisHalfHeight * 0.8;
+    const cabin = new THREE.Mesh(
+      new THREE.BoxGeometry(
+        vehicleSpec.chassisHalfWidth * 1.18,
+        vehicleSpec.chassisHalfHeight * 0.78,
+        vehicleSpec.chassisHalfLength * 0.84
+      ),
+      material
+    );
+    cabin.position.set(0, vehicleSpec.chassisHalfHeight * 1.45, -vehicleSpec.chassisHalfLength * 0.12);
+    ghost.add(body, cabin);
+    ghost.renderOrder = 3;
+    return ghost;
   }
 
   function createRallyRibbonMesh(ribbon, material) {
@@ -2394,6 +2520,19 @@ export function createRacingGame({
     let nearest = Infinity;
     for (const sample of freeDriveRallyRoute) {
       nearest = Math.min(nearest, Math.hypot(position.x - sample.x, position.y - sample.z));
+    }
+    return nearest;
+  }
+
+  function nearestRallyRouteSample(x, z) {
+    let nearest = null;
+    let nearestDistance = Infinity;
+    for (const sample of freeDriveRallyRoute) {
+      const distance = Math.hypot(x - sample.x, z - sample.z);
+      if (distance < nearestDistance) {
+        nearest = sample;
+        nearestDistance = distance;
+      }
     }
     return nearest;
   }
@@ -5929,6 +6068,7 @@ export function createRacingGame({
     if (isFreeDrive) {
       state.maxForwardDistance += state.velocity.length() * deltaSeconds;
       raceState.playerPlace = 1;
+      updateFreeDriveRallyChallenge(deltaSeconds);
       return;
     }
 
@@ -5984,6 +6124,50 @@ export function createRacingGame({
     if (raceState.opponentEnabled) {
       opponentState.lastRaceProgress = opponentState.raceProgress;
     }
+  }
+
+  function updateFreeDriveRallyChallenge(deltaSeconds) {
+    if (!freeDriveRallyChallenge) return;
+    const challengeState = freeDriveRallyChallenge.update({
+      x: state.position.x,
+      z: state.position.y,
+      heading: state.heading,
+      deltaSeconds
+    });
+    updateFreeDriveRallyGhost(challengeState);
+  }
+
+  function updateFreeDriveRallyGhost(challengeState) {
+    if (!freeDriveRallyGhost) return;
+    const samples = challengeState.bestGhost;
+    const pose = challengeState.phase === "running" && samples.length >= 2
+      ? sampleGhostPose(samples, challengeState.elapsedSeconds)
+      : null;
+    freeDriveRallyGhost.visible = Boolean(pose);
+    if (!pose) return;
+    const routeSample = nearestRallyRouteSample(pose.x, pose.z);
+    freeDriveRallyGhost.position.set(
+      pose.x,
+      (routeSample?.y ?? 0) + 0.12,
+      pose.z
+    );
+    freeDriveRallyGhost.rotation.y = pose.heading;
+  }
+
+  function formatRallyChallengeDebugState() {
+    const challenge = freeDriveRallyChallenge.getState();
+    return {
+      phase: challenge.phase,
+      elapsedSeconds: Number(challenge.elapsedSeconds.toFixed(2)),
+      nextCheckpoint: challenge.nextCheckpoint,
+      checkpointCount: challenge.checkpointCount,
+      bestTimeSeconds: challenge.bestTimeSeconds === null
+        ? null
+        : Number(challenge.bestTimeSeconds.toFixed(2)),
+      ghostSampleCount: challenge.bestGhost.length,
+      ghostVisible: Boolean(freeDriveRallyGhost?.visible),
+      newBest: challenge.newBest
+    };
   }
 
   function advanceLapCounter(driverState, trackSpeed) {
@@ -6496,13 +6680,26 @@ ${shader.vertexShader}`
   }
 
   function updateHud() {
-    progressLabel.textContent = isFreeDrive ? "ROAM" : raceConfig.mode === "lap" ? "LAP" : "LEFT";
-    progressValue.textContent = isFreeDrive
-      ? `${Math.round(state.maxForwardDistance)} M`
-      : raceConfig.mode === "lap"
-      ? formatLapDisplay(state.completedLaps)
-      : formatDistanceHud(sprintRemainingDistance(state));
-    placeValue.textContent = isFreeDrive ? "FREE" : `${raceState.playerPlace} / ${raceState.opponentEnabled ? 2 : 1}`;
+    const rallyChallenge = freeDriveRallyChallenge?.getState();
+    if (isFreeDrive && rallyChallenge?.phase === "running") {
+      progressLabel.textContent = "RALLY";
+      progressValue.textContent = `${rallyChallenge.elapsedSeconds.toFixed(2)} S`;
+      placeValue.textContent = `CP ${Math.min(rallyChallenge.nextCheckpoint, rallyChallenge.checkpointCount - 1)} / ${rallyChallenge.checkpointCount - 1}`;
+    } else if (isFreeDrive && rallyChallenge?.phase === "finished") {
+      progressLabel.textContent = rallyChallenge.newBest ? "NEW BEST" : "RALLY";
+      progressValue.textContent = `${rallyChallenge.elapsedSeconds.toFixed(2)} S`;
+      placeValue.textContent = rallyChallenge.bestTimeSeconds === null
+        ? "FREE"
+        : `BEST ${rallyChallenge.bestTimeSeconds.toFixed(2)}`;
+    } else {
+      progressLabel.textContent = isFreeDrive ? "ROAM" : raceConfig.mode === "lap" ? "LAP" : "LEFT";
+      progressValue.textContent = isFreeDrive
+        ? `${Math.round(state.maxForwardDistance)} M`
+        : raceConfig.mode === "lap"
+        ? formatLapDisplay(state.completedLaps)
+        : formatDistanceHud(sprintRemainingDistance(state));
+      placeValue.textContent = isFreeDrive ? "FREE" : `${raceState.playerPlace} / ${raceState.opponentEnabled ? 2 : 1}`;
+    }
     speedValue.textContent = `${Math.round(state.velocity.length() * 3.6)}`;
     boostValue.textContent = state.boostSeconds > 0
       ? `${state.boostSeconds.toFixed(1)}S`
@@ -7141,6 +7338,28 @@ ${shader.vertexShader}`
       sample.z,
       Math.atan2(sample.tangentX, sample.tangentZ)
     );
+  }
+
+  function startRallyChallengeScenario() {
+    if (!isFreeDrive || !freeDriveRallyChallenge || !freeDriveRallyCheckpoints.length) return false;
+    const checkpoint = freeDriveRallyCheckpoints[0];
+    if (!placeWorldScenario(checkpoint.x, checkpoint.z, checkpoint.heading)) return false;
+    updateFreeDriveRallyChallenge(0);
+    updateHud();
+    renderer.render(scene, camera);
+    return true;
+  }
+
+  function completeRallyChallengeScenario() {
+    if (!isFreeDrive || !freeDriveRallyChallenge || freeDriveRallyCheckpoints.length < 2) return false;
+    if (freeDriveRallyChallenge.getState().phase !== "running" && !startRallyChallengeScenario()) return false;
+    for (const checkpoint of freeDriveRallyCheckpoints.slice(1)) {
+      placeWorldScenario(checkpoint.x, checkpoint.z, checkpoint.heading);
+      updateFreeDriveRallyChallenge(1.25);
+    }
+    updateHud();
+    renderer.render(scene, camera);
+    return freeDriveRallyChallenge.getState().phase === "finished";
   }
 
   function placeTrackScenario(requestedProgress = 0) {
