@@ -38,6 +38,7 @@ import { createBrowserRacingClock, createBrowserRacingInput } from "./racing-run
 import { createResourceLeaseCache } from "./racing-resource-leases.mjs";
 import { createRacingAudioController } from "./racing-audio.mjs";
 import { createRacingHapticsController } from "./racing-haptics.mjs";
+import { FREE_DRIVE_TUNNEL, createFreeDriveTunnelSegments } from "./racing-free-drive-features.mjs";
 import {
   shouldActivateComputerBoost
 } from "./racing-driving-dynamics.mjs";
@@ -494,6 +495,7 @@ export function createRacingGame({
     finishRace: (winner = "player") => finishLapRace(winner === "opponent" ? "opponent" : "player"),
     placeCollisionScenario: (progress, laneOffset, progressGap) => placeCollisionScenario(progress, laneOffset, progressGap),
     placeStuntJumpScenario: (direction = 1) => placeStuntJumpScenario(direction),
+    placeTunnelScenario: () => placeTunnelScenario(),
     placeWorldScenario: (x, z, heading = 0) => placeWorldScenario(x, z, heading),
     toggleOpponent,
     toggleCollisionDebug: () => setCollisionDebugEnabled(!collisionDebug.enabled),
@@ -524,6 +526,7 @@ export function createRacingGame({
         : null,
       worldColliders: {
         roadMesh: Boolean(roadCollisionMeshData),
+        tunnelPieces: staticWorldColliderSpecs.filter((spec) => spec.tag === "tunnel-wall" || spec.tag === "tunnel-roof").length,
         buildings: staticWorldColliderSpecs
           .filter((spec) => spec.tag === "building")
           .map((spec) => ({ x: spec.x, z: spec.z, width: spec.width, depth: spec.depth }))
@@ -1522,6 +1525,7 @@ export function createRacingGame({
       addFreeDriveLandmarks();
       addFreeDriveBridge();
       addFreeDriveStuntRamps();
+      addFreeDriveTunnel();
       addFreeDriveCity();
       await Promise.all([addRealFreeDriveVegetation(), addFreeDriveCoastalCliffs(), addRealFreeDriveCityProps()]);
     }
@@ -2129,6 +2133,93 @@ export function createRacingGame({
         scene.add(arrow);
       }
     }
+  }
+
+  function addFreeDriveTunnel() {
+    const segments = createFreeDriveTunnelSegments({
+      sampleTrack: trackProfileAtProgress,
+      elevationAt: freeDriveElevationAtProgress
+    });
+    if (!segments.length) return;
+
+    const tunnel = new THREE.Group();
+    tunnel.name = "free-drive-tunnel";
+    const concrete = createFreeDrivePbrMaterial("brushed_concrete", {
+      color: 0x525a5c,
+      repeatX: 3,
+      repeatY: 4,
+      roughness: 0.88
+    });
+    const roofMaterial = new THREE.MeshStandardMaterial({
+      color: 0x343b3e,
+      roughness: 0.82,
+      metalness: 0.12
+    });
+    const lightMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffe0a3,
+      emissive: 0xffa742,
+      emissiveIntensity: 2.6,
+      roughness: 0.28
+    });
+    const portalMaterial = new THREE.MeshStandardMaterial({
+      color: 0x252b2e,
+      roughness: 0.64,
+      metalness: 0.28
+    });
+
+    for (const segment of segments) {
+      for (const wallSpec of segment.walls) {
+        const wall = new THREE.Mesh(
+          new THREE.BoxGeometry(wallSpec.width, wallSpec.height, wallSpec.depth),
+          concrete
+        );
+        wall.position.set(wallSpec.x, wallSpec.y, wallSpec.z);
+        wall.rotation.y = wallSpec.yaw;
+        wall.castShadow = wall.receiveShadow = qualityPreset.shadows;
+        tunnel.add(wall);
+        registerStaticWorldBox(wallSpec);
+      }
+
+      const roof = new THREE.Mesh(
+        new THREE.BoxGeometry(segment.roof.width, segment.roof.height, segment.roof.depth),
+        roofMaterial
+      );
+      roof.position.set(segment.roof.x, segment.roof.y, segment.roof.z);
+      roof.rotation.y = segment.roof.yaw;
+      roof.castShadow = roof.receiveShadow = qualityPreset.shadows;
+      tunnel.add(roof);
+      registerStaticWorldBox(segment.roof);
+
+      if (segment.index % 2 === 0) {
+        const normalX = Math.cos(segment.yaw);
+        const normalZ = -Math.sin(segment.yaw);
+        for (const side of [-1, 1]) {
+          const strip = new THREE.Mesh(
+            new THREE.BoxGeometry(0.16, 0.14, segment.length * 0.72),
+            lightMaterial
+          );
+          strip.position.set(
+            segment.x + normalX * (segment.innerHalfWidth - 0.12) * side,
+            segment.roadHeight + segment.wallHeight - 0.65,
+            segment.z + normalZ * (segment.innerHalfWidth - 0.12) * side
+          );
+          strip.rotation.y = segment.yaw;
+          tunnel.add(strip);
+        }
+      }
+    }
+
+    for (const segment of [segments[0], segments.at(-1)]) {
+      const portal = new THREE.Mesh(
+        new THREE.BoxGeometry(segment.roofWidth + 1.8, 0.8, 0.72),
+        portalMaterial
+      );
+      portal.position.set(segment.x, segment.roadHeight + segment.wallHeight - 0.15, segment.z);
+      portal.rotation.y = segment.yaw;
+      portal.castShadow = true;
+      tunnel.add(portal);
+    }
+    scene.add(tunnel);
   }
 
   function addFreeDriveCity() {
@@ -6645,6 +6736,13 @@ export function createRacingGame({
     updateCamera(1);
     renderer.render(scene, camera);
     return true;
+  }
+
+  function placeTunnelScenario() {
+    if (!isFreeDrive) return false;
+    const progress = (FREE_DRIVE_TUNNEL.startProgress + FREE_DRIVE_TUNNEL.endProgress) * 0.5;
+    const sample = trackProfileAtProgress(progress);
+    return placeWorldScenario(sample.center.x, sample.center.y, sample.heading);
   }
 
   function placeWorldScenario(requestedX, requestedZ, requestedHeading = 0) {
