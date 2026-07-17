@@ -7,8 +7,8 @@ import {
   physicalRoadSupportHalfWidth
 } from "../racing-physical-surfaces.mjs";
 
-test("物理车辆可在道路、地形、路肩、堤坡和特技坡道上行驶", () => {
-  for (const surface of ["road", "ground", "verge", "embankment", "stunt-ramp"]) {
+test("物理车辆可在道路、地形、路肩、堤坡、特技坡道和拉力泥土路上行驶", () => {
+  for (const surface of ["road", "ground", "verge", "embankment", "stunt-ramp", "rally-dirt"]) {
     assert.equal(isPhysicalVehicleSurface(surface), true, surface);
   }
   assert.equal(isPhysicalVehicleSurface("building"), false);

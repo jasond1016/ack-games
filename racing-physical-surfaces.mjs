@@ -3,7 +3,8 @@ const drivableSurfaceIds = new Set([
   "ground",
   "verge",
   "embankment",
-  "stunt-ramp"
+  "stunt-ramp",
+  "rally-dirt"
 ]);
 
 export function isPhysicalVehicleSurface(surfaceId) {

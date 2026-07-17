@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  FREE_DRIVE_RALLY,
   FREE_DRIVE_TUNNEL,
+  createFreeDriveRallyRibbon,
+  createFreeDriveRallyRoute,
   createFreeDriveTunnelSegments
 } from "../racing-free-drive-features.mjs";
 
@@ -18,6 +21,25 @@ test("自由地图隧道连续覆盖指定赛道区间", () => {
   for (let index = 1; index < segments.length; index += 1) {
     assert.equal(segments[index - 1].progressEnd, segments[index].progressStart);
   }
+});
+
+test("泥土拉力支线从主路驶入并重新接回主路", () => {
+  const route = createFreeDriveRallyRoute({ sampleTrack: straightTrack, elevationAt: () => 1.5 });
+  assert.equal(route.length, FREE_DRIVE_RALLY.sampleCount + 1);
+  assert.equal(route[0].x, straightTrack(FREE_DRIVE_RALLY.startProgress).center.x);
+  assert.equal(route.at(-1).x, straightTrack(FREE_DRIVE_RALLY.endProgress).center.x);
+  assert.ok(route.every((sample) => Math.abs(Math.hypot(sample.tangentX, sample.tangentZ) - 1) < 0.0001));
+  assert.ok(route.every((sample) => sample.y === 1.5 + FREE_DRIVE_RALLY.surfaceOffset));
+});
+
+test("拉力道路生成连续的可碰撞三角带", () => {
+  const route = createFreeDriveRallyRoute({ sampleTrack: straightTrack, elevationAt: () => 0 });
+  const ribbon = createFreeDriveRallyRibbon(route);
+  assert.equal(ribbon.positions.length, route.length * 2 * 3);
+  assert.equal(ribbon.uvs.length, route.length * 2 * 2);
+  assert.equal(ribbon.indices.length, (route.length - 1) * 6);
+  assert.ok(FREE_DRIVE_RALLY.halfWidth >= 4);
+  assert.equal(FREE_DRIVE_RALLY.surfaceId, "rally-dirt");
 });
 
 test("隧道净空覆盖道路且墙体和顶板都有物理规格", () => {

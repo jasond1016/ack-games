@@ -38,7 +38,13 @@ import { createBrowserRacingClock, createBrowserRacingInput } from "./racing-run
 import { createResourceLeaseCache } from "./racing-resource-leases.mjs";
 import { createRacingAudioController } from "./racing-audio.mjs";
 import { createRacingHapticsController } from "./racing-haptics.mjs";
-import { FREE_DRIVE_TUNNEL, createFreeDriveTunnelSegments } from "./racing-free-drive-features.mjs";
+import {
+  FREE_DRIVE_RALLY,
+  FREE_DRIVE_TUNNEL,
+  createFreeDriveRallyRibbon,
+  createFreeDriveRallyRoute,
+  createFreeDriveTunnelSegments
+} from "./racing-free-drive-features.mjs";
 import {
   advanceWheelSpin,
   createWheelAnimationState,
@@ -453,6 +459,7 @@ export function createRacingGame({
   let wheelSpinAngle = 0;
   let playerVisualElevation = 0;
   let freeDriveWater = null;
+  let freeDriveRallyRoute = [];
   let boostCameraKick = 0;
   const startGateLights = [];
   let initialized = false;
@@ -502,6 +509,7 @@ export function createRacingGame({
     placeCollisionScenario: (progress, laneOffset, progressGap) => placeCollisionScenario(progress, laneOffset, progressGap),
     placeStuntJumpScenario: (direction = 1) => placeStuntJumpScenario(direction),
     placeTunnelScenario: () => placeTunnelScenario(),
+    placeRallyScenario: () => placeRallyScenario(),
     placeWorldScenario: (x, z, heading = 0) => placeWorldScenario(x, z, heading),
     toggleOpponent,
     toggleCollisionDebug: () => setCollisionDebugEnabled(!collisionDebug.enabled),
@@ -533,6 +541,7 @@ export function createRacingGame({
       worldColliders: {
         roadMesh: Boolean(roadCollisionMeshData),
         tunnelPieces: staticWorldColliderSpecs.filter((spec) => spec.tag === "tunnel-wall" || spec.tag === "tunnel-roof").length,
+        rallyDirtMeshes: staticWorldMeshColliderSpecs.filter((spec) => spec.tag === FREE_DRIVE_RALLY.surfaceId).length,
         buildings: staticWorldColliderSpecs
           .filter((spec) => spec.tag === "building")
           .map((spec) => ({ x: spec.x, z: spec.z, width: spec.width, depth: spec.depth }))
@@ -1516,6 +1525,7 @@ export function createRacingGame({
     staticWorldColliderSpecs.length = 0;
     staticWorldMeshColliderSpecs.length = 0;
     roadCollisionMeshData = null;
+    freeDriveRallyRoute = [];
     startGateLights.length = 0;
     if (!isFreeDrive) addSkyDome();
     if (isFreeDrive) addFreeDriveGroundLayers();
@@ -1536,6 +1546,7 @@ export function createRacingGame({
     if (!isFreeDrive) addVenueCluster();
     if (!isFreeDrive) addFoliage();
     if (isFreeDrive) {
+      addFreeDriveRallyRoad();
       addFreeDriveLandmarks();
       addFreeDriveBridge();
       addFreeDriveStuntRamps();
@@ -1678,6 +1689,7 @@ export function createRacingGame({
     });
     placements.forEach((placement) => {
       if (placement.position.x > 118) return;
+      if (nearestRallyRoadDistance(placement.position) < FREE_DRIVE_RALLY.halfWidth + 4) return;
       const model = template.clone(true);
       const groundElevation = freeDriveGroundElevationAt(placement.position, placement.progress);
       model.position.set(placement.position.x, groundElevation, placement.position.y);
@@ -2236,6 +2248,104 @@ export function createRacingGame({
     scene.add(tunnel);
   }
 
+  function addFreeDriveRallyRoad() {
+    freeDriveRallyRoute = createFreeDriveRallyRoute({
+      sampleTrack: trackProfileAtProgress,
+      elevationAt: (x, z) => {
+        const position = new THREE.Vector2(x, z);
+        const projection = closestTrackSample(position);
+        return freeDriveGroundElevationAt(position, projection.progress);
+      }
+    });
+    if (!freeDriveRallyRoute.length) return;
+
+    const loader = new THREE.TextureLoader();
+    const loadDirtTexture = (name, colorSpace = null) => {
+      const texture = loader.load(new URL(`./assets/freedrive/textures/${name}`, import.meta.url).href);
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      if (colorSpace) texture.colorSpace = colorSpace;
+      return texture;
+    };
+    const dirtMaterial = new THREE.MeshStandardMaterial({
+      color: 0x9b704b,
+      map: loadDirtTexture("coast_sand_01_diff_1k.jpg", THREE.SRGBColorSpace),
+      normalMap: loadDirtTexture("coast_sand_01_nor_gl_1k.jpg"),
+      roughnessMap: loadDirtTexture("coast_sand_01_rough_1k.jpg"),
+      normalScale: new THREE.Vector2(1.25, 1.25),
+      roughness: 0.98,
+      metalness: 0,
+      side: THREE.DoubleSide
+    });
+    const road = createRallyRibbonMesh(createFreeDriveRallyRibbon(freeDriveRallyRoute), dirtMaterial);
+    road.name = "free-drive-rally-dirt-road";
+    road.receiveShadow = true;
+    registerStaticWorldMesh(road, FREE_DRIVE_RALLY.surfaceId);
+    scene.add(road);
+
+    const rutMaterial = new THREE.MeshStandardMaterial({
+      color: 0x3f281c,
+      roughness: 1,
+      transparent: true,
+      opacity: 0.58,
+      depthWrite: false
+    });
+    const edgeMaterial = new THREE.MeshStandardMaterial({ color: 0x65442d, roughness: 1 });
+    for (const side of [-1, 1]) {
+      const rut = createRallyRibbonMesh(createFreeDriveRallyRibbon(freeDriveRallyRoute, {
+        halfWidth: 0.18,
+        centerOffset: side * 1.48,
+        heightOffset: 0.025
+      }), rutMaterial);
+      const edge = createRallyRibbonMesh(createFreeDriveRallyRibbon(freeDriveRallyRoute, {
+        halfWidth: 0.24,
+        centerOffset: side * (FREE_DRIVE_RALLY.halfWidth - 0.18),
+        heightOffset: 0.018
+      }), edgeMaterial);
+      scene.add(rut, edge);
+    }
+
+    const markerMaterials = [
+      new THREE.MeshStandardMaterial({ color: 0xf0eee5, roughness: 0.76 }),
+      new THREE.MeshStandardMaterial({ color: 0xc94732, roughness: 0.7 })
+    ];
+    for (let index = 8; index < freeDriveRallyRoute.length - 5; index += 11) {
+      const sample = freeDriveRallyRoute[index];
+      for (const side of [-1, 1]) {
+        const marker = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.12, 0.15, 1.15, 8),
+          markerMaterials[(index + (side > 0 ? 1 : 0)) % markerMaterials.length]
+        );
+        marker.position.set(
+          sample.x + sample.normalX * side * (FREE_DRIVE_RALLY.halfWidth + 0.65),
+          sample.y + 0.56,
+          sample.z + sample.normalZ * side * (FREE_DRIVE_RALLY.halfWidth + 0.65)
+        );
+        marker.castShadow = qualityPreset.shadows;
+        scene.add(marker);
+      }
+    }
+  }
+
+  function createRallyRibbonMesh(ribbon, material) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(ribbon.positions, 3));
+    geometry.setAttribute("uv", new THREE.Float32BufferAttribute(ribbon.uvs, 2));
+    geometry.setIndex(ribbon.indices);
+    geometry.computeVertexNormals();
+    return new THREE.Mesh(geometry, material);
+  }
+
+  function nearestRallyRoadDistance(position) {
+    if (!freeDriveRallyRoute.length) return Infinity;
+    let nearest = Infinity;
+    for (const sample of freeDriveRallyRoute) {
+      nearest = Math.min(nearest, Math.hypot(position.x - sample.x, position.y - sample.z));
+    }
+    return nearest;
+  }
+
   function addFreeDriveCity() {
     const city = new THREE.Group();
     const concrete = createFreeDrivePbrMaterial("brushed_concrete", { color: 0xaeb4b3, repeatX: 4, repeatY: 6, roughness: 0.86 });
@@ -2788,7 +2898,7 @@ export function createRacingGame({
       if (!spec.vertices.length || !spec.indices.length) continue;
       const collider = world.createCollider(
         RAPIER.ColliderDesc.trimesh(spec.vertices, spec.indices, RAPIER.TriMeshFlags.FIX_INTERNAL_EDGES)
-          .setFriction(1.05)
+          .setFriction(spec.tag === FREE_DRIVE_RALLY.surfaceId ? 0.74 : 1.05)
       );
       physics.colliderTags.set(collider.handle, spec.tag);
     }
@@ -6892,6 +7002,16 @@ ${shader.vertexShader}`
     const progress = (FREE_DRIVE_TUNNEL.startProgress + FREE_DRIVE_TUNNEL.endProgress) * 0.5;
     const sample = trackProfileAtProgress(progress);
     return placeWorldScenario(sample.center.x, sample.center.y, sample.heading);
+  }
+
+  function placeRallyScenario() {
+    if (!isFreeDrive || !freeDriveRallyRoute.length) return false;
+    const sample = freeDriveRallyRoute[Math.floor(freeDriveRallyRoute.length * 0.42)];
+    return placeWorldScenario(
+      sample.x,
+      sample.z,
+      Math.atan2(sample.tangentX, sample.tangentZ)
+    );
   }
 
   function placeWorldScenario(requestedX, requestedZ, requestedHeading = 0) {
