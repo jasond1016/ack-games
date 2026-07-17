@@ -9,6 +9,8 @@ test("Cloudflare asset graph is fail-closed and excludes repository internals", 
   assert.ok(plan.pagesFiles.includes("game-lifecycle.mjs"));
   assert.ok(plan.pagesFiles.includes("racing-driving-dynamics.mjs"));
   assert.ok(plan.pagesFiles.includes("racing-jump-rules.mjs"));
+  assert.ok(plan.pagesFiles.includes("racing-physical-vehicle.mjs"));
+  assert.ok(plan.pagesFiles.includes("racing-surface-contact.mjs"));
   assert.ok(plan.pagesDirectories.includes("assets/freedrive"));
   for (const forbidden of ["package.json", "CONTEXT.md", "tests", "docs", "scripts"]) {
     assert.ok(!plan.pagesFiles.includes(forbidden));

@@ -33,8 +33,3 @@ test("every racing car declares its own nitro exhaust layout", () => {
     }
   }
 });
-
-test("only the Aventador LP720-4 50th has drift tuning", () => {
-  const driftCars = racingCarCatalog.filter((car) => car.drift?.enabled);
-  assert.deepEqual(driftCars.map((car) => car.id), ["aventador"]);
-});

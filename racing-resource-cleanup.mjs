@@ -99,6 +99,10 @@ export function disposePhysicsState(physics) {
     return;
   }
 
+  if (physics.playerVehicle?.controller) {
+    physics.world?.removeVehicleController?.(physics.playerVehicle.controller);
+    physics.playerVehicle = null;
+  }
   physics.colliderTags?.clear?.();
   physics.eventQueue?.free?.();
   physics.world?.free?.();

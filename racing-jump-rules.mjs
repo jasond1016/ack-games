@@ -21,11 +21,36 @@ export const FREE_DRIVE_STUNT_JUMP = Object.freeze({
   rightRampEndX: 222,
   rampRise: 6.2,
   landingOvershoot: 10,
-  airtimeMultiplier: 1.22,
-  autoLaunchSpeed: 32,
-  minApproachSpeed: 8,
-  gravity: 18
+  airtimeMultiplier: 1.22
 });
+
+export function createFreeDriveStuntRampColliderSpecs({ baseY = -1.2, thickness = 0.55 } = {}) {
+  const horizontalLength = FREE_DRIVE_STUNT_JUMP.leftTakeoffX - FREE_DRIVE_STUNT_JUMP.leftRampStartX;
+  const slopeLength = Math.hypot(horizontalLength, FREE_DRIVE_STUNT_JUMP.rampRise);
+  const slopeAngle = Math.atan2(FREE_DRIVE_STUNT_JUMP.rampRise, horizontalLength);
+  return [
+    {
+      x: (FREE_DRIVE_STUNT_JUMP.leftRampStartX + FREE_DRIVE_STUNT_JUMP.leftTakeoffX) * 0.5,
+      y: baseY + FREE_DRIVE_STUNT_JUMP.rampRise * 0.5,
+      z: FREE_DRIVE_STUNT_JUMP.centerY,
+      width: slopeLength,
+      height: thickness,
+      depth: FREE_DRIVE_STUNT_JUMP.halfWidth * 2,
+      roll: slopeAngle,
+      tag: "stunt-ramp"
+    },
+    {
+      x: (FREE_DRIVE_STUNT_JUMP.rightTakeoffX + FREE_DRIVE_STUNT_JUMP.rightRampEndX) * 0.5,
+      y: baseY + FREE_DRIVE_STUNT_JUMP.rampRise * 0.5,
+      z: FREE_DRIVE_STUNT_JUMP.centerY,
+      width: slopeLength,
+      height: thickness,
+      depth: FREE_DRIVE_STUNT_JUMP.halfWidth * 2,
+      roll: -slopeAngle,
+      tag: "stunt-ramp"
+    }
+  ];
+}
 
 function clamp01(value) {
   return Math.max(0, Math.min(1, value));
@@ -121,43 +146,4 @@ export function freeDriveStuntRampRise(position) {
     ));
   }
   return 0;
-}
-
-export function resolveFreeDriveStuntBoost(position, velocity) {
-  if (!isFreeDriveStuntJumpCorridor(position)) return 0;
-  const onLeftRamp = position.x >= FREE_DRIVE_STUNT_JUMP.leftRampStartX
-    && position.x <= FREE_DRIVE_STUNT_JUMP.leftTakeoffX
-    && velocity.x > 0;
-  const onRightRamp = position.x >= FREE_DRIVE_STUNT_JUMP.rightTakeoffX
-    && position.x <= FREE_DRIVE_STUNT_JUMP.rightRampEndX
-    && velocity.x < 0;
-  return onLeftRamp ? 1 : onRightRamp ? -1 : 0;
-}
-
-export function resolveFreeDriveStuntLaunch(position, velocity) {
-  const direction = resolveFreeDriveStuntBoost(position, velocity);
-  if (!direction || Math.hypot(velocity.x, velocity.y) < FREE_DRIVE_STUNT_JUMP.minApproachSpeed) return null;
-  const atTakeoff = direction > 0
-    ? position.x >= FREE_DRIVE_STUNT_JUMP.leftTakeoffX - 2 && position.x <= FREE_DRIVE_STUNT_JUMP.leftTakeoffX + 1
-    : position.x >= FREE_DRIVE_STUNT_JUMP.rightTakeoffX - 1 && position.x <= FREE_DRIVE_STUNT_JUMP.rightTakeoffX + 2;
-  if (!atTakeoff) return null;
-
-  const minimumLandingX = direction > 0
-    ? FREE_DRIVE_STUNT_JUMP.rightRampEndX + FREE_DRIVE_STUNT_JUMP.landingOvershoot
-    : FREE_DRIVE_STUNT_JUMP.leftRampStartX - FREE_DRIVE_STUNT_JUMP.landingOvershoot;
-  const horizontalSpeed = direction * Math.max(Math.abs(velocity.x), FREE_DRIVE_STUNT_JUMP.autoLaunchSpeed);
-  const flightDistance = Math.abs(minimumLandingX - position.x);
-  const flightSeconds = flightDistance / Math.abs(horizontalSpeed);
-  const verticalSpeed = FREE_DRIVE_STUNT_JUMP.gravity
-    * flightSeconds
-    * 0.5
-    * FREE_DRIVE_STUNT_JUMP.airtimeMultiplier;
-  const actualFlightDistance = Math.abs(horizontalSpeed)
-    * (2 * verticalSpeed / FREE_DRIVE_STUNT_JUMP.gravity);
-  return {
-    verticalSpeed,
-    horizontalSpeed,
-    direction,
-    landingX: position.x + direction * actualFlightDistance
-  };
 }

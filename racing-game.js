@@ -37,22 +37,32 @@ import {
 import { createBrowserRacingClock, createBrowserRacingInput } from "./racing-runtime-adapters.mjs";
 import { createResourceLeaseCache } from "./racing-resource-leases.mjs";
 import {
-  calculateDriveRetention,
-  calculateEngineForce,
-  calculateSurfaceSpeedLimit,
-  resolvePlayerDrift,
   shouldActivateComputerBoost
 } from "./racing-driving-dynamics.mjs";
 import {
+  createVehicleContactPoints,
+  resolveVehicleSupport
+} from "./racing-surface-contact.mjs";
+import {
+  createPhysicalVehicle,
+  physicalVehicleConfig,
+  resetPhysicalVehicleControls,
+  updatePhysicalVehicle
+} from "./racing-physical-vehicle.mjs";
+import {
+  isPhysicalVehicleSurface,
+  physicalFallbackGroundHeight,
+  physicalRoadSupportHalfWidth
+} from "./racing-physical-surfaces.mjs";
+import {
   FREE_DRIVE_JUMP,
   FREE_DRIVE_STUNT_JUMP,
+  createFreeDriveStuntRampColliderSpecs,
   freeDriveJumpRampRise,
   freeDriveStuntRampRise,
   isFreeDriveJumpGap,
   isFreeDriveJumpGapSegment,
-  resolveFreeDriveJumpLaunch,
-  resolveFreeDriveStuntBoost,
-  resolveFreeDriveStuntLaunch
+  resolveFreeDriveJumpLaunch
 } from "./racing-jump-rules.mjs";
 
 const dracoDecoderPath = "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/libs/draco/";
@@ -92,157 +102,26 @@ const collisionDebugColors = {
   response: 0xff9f1c,
   impact: 0xff4d4d
 };
-const defaultDrivingFeelPresetId = "arcade";
-const drivingFeelPresets = {
-  balanced: {
-    camera: {
-      speedFovBoost: 0,
-      speedFovResponse: 4,
-      speedLookAheadBoost: 0,
-      headingFollowTightness: 7.5
-    },
-    car: (isGravelSurface) => ({
-      maxForwardSpeed: 50,
-      maxReverseSpeed: 60 / 3.6,
-      engineForce: 35,
-      brakeForce: isGravelSurface ? 31 : 40,
-      reverseForce: 24,
-      drag: 0.028,
-      rollingResistance: 0.76,
-      roadGrip: isGravelSurface ? 6.4 : 9.4,
-      grassGrip: 2.9,
-      maxSteerRate: isGravelSurface ? 1.68 : 1.82
-    }),
-    handling: (isGravelSurface) => ({
-      steeringResponse: 0.3,
-      steeringReleaseResponse: 0.2,
-      lowSpeedSteerBoost: 1.42,
-      highSpeedSteerStart: 18,
-      highSpeedSteerEnd: 42,
-      highSpeedSteerMin: isGravelSurface ? 0.52 : 0.58,
-      steerFactorFloor: isGravelSurface ? 0.42 : 0.48,
-      driftEntrySpeed: isGravelSurface ? 7.4 : 9,
-      driftSustainSpeed: isGravelSurface ? 5.8 : 6.5,
-      driftSteerThreshold: isGravelSurface ? 0.18 : 0.22,
-      driftGripMultiplier: isGravelSurface ? 0.16 : 0.2,
-      driftBrakeMultiplier: 0.26,
-      driftTurnMultiplier: isGravelSurface ? 1.58 : 1.48,
-      driftYawAssist: isGravelSurface ? 0.74 : 0.62,
-      launchBoostThreshold: 12,
-      launchForceMultiplier: 1.18,
-      grassTopSpeedMultiplier: 0.9,
-      grassDragMultiplier: 0.12
-    }),
-    collision: {
-      stopSeconds: 0.16,
-      carStopSeconds: 0.12,
-      opponentPauseSeconds: 0.36,
-      playerOpponentForwardRetention: 0.48,
-      playerOpponentMinForwardSpeed: 2.8,
-      playerOpponentSideShove: 2.1,
-      opponentImpactSpeedMultiplier: 0.52,
-      opponentSpeedLoss: 2.4,
-      opponentLaneKick: 1.15,
-      opponentYawKick: 0.18,
-      opponentLaneRecovery: 3.2,
-      opponentYawRecovery: 3.8,
-      headingResponseMinSpeed: 2.4,
-      headingCorrectionMax: 0.38,
-      headingIgnoreAngle: Math.PI * 0.65
-    },
-    railImpact: {
-      slideSpeedRetention: 0.62,
-      throttleSlideFloor: 3.8,
-      coastSlideFloor: 1.6,
-      tangentDamping: 0.34,
-      bounceFactor: 0.28,
-      maxSpeedMultiplier: 0.76
-    }
-  },
-  arcade: {
-    camera: {
-      fov: 58,
-      followDistance: 9.8,
-      height: 5.4,
-      lookAhead: 6.2,
-      targetHeight: 1.55,
-      followTightness: 6.8,
-      speedFovBoost: 8,
-      speedFovResponse: 5.4,
-      speedLookAheadBoost: 1.2,
-      headingFollowTightness: 5.2
-    },
-    car: (isGravelSurface) => ({
-      maxForwardSpeed: 50,
-      maxReverseSpeed: 60 / 3.6,
-      engineForce: 42,
-      brakeForce: isGravelSurface ? 35 : 44,
-      reverseForce: 26,
-      drag: 0.024,
-      rollingResistance: 0.68,
-      roadGrip: isGravelSurface ? 8 : 11.2,
-      grassGrip: 3.8,
-      maxSteerRate: isGravelSurface ? 1.82 : 1.96
-    }),
-    handling: (isGravelSurface) => ({
-      steeringResponse: 0.45,
-      steeringReleaseResponse: 0.32,
-      lowSpeedSteerBoost: 1.5,
-      highSpeedSteerStart: 20,
-      highSpeedSteerEnd: 46,
-      highSpeedSteerMin: isGravelSurface ? 0.68 : 0.74,
-      steerFactorFloor: isGravelSurface ? 0.6 : 0.64,
-      driftEntrySpeed: isGravelSurface ? 6.9 : 7.5,
-      driftSustainSpeed: isGravelSurface ? 5.3 : 5.8,
-      driftSteerThreshold: isGravelSurface ? 0.12 : 0.14,
-      driftGripMultiplier: isGravelSurface ? 0.26 : 0.3,
-      driftBrakeMultiplier: 0.36,
-      driftTurnMultiplier: isGravelSurface ? 1.72 : 1.6,
-      driftYawAssist: isGravelSurface ? 0.92 : 0.85,
-      launchBoostThreshold: 15,
-      launchForceMultiplier: 1.35,
-      grassTopSpeedMultiplier: 0.9,
-      grassDragMultiplier: 0.12
-    }),
-    collision: {
-      stopSeconds: 0.11,
-      carStopSeconds: 0.08,
-      opponentPauseSeconds: 0.22,
-      playerOpponentForwardRetention: 0.62,
-      playerOpponentMinForwardSpeed: 4.2,
-      playerOpponentSideShove: 3.2,
-      opponentImpactSpeedMultiplier: 0.64,
-      opponentSpeedLoss: 2.8,
-      opponentLaneKick: 1.55,
-      opponentYawKick: 0.24,
-      opponentLaneRecovery: 4.6,
-      opponentYawRecovery: 5.4,
-      headingResponseMinSpeed: 2.8,
-      headingCorrectionMax: 0.32,
-      headingIgnoreAngle: Math.PI * 0.62
-    },
-    railImpact: {
-      slideSpeedRetention: 0.78,
-      throttleSlideFloor: 5.4,
-      coastSlideFloor: 2.4,
-      tangentDamping: 0.46,
-      bounceFactor: 0.22,
-      maxSpeedMultiplier: 0.84
-    }
-  }
-};
-
-function resolveDrivingFeelPreset(presetId, isGravelSurface) {
-  const preset = drivingFeelPresets[presetId] ?? drivingFeelPresets[defaultDrivingFeelPresetId];
-  return {
-    id: drivingFeelPresets[presetId] ? presetId : defaultDrivingFeelPresetId,
-    camera: { ...preset.camera },
-    car: preset.car(isGravelSurface),
-    handling: preset.handling(isGravelSurface),
-    collision: { ...preset.collision },
-    railImpact: { ...preset.railImpact }
-  };
-}
+const physicalDrivingConfig = Object.freeze({
+  maxForwardSpeed: 50,
+  steeringResponse: 0.45,
+  steeringReleaseResponse: 0.32,
+  opponentImpactSpeedMultiplier: 0.64,
+  opponentLaneRecovery: 4.6,
+  opponentYawRecovery: 5.4,
+  camera: Object.freeze({
+    fov: 58,
+    followDistance: 9.8,
+    height: 5.4,
+    lookAhead: 6.2,
+    targetHeight: 1.55,
+    followTightness: 6.8,
+    speedFovBoost: 8,
+    speedFovResponse: 5.4,
+    speedLookAheadBoost: 1.2,
+    headingFollowTightness: 5.2
+  })
+});
 
 function createCarModelLoader() {
   const loader = new GLTFLoader();
@@ -380,21 +259,8 @@ export function createRacingGame({
     ? mapData.track.width
     : racingSceneConfig.trackWidthOverride ?? mapData.track.width;
   const isGravelSurface = trackSurface === TRACK_SURFACES.GRAVEL;
-  const drivingFeelPreset = resolveDrivingFeelPreset(
-    racingSceneConfig.drivingFeelPreset ?? defaultDrivingFeelPresetId,
-    isGravelSurface
-  );
   const cameraConfig = {
-    fov: drivingFeelPreset.camera.fov ?? racingSceneConfig.cameraFov ?? 58,
-    followDistance: drivingFeelPreset.camera.followDistance ?? racingSceneConfig.cameraFollowDistance ?? 11.8,
-    height: drivingFeelPreset.camera.height ?? racingSceneConfig.cameraHeight ?? 6.4,
-    lookAhead: drivingFeelPreset.camera.lookAhead ?? racingSceneConfig.cameraLookAhead ?? 4.2,
-    targetHeight: drivingFeelPreset.camera.targetHeight ?? racingSceneConfig.cameraTargetHeight ?? 1.1,
-    followTightness: drivingFeelPreset.camera.followTightness ?? racingSceneConfig.cameraFollowTightness ?? 5.2,
-    speedFovBoost: drivingFeelPreset.camera.speedFovBoost ?? 0,
-    speedFovResponse: drivingFeelPreset.camera.speedFovResponse ?? 4,
-    speedLookAheadBoost: drivingFeelPreset.camera.speedLookAheadBoost ?? 0,
-    headingFollowTightness: drivingFeelPreset.camera.headingFollowTightness ?? 7
+    ...physicalDrivingConfig.camera
   };
   const fallbackHoodCameraConfig = {
     position: [0, 1.45, 2.05],
@@ -471,13 +337,8 @@ export function createRacingGame({
     sceneBounds.radius + 88
   );
 
-  const carConfig = drivingFeelPreset.car;
-  const handlingConfig = drivingFeelPreset.handling;
-  const collisionConfig = drivingFeelPreset.collision;
-  const railImpactConfig = drivingFeelPreset.railImpact;
-
   const opponentConfig = {
-    speed: carConfig.maxForwardSpeed,
+    speed: physicalDrivingConfig.maxForwardSpeed,
     laneOffset: -2.7,
     startProgress: raceMode === "lap" || isFreeDrive ? raceConfig.startProgress : 0
   };
@@ -491,6 +352,9 @@ export function createRacingGame({
     railHalfDepth: 0.34,
     stepSeconds: 1 / 60
   };
+  const staticWorldColliderSpecs = [];
+  const staticWorldMeshColliderSpecs = [];
+  let roadCollisionMeshData = null;
 
   const keyState = new Set();
   let gamepadDrive = Object.freeze({ connected: false, steering: 0, throttle: 0, brake: 0 });
@@ -517,13 +381,17 @@ export function createRacingGame({
     lapArmed: false,
     boostSeconds: 0,
     boostCharges: boostConfig.charges,
-    drifting: false
   };
   const freeDriveJumpState = {
-    airborne: false,
-    elapsedSeconds: 0,
-    cooldownSeconds: 0,
-    takeoffElevation: 0
+    airborne: false
+  };
+  const playerSurfaceState = {
+    grounded: true,
+    height: 0,
+    pitch: 0,
+    roll: 0,
+    surfaceId: "road",
+    contacts: []
   };
   const opponentState = {
     progress: opponentConfig.startProgress,
@@ -575,6 +443,7 @@ export function createRacingGame({
   let listening = false;
   let animationFrameId = 0;
   let lastFrameTime = 0;
+  let physicsAccumulator = 0;
   let initializationPromise = null;
   let raceStarting = false;
   let physics = null;
@@ -615,6 +484,7 @@ export function createRacingGame({
     finishRace: (winner = "player") => finishLapRace(winner === "opponent" ? "opponent" : "player"),
     placeCollisionScenario: (progress, laneOffset, progressGap) => placeCollisionScenario(progress, laneOffset, progressGap),
     placeStuntJumpScenario: (direction = 1) => placeStuntJumpScenario(direction),
+    placeWorldScenario: (x, z, heading = 0) => placeWorldScenario(x, z, heading),
     toggleOpponent,
     toggleCollisionDebug: () => setCollisionDebugEnabled(!collisionDebug.enabled),
     getState: () => ({
@@ -630,8 +500,24 @@ export function createRacingGame({
       boostSeconds: Number(state.boostSeconds.toFixed(2)),
       boostCharges: state.boostCharges,
       playerBoostUnlimited: boostConfig.unlimited,
-      drifting: state.drifting,
       airborne: freeDriveJumpState.airborne,
+      surface: {
+        grounded: playerSurfaceState.grounded,
+        id: playerSurfaceState.surfaceId,
+        height: Number(playerSurfaceState.height.toFixed(2)),
+        contacts: playerSurfaceState.contacts.length,
+        pitchDegrees: Number(THREE.MathUtils.radToDeg(playerSurfaceState.pitch).toFixed(1)),
+        rollDegrees: Number(THREE.MathUtils.radToDeg(playerSurfaceState.roll).toFixed(1))
+      },
+      physicsHeight: physics?.playerBody
+        ? Number(physics.playerBody.translation().y.toFixed(2))
+        : null,
+      worldColliders: {
+        roadMesh: Boolean(roadCollisionMeshData),
+        buildings: staticWorldColliderSpecs
+          .filter((spec) => spec.tag === "building")
+          .map((spec) => ({ x: spec.x, z: spec.z, width: spec.width, depth: spec.depth }))
+      },
       speedKmh: Math.round(state.velocity.length() * 3.6),
       playerMaxForwardSpeed: playerMaxForwardSpeed(),
       status: currentStatusLabel(),
@@ -663,15 +549,24 @@ export function createRacingGame({
       playerCar: formatCarLabel(selectedCar()),
       opponentCar: formatCarLabel(opponentCarSelection()),
       cameraMode,
-      drivingFeelPreset: drivingFeelPreset.id,
+      vehiclePhysics: {
+        mode: "physical",
+        wheelContacts: physics?.playerVehicle?.contactCount ?? 0,
+        signedSpeed: Number((physics?.playerVehicle?.speed ?? 0).toFixed(2)),
+        steeringDegrees: Number(THREE.MathUtils.radToDeg(
+          physics?.playerVehicle?.steeringAngle ?? 0
+        ).toFixed(1)),
+        suspensionLengths: (physics?.playerVehicle?.suspensionLengths ?? [])
+          .map((length) => Number(length.toFixed(2)))
+      },
       randomSeed: activeSnapshot?.randomSeed ?? null,
       visualScale,
       collisionScale,
       trackWidth: trackConfig.width,
       collider: {
-        halfWidth: Number(physicsConfig.carHalfWidth.toFixed(2)),
-        halfHeight: Number(physicsConfig.carHalfHeight.toFixed(2)),
-        halfLength: Number(physicsConfig.carHalfLength.toFixed(2))
+        halfWidth: Number(physicalVehicleConfig.chassisHalfWidth.toFixed(2)),
+        halfHeight: Number(physicalVehicleConfig.chassisHalfHeight.toFixed(2)),
+        halfLength: Number(physicalVehicleConfig.chassisHalfLength.toFixed(2))
       },
       collisionDebugEnabled: collisionDebug.enabled,
       lastCollision: collisionDebug.lastCollision,
@@ -1198,7 +1093,7 @@ export function createRacingGame({
       collisionDebug.group.visible = collisionDebug.enabled && Boolean(scene);
     }
     if (collisionDebug.hud) {
-      collisionDebug.hud.hidden = !(collisionDebug.enabled && active);
+      collisionDebug.hud.hidden = !active;
     }
   }
 
@@ -1397,10 +1292,13 @@ export function createRacingGame({
     group.name = "collision-debug";
     collisionDebug.group = group;
 
+    const playerHalfWidth = physicalVehicleConfig.chassisHalfWidth;
+    const playerHalfHeight = physicalVehicleConfig.chassisHalfHeight;
+    const playerHalfLength = physicalVehicleConfig.chassisHalfLength;
     collisionDebug.playerWire = createCollisionWireBox(
-      physicsConfig.carHalfWidth * 2,
-      physicsConfig.carHalfHeight * 2,
-      physicsConfig.carHalfLength * 2,
+      playerHalfWidth * 2,
+      playerHalfHeight * 2,
+      playerHalfLength * 2,
       collisionDebugColors.player
     );
     collisionDebug.opponentWire = createCollisionWireBox(
@@ -1419,7 +1317,7 @@ export function createRacingGame({
         physicsConfig.railHalfDepth * 2,
         collisionDebugColors.rail
       );
-      wire.position.set(rail.midpoint.x, physicsConfig.railHalfHeight, rail.midpoint.y);
+      wire.position.set(rail.midpoint.x, rail.elevation + physicsConfig.railHalfHeight, rail.midpoint.y);
       wire.rotation.y = rail.yaw;
       collisionDebug.railWiresByHandle.set(rail.handle, wire);
       group.add(wire);
@@ -1583,6 +1481,9 @@ export function createRacingGame({
   }
 
   async function createWorld() {
+    staticWorldColliderSpecs.length = 0;
+    staticWorldMeshColliderSpecs.length = 0;
+    roadCollisionMeshData = null;
     startGateLights.length = 0;
     if (!isFreeDrive) addSkyDome();
     if (isFreeDrive) addFreeDriveGroundLayers();
@@ -1841,6 +1742,7 @@ export function createRacingGame({
     island.rotation.x = -Math.PI / 2;
     island.position.set(islandCenter.x, 0, islandCenter.y);
     island.receiveShadow = true;
+    registerStaticWorldMesh(island, "ground");
     scene.add(island);
     const createSandMaterial = (tint) => new THREE.MeshStandardMaterial({
       map: loadTiled("./assets/freedrive/textures/coast_sand_01_diff_1k.jpg", THREE.SRGBColorSpace, 16, 16),
@@ -1851,10 +1753,12 @@ export function createRacingGame({
       side: THREE.DoubleSide
     });
     const coastStart = islandRadius - 42;
-    scene.add(
+    const coastMeshes = [
       createFreeDriveCoastRing(coastStart, islandRadius - 12, -0.2, -0.78, createSandMaterial(0xc7ad82), islandCenter),
       createFreeDriveCoastRing(islandRadius - 13, islandRadius + 3, -0.76, -1.38, createSandMaterial(0x766b5d), islandCenter)
-    );
+    ];
+    coastMeshes.forEach((mesh) => registerStaticWorldMesh(mesh, "ground"));
+    scene.add(...coastMeshes);
     const cityGround = new THREE.Mesh(
       new THREE.BoxGeometry(250, 0.7, 250),
       createFreeDrivePbrMaterial("brushed_concrete", { color: 0x737b7c, repeatX: 28, repeatY: 28, roughness: 0.92 })
@@ -1862,6 +1766,15 @@ export function createRacingGame({
     cityGround.position.set(340, -0.42, 14);
     cityGround.receiveShadow = true;
     scene.add(cityGround);
+    registerStaticWorldBox({
+      x: cityGround.position.x,
+      y: cityGround.position.y,
+      z: cityGround.position.z,
+      width: 250,
+      height: 0.7,
+      depth: 250,
+      tag: "ground"
+    });
     scene.add(
       createFreeDriveEmbankmentMesh(1, createGrassMaterial(3, 1), (sample) => sample.center.x <= 116),
       createFreeDriveEmbankmentMesh(-1, createGrassMaterial(3, 1), (sample) => sample.center.x <= 116),
@@ -1916,6 +1829,7 @@ export function createRacingGame({
     geometry.computeVertexNormals();
     const mesh = new THREE.Mesh(geometry, material);
     mesh.receiveShadow = true;
+    registerStaticWorldMesh(mesh, "embankment");
     return mesh;
   }
 
@@ -2002,11 +1916,12 @@ export function createRacingGame({
     const deckMaterial = createFreeDrivePbrMaterial("wood_planks_grey", { color: 0xa88a6c, repeatX: 4, repeatY: 2 });
     for (let index = 0; index < 3; index += 1) {
       const height = 4 + index * 0.8;
+      const localX = (index - 1) * 9;
       const building = new THREE.Mesh(
         new THREE.BoxGeometry(8, height, 6),
         createFreeDrivePbrMaterial("painted_plaster_wall", { color: colors[index], repeatX: 3, repeatY: 2 })
       );
-      building.position.set((index - 1) * 9, height * 0.5, 0);
+      building.position.set(localX, height * 0.5, 0);
       building.castShadow = qualityPreset.shadows;
       building.receiveShadow = true;
       const roof = new THREE.Mesh(
@@ -2021,6 +1936,16 @@ export function createRacingGame({
       deck.position.set((index - 1) * 9, 0.14, 4.0);
       deck.receiveShadow = true;
       group.add(building, roof, windowBand, deck);
+      registerStaticWorldBox({
+        x: anchor.x + Math.cos(group.rotation.y) * localX,
+        y: height * 0.5,
+        z: anchor.y - Math.sin(group.rotation.y) * localX,
+        width: 8,
+        height,
+        depth: 6,
+        yaw: group.rotation.y,
+        tag: "building"
+      });
     }
     scene.add(group);
   }
@@ -2142,8 +2067,18 @@ export function createRacingGame({
       grassPad.position.set(centerX, baseY - 0.08, FREE_DRIVE_STUNT_JUMP.centerY);
       grassPad.receiveShadow = true;
       scene.add(grassPad);
+      registerStaticWorldBox({
+        x: centerX,
+        y: baseY - 0.08,
+        z: FREE_DRIVE_STUNT_JUMP.centerY,
+        width: grassPadLength,
+        height: 0.18,
+        depth: FREE_DRIVE_STUNT_JUMP.halfWidth * 2 + 5,
+        tag: "ground"
+      });
     }
 
+    const rampColliderSpecs = createFreeDriveStuntRampColliderSpecs({ baseY });
     for (const direction of [1, -1]) {
       const startX = direction > 0 ? FREE_DRIVE_STUNT_JUMP.leftRampStartX : FREE_DRIVE_STUNT_JUMP.rightRampEndX;
       const takeoffX = direction > 0 ? FREE_DRIVE_STUNT_JUMP.leftTakeoffX : FREE_DRIVE_STUNT_JUMP.rightTakeoffX;
@@ -2156,6 +2091,7 @@ export function createRacingGame({
       ramp.rotation.z = direction * slopeAngle;
       ramp.castShadow = ramp.receiveShadow = qualityPreset.shadows;
       scene.add(ramp);
+      registerStaticWorldBox(rampColliderSpecs[direction > 0 ? 0 : 1]);
 
       for (const side of [-1, 1]) {
         const edge = new THREE.Mesh(new THREE.BoxGeometry(slopeLength, 0.24, 0.28), edgeMaterial);
@@ -2206,6 +2142,15 @@ export function createRacingGame({
       crown.position.set(x, height + 0.3, z);
       crown.castShadow = qualityPreset.shadows;
       city.add(building, crown);
+      registerStaticWorldBox({
+        x,
+        y: height * 0.5,
+        z,
+        width,
+        height,
+        depth,
+        tag: "building"
+      });
       if (type !== "glass") {
         const rows = Math.max(2, Math.floor(height / 5));
         for (let row = 0; row < rows; row += 1) {
@@ -2229,6 +2174,30 @@ export function createRacingGame({
     });
 
     scene.add(city);
+  }
+
+  function registerStaticWorldBox({ x, y, z, width, height, depth, yaw = 0, pitch = 0, roll = 0, tag = "world" }) {
+    staticWorldColliderSpecs.push(Object.freeze({ x, y, z, width, height, depth, yaw, pitch, roll, tag }));
+  }
+
+  function registerStaticWorldMesh(mesh, tag = "world") {
+    const geometry = mesh?.geometry;
+    const position = geometry?.getAttribute("position");
+    if (!position?.count) return;
+
+    mesh.updateMatrixWorld(true);
+    const vertices = new Float32Array(position.count * 3);
+    const point = new THREE.Vector3();
+    for (let index = 0; index < position.count; index += 1) {
+      point.fromBufferAttribute(position, index).applyMatrix4(mesh.matrixWorld);
+      vertices[index * 3] = point.x;
+      vertices[index * 3 + 1] = point.y;
+      vertices[index * 3 + 2] = point.z;
+    }
+    const indices = geometry.index
+      ? new Uint32Array(geometry.index.array)
+      : Uint32Array.from({ length: position.count }, (_, index) => index);
+    staticWorldMeshColliderSpecs.push(Object.freeze({ vertices, indices, tag }));
   }
 
   function smoothstep(edge0, edge1, value) {
@@ -2299,7 +2268,7 @@ export function createRacingGame({
     const dustySurface = isGravelSurface || !state.onRoad;
     const emissionRate = dustySurface
       ? clamp((speed - 2) * 2.1, 0, 52)
-      : state.drifting && speed > 6 ? clamp((speed - 5) * 1.55, 0, 38) : 0;
+      : 0;
     drivingDust.emissionCarry += emissionRate * deltaSeconds;
     while (drivingDust.emissionCarry >= 1) {
       emitDrivingDustParticle(dustySurface);
@@ -2486,6 +2455,7 @@ export function createRacingGame({
           verge.material.roughness = zone.roughness;
           verge.material.needsUpdate = true;
           verge.receiveShadow = true;
+          registerStaticWorldMesh(verge, "verge");
           scene.add(verge);
         }
       }
@@ -2670,16 +2640,50 @@ export function createRacingGame({
       debugRailColliders: [],
       playerBody: null,
       playerCollider: null,
+      playerVehicle: null,
       opponentBody: null,
       opponentCollider: null
     };
 
+    const fallbackGroundHeight = physicalFallbackGroundHeight(isFreeDrive);
     const groundCollider = world.createCollider(
       RAPIER.ColliderDesc.cuboid(Math.max(180, farFieldWidth * 0.55), 0.3, Math.max(150, farFieldDepth * 0.55))
-        .setTranslation(sceneCenter.x, -0.3, sceneCenter.y)
+        .setTranslation(sceneCenter.x, fallbackGroundHeight - 0.3, sceneCenter.y)
         .setFriction(1.2)
     );
     physics.colliderTags.set(groundCollider.handle, "ground");
+
+    if (roadCollisionMeshData?.vertices.length && roadCollisionMeshData.indices.length) {
+      const roadCollider = world.createCollider(
+        RAPIER.ColliderDesc.trimesh(
+          roadCollisionMeshData.vertices,
+          roadCollisionMeshData.indices,
+          RAPIER.TriMeshFlags.FIX_INTERNAL_EDGES
+        ).setFriction(1.15)
+      );
+      physics.colliderTags.set(roadCollider.handle, "road");
+    }
+
+    for (const spec of staticWorldMeshColliderSpecs) {
+      if (!spec.vertices.length || !spec.indices.length) continue;
+      const collider = world.createCollider(
+        RAPIER.ColliderDesc.trimesh(spec.vertices, spec.indices, RAPIER.TriMeshFlags.FIX_INTERNAL_EDGES)
+          .setFriction(1.05)
+      );
+      physics.colliderTags.set(collider.handle, spec.tag);
+    }
+
+    for (const spec of staticWorldColliderSpecs) {
+      const collider = world.createCollider(
+        RAPIER.ColliderDesc.cuboid(spec.width * 0.5, spec.height * 0.5, spec.depth * 0.5)
+          .setTranslation(spec.x, spec.y, spec.z)
+          .setRotation(rapierRotationFromEuler(spec.pitch, spec.yaw, spec.roll))
+          .setFriction(0.72)
+          .setRestitution(0.02)
+          .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS)
+      );
+      physics.colliderTags.set(collider.handle, spec.tag);
+    }
 
     if (!isFreeDrive) {
       createRailColliders(1);
@@ -2691,23 +2695,30 @@ export function createRacingGame({
 
     const playerBodyDesc = RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(0, physicsConfig.fixedHeight, 0)
-      .enabledRotations(false, true, false)
       .setCanSleep(false)
       .setCcdEnabled(true)
-      .setAngularDamping(8);
+      .setLinearDamping(0.08)
+      .setAngularDamping(1.2)
+      .setAdditionalSolverIterations(4);
     physics.playerBody = world.createRigidBody(playerBodyDesc);
+    const playerColliderDesc = RAPIER.ColliderDesc.roundCuboid(
+      physicalVehicleConfig.chassisHalfWidth,
+      physicalVehicleConfig.chassisHalfHeight,
+      physicalVehicleConfig.chassisHalfLength,
+      physicalVehicleConfig.chassisRoundRadius
+    )
+      .setMass(physicalVehicleConfig.mass)
+      .setFriction(0.42)
+      .setRestitution(0.03);
     physics.playerCollider = world.createCollider(
-      RAPIER.ColliderDesc.cuboid(
-        physicsConfig.carHalfWidth,
-        physicsConfig.carHalfHeight,
-        physicsConfig.carHalfLength
-      )
-        .setFriction(0.15)
-        .setRestitution(0)
-        .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
+      playerColliderDesc.setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
       physics.playerBody
     );
     physics.colliderTags.set(physics.playerCollider.handle, "player");
+    physics.playerVehicle = createPhysicalVehicle({
+      world,
+      chassis: physics.playerBody
+    });
 
     const opponentBodyDesc = RAPIER.RigidBodyDesc.kinematicPositionBased()
       .setTranslation(0, physicsConfig.fixedHeight, 0)
@@ -2749,9 +2760,12 @@ export function createRacingGame({
 
       const midpoint = start.clone().add(end).multiplyScalar(0.5);
       const yaw = Math.atan2(segment.x, segment.y);
+      const startHeight = 0.06 + freeDriveElevationAtPosition(startSample.center, startSample.progress);
+      const endHeight = 0.06 + freeDriveElevationAtPosition(endSample.center, endSample.progress);
+      const elevation = (startHeight + endHeight) * 0.5;
       const railCollider = physics.world.createCollider(
         RAPIER.ColliderDesc.cuboid(length * 0.5, physicsConfig.railHalfHeight, physicsConfig.railHalfDepth)
-          .setTranslation(midpoint.x, physicsConfig.railHalfHeight, midpoint.y)
+          .setTranslation(midpoint.x, elevation + physicsConfig.railHalfHeight, midpoint.y)
           .setRotation(rapierRotationFromYaw(yaw))
           .setFriction(0.12)
           .setRestitution(0.04)
@@ -2760,6 +2774,7 @@ export function createRacingGame({
       physics.debugRailColliders.push({
         handle: railCollider.handle,
         midpoint: midpoint.clone(),
+        elevation,
         yaw,
         length
       });
@@ -2775,7 +2790,43 @@ export function createRacingGame({
     const velocity = physics.playerBody.linvel();
     state.position.set(translation.x, translation.z);
     state.velocity.set(velocity.x, velocity.z);
+    const rotation = physics.playerBody.rotation();
+    tempQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(tempQuaternion);
+    if (forward.x * forward.x + forward.z * forward.z > 0.0001) {
+      state.heading = Math.atan2(forward.x, forward.z);
+    }
     syncPlayerTrackMetrics(preferredIndex);
+  }
+
+  function syncPhysicalVehicleState() {
+    const vehicle = physics?.playerVehicle;
+    if (!vehicle || !physics?.playerBody) return;
+
+    const contacts = [];
+    const surfaceCounts = new Map();
+    for (let index = 0; index < vehicle.controller.numWheels(); index += 1) {
+      if (!vehicle.controller.wheelIsInContact(index)) continue;
+      const point = vehicle.controller.wheelContactPoint(index);
+      const collider = vehicle.controller.wheelGroundObject(index);
+      const surfaceId = physics.colliderTags.get(collider?.handle) ?? "surface";
+      if (point) contacts.push({ x: point.x, z: point.z, height: point.y, surfaceId });
+      surfaceCounts.set(surfaceId, (surfaceCounts.get(surfaceId) ?? 0) + 1);
+    }
+
+    const rotation = physics.playerBody.rotation();
+    tempQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+    const euler = new THREE.Euler().setFromQuaternion(tempQuaternion, "YXZ");
+    playerSurfaceState.grounded = contacts.length >= 2;
+    playerSurfaceState.height = contacts.length
+      ? contacts.reduce((sum, contact) => sum + contact.height, 0) / contacts.length
+      : physics.playerBody.translation().y - physicalVehicleConfig.visualGroundOffset;
+    playerSurfaceState.pitch = euler.x;
+    playerSurfaceState.roll = euler.z;
+    playerSurfaceState.surfaceId = [...surfaceCounts.entries()]
+      .sort((left, right) => right[1] - left[1])[0]?.[0] ?? "air";
+    playerSurfaceState.contacts = contacts;
+    freeDriveJumpState.airborne = contacts.length === 0;
   }
 
   function syncOpponentPhysicsState() {
@@ -2792,14 +2843,18 @@ export function createRacingGame({
       return;
     }
 
-    physics.playerBody.setTranslation({ x: position.x, y: physicsConfig.fixedHeight, z: position.y }, true);
+    const support = resolveSurfaceSupport(position, heading);
+    if (support.grounded) applyPlayerSurfaceState(support);
+    physics.playerBody.setTranslation({
+      x: position.x,
+      y: (support.height ?? 0) + physicalVehicleConfig.spawnHeight,
+      z: position.y
+    }, true);
     physics.playerBody.setRotation(rapierRotationFromYaw(heading), true);
     physics.playerBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
     physics.playerBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    resetPhysicalVehicleControls(physics.playerVehicle);
     freeDriveJumpState.airborne = false;
-    freeDriveJumpState.elapsedSeconds = 0;
-    freeDriveJumpState.cooldownSeconds = 0;
-    freeDriveJumpState.takeoffElevation = 0;
   }
 
   function setOpponentBodyPose(position, heading) {
@@ -2807,7 +2862,12 @@ export function createRacingGame({
       return;
     }
 
-    physics.opponentBody.setTranslation({ x: position.x, y: physicsConfig.fixedHeight, z: position.y }, true);
+    const support = resolveSurfaceSupport(position, heading, Math.round(opponentState.progress * trackConfig.samples));
+    physics.opponentBody.setTranslation({
+      x: position.x,
+      y: (support.height ?? 0) + physicsConfig.fixedHeight,
+      z: position.y
+    }, true);
     physics.opponentBody.setRotation(rapierRotationFromYaw(heading), true);
     physics.opponentBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
     physics.opponentBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
@@ -2823,8 +2883,19 @@ export function createRacingGame({
     };
   }
 
+  function rapierRotationFromEuler(pitch = 0, yaw = 0, roll = 0) {
+    tempQuaternion.setFromEuler(new THREE.Euler(pitch, yaw, roll, "YXZ"));
+    return {
+      w: tempQuaternion.w,
+      x: tempQuaternion.x,
+      y: tempQuaternion.y,
+      z: tempQuaternion.z
+    };
+  }
+
   function createRoadMesh() {
     const positions = [];
+    const collisionPositions = [];
     const normals = [];
     const uvs = [];
     const indices = [];
@@ -2834,9 +2905,18 @@ export function createRacingGame({
       const roadHeight = 0.06 + freeDriveElevationAtProgress(sampleProgressForIndex(sampleIndex, trackSamples.length));
       const left = sample.center.clone().add(sample.normal.clone().multiplyScalar(sample.halfWidth));
       const right = sample.center.clone().add(sample.normal.clone().multiplyScalar(-sample.halfWidth));
+      const supportHalfWidth = physicalRoadSupportHalfWidth({
+        halfWidth: sample.halfWidth,
+        centerX: sample.center.x,
+        isFreeDrive
+      });
+      const collisionLeft = sample.center.clone().add(sample.normal.clone().multiplyScalar(supportHalfWidth));
+      const collisionRight = sample.center.clone().add(sample.normal.clone().multiplyScalar(-supportHalfWidth));
 
       positions.push(left.x, roadHeight, left.y);
       positions.push(right.x, roadHeight, right.y);
+      collisionPositions.push(collisionLeft.x, roadHeight, collisionLeft.y);
+      collisionPositions.push(collisionRight.x, roadHeight, collisionRight.y);
       normals.push(0, 1, 0, 0, 1, 0);
       uvs.push(0, sample.distance / 7.5, 1, sample.distance / 7.5);
     });
@@ -2859,6 +2939,10 @@ export function createRacingGame({
     geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
     geometry.setIndex(indices);
     geometry.computeVertexNormals();
+    roadCollisionMeshData = {
+      vertices: new Float32Array(collisionPositions),
+      indices: new Uint32Array(indices)
+    };
 
     return new THREE.Mesh(
       geometry,
@@ -3476,6 +3560,63 @@ export function createRacingGame({
     const sample = trackProfileAtProgress(progress);
     const distance = position.distanceTo(sample.center);
     return Math.max(0, freeDriveElevationAtProgress(progress) - smoothstep(8, 30, distance) * 3.8);
+  }
+
+  function resolveSurfaceSupport(position, heading, preferredIndex = state.trackIndex) {
+    const centerProjection = closestTrackSample(position, preferredIndex);
+    const centerInJumpGap = isFreeDrive && isFreeDriveJumpGap(position);
+    const roadSupportHalfWidth = physicalRoadSupportHalfWidth({
+      halfWidth: centerProjection.sample.halfWidth,
+      centerX: centerProjection.sample.center.x,
+      isFreeDrive
+    });
+    const preferRoadLayer = centerProjection.distance <= roadSupportHalfWidth && !centerInJumpGap;
+    const contactPoints = createVehicleContactPoints({
+      position: { x: position.x, z: position.y },
+      heading,
+      halfWidth: physicsConfig.carHalfWidth * 0.78,
+      halfLength: physicsConfig.carHalfLength * 0.82
+    });
+
+    return resolveVehicleSupport({
+      contactPoints,
+      sampleSurface: (point) => sampleVehicleSurface(point, preferRoadLayer, centerProjection.index)
+    });
+  }
+
+  function sampleVehicleSurface(point, preferRoadLayer, preferredIndex) {
+    const position = new THREE.Vector2(point.x, point.z);
+    const projection = closestTrackSample(position, preferredIndex);
+    const inJumpGap = isFreeDrive && isFreeDriveJumpGap(position);
+
+    if (preferRoadLayer) {
+      const roadSupportHalfWidth = physicalRoadSupportHalfWidth({
+        halfWidth: projection.sample.halfWidth,
+        centerX: projection.sample.center.x,
+        isFreeDrive
+      });
+      if (projection.distance > roadSupportHalfWidth || inJumpGap) return null;
+      const bridge = isFreeDrive && position.x > 116 && position.x < 240;
+      return {
+        height: 0.06 + freeDriveElevationAtProgress(projection.progress),
+        surfaceId: bridge ? "bridge" : "road"
+      };
+    }
+
+    const stuntRise = freeDriveStuntRampRise(position);
+    return {
+      height: freeDriveGroundElevationAt(position, projection.progress),
+      surfaceId: stuntRise > 0 ? "stunt-ramp" : "ground"
+    };
+  }
+
+  function applyPlayerSurfaceState(support) {
+    playerSurfaceState.grounded = support.grounded;
+    playerSurfaceState.height = support.height ?? playerSurfaceState.height;
+    playerSurfaceState.pitch = support.pitch;
+    playerSurfaceState.roll = support.roll;
+    playerSurfaceState.surfaceId = support.surfaceId;
+    playerSurfaceState.contacts = support.contacts;
   }
 
   function addGuardRails() {
@@ -4463,7 +4604,7 @@ export function createRacingGame({
 
   async function initializeFreeDriveTraffic() {
     if (!physics?.world || freeDriveTraffic.length > 0) return;
-    const trafficCount = qualityPreset.id === "low" ? 4 : 6;
+    const trafficCount = 3;
     const palette = [0x2f5e8d, 0xd8d6ce, 0x9b2533, 0x33383c, 0xc18b2e, 0x58705a];
     const specs = Array.from({ length: trafficCount }, (_, index) =>
       racingCarCatalog[(index + 1) % racingCarCatalog.length]
@@ -4487,7 +4628,7 @@ export function createRacingGame({
         progress: 0,
         direction,
         laneOffset: direction > 0 ? -3.15 : 3.15,
-        cruiseSpeed: carConfig.maxForwardSpeed * (
+        cruiseSpeed: physicalDrivingConfig.maxForwardSpeed * (
           trafficCount > 1 ? 0.55 + (index / (trafficCount - 1)) * 0.45 : 1
         ),
         currentSpeed: 0,
@@ -4553,9 +4694,15 @@ export function createRacingGame({
     const sample = trackProfileAtProgress(traffic.progress);
     traffic.position.copy(sample.center).add(sample.normal.clone().multiplyScalar(traffic.laneOffset));
     traffic.heading = sample.heading + (traffic.direction < 0 ? Math.PI : 0);
+    const support = resolveSurfaceSupport(
+      traffic.position,
+      traffic.heading,
+      Math.round(traffic.progress * trackConfig.samples)
+    );
+    const surfaceHeight = support.height ?? freeDriveElevationAtProgress(traffic.progress);
     const translation = {
       x: traffic.position.x,
-      y: physicsConfig.fixedHeight + traffic.jumpOffset,
+      y: surfaceHeight + physicsConfig.fixedHeight + traffic.jumpOffset,
       z: traffic.position.y
     };
     const rotation = rapierRotationFromYaw(traffic.heading);
@@ -4568,7 +4715,7 @@ export function createRacingGame({
     }
     traffic.visual.position.set(
       traffic.position.x,
-      freeDriveElevationAtProgress(traffic.progress) + traffic.jumpOffset,
+      surfaceHeight + traffic.jumpOffset,
       traffic.position.y
     );
     traffic.visual.rotation.set(0, traffic.heading, 0);
@@ -5125,6 +5272,7 @@ export function createRacingGame({
     }
 
     updateHud();
+    updateCollisionDebugHud();
     return raceState.paused;
   }
 
@@ -5141,8 +5289,8 @@ export function createRacingGame({
     const keyboardSteer = (leftPressed ? 1 : 0) - (rightPressed ? 1 : 0);
     const targetSteer = keyboardSteer || gamepadDrive.steering;
     const steeringResponse = targetSteer === 0
-      ? handlingConfig.steeringReleaseResponse
-      : handlingConfig.steeringResponse;
+      ? physicalDrivingConfig.steeringReleaseResponse
+      : physicalDrivingConfig.steeringResponse;
     state.steering += (targetSteer - state.steering) * steeringResponse;
   }
 
@@ -5197,6 +5345,17 @@ export function createRacingGame({
   }
 
   function updatePhysics(deltaSeconds) {
+    physicsAccumulator = Math.min(
+      physicsAccumulator + deltaSeconds,
+      physicsConfig.stepSeconds * 4
+    );
+    while (physicsAccumulator >= physicsConfig.stepSeconds) {
+      stepPhysics(physicsConfig.stepSeconds);
+      physicsAccumulator -= physicsConfig.stepSeconds;
+    }
+  }
+
+  function stepPhysics(deltaSeconds) {
     if (!physics?.playerBody) {
       return;
     }
@@ -5206,69 +5365,39 @@ export function createRacingGame({
     state.previousPosition.copy(state.position);
     state.previousTrackIndex = state.trackIndex;
     state.boostSeconds = Math.max(0, state.boostSeconds - deltaSeconds);
-    const verticalVelocity = physics.playerBody.linvel().y;
-    const impactRecovery = state.stoppedByImpactSeconds > 0 ? 0.48 : 1;
-
     if (state.stoppedByImpactSeconds > 0) {
       state.stoppedByImpactSeconds = Math.max(0, state.stoppedByImpactSeconds - deltaSeconds);
-      state.drifting = false;
     }
 
-    drivePlayerBody(deltaSeconds, verticalVelocity, impactRecovery);
-    updatePlayerFreeDriveJump(deltaSeconds);
+    drivePhysicalVehicle(deltaSeconds);
 
     updateOpponent(deltaSeconds);
     updateFreeDriveTraffic(deltaSeconds);
     physics.world.step(physics.eventQueue);
     drainPhysicsEvents();
     syncPlayerPhysicsState(state.previousTrackIndex);
-    settlePlayerFreeDriveJump();
-    resolveFreeDriveTrafficContacts();
+    syncPhysicalVehicleState();
     syncOpponentPhysicsState();
   }
 
-  function updatePlayerFreeDriveJump(deltaSeconds) {
-    if (!isFreeDrive || !physics?.playerBody) return;
-    freeDriveJumpState.cooldownSeconds = Math.max(0, freeDriveJumpState.cooldownSeconds - deltaSeconds);
-    if (freeDriveJumpState.airborne || freeDriveJumpState.cooldownSeconds > 0) return;
-
-    if (resolveFreeDriveStuntBoost(state.position, state.velocity)) {
-      activateBoost();
-    }
-    const launch = resolveFreeDriveStuntLaunch(state.position, state.velocity)
-      ?? resolveFreeDriveJumpLaunch(state.position, state.velocity);
-    if (!launch) return;
-    const velocity = physics.playerBody.linvel();
-    if (Number.isFinite(launch.horizontalSpeed)) {
-      state.velocity.x = launch.horizontalSpeed;
-    }
-    freeDriveJumpState.takeoffElevation = state.onRoad
-      ? freeDriveElevationAtPosition(state.position, state.trackProgress)
-      : freeDriveGroundElevationAt(state.position, state.trackProgress);
-    physics.playerBody.setLinvel({
-      x: Number.isFinite(launch.horizontalSpeed) ? launch.horizontalSpeed : velocity.x,
-      y: launch.verticalSpeed,
-      z: velocity.z
-    }, true);
-    freeDriveJumpState.airborne = true;
-    freeDriveJumpState.elapsedSeconds = 0;
-  }
-
-  function settlePlayerFreeDriveJump() {
-    if (!freeDriveJumpState.airborne || !physics?.playerBody) return;
-    freeDriveJumpState.elapsedSeconds += physicsConfig.stepSeconds;
-    const translation = physics.playerBody.translation();
-    const verticalSpeed = physics.playerBody.linvel().y;
-    if (
-      freeDriveJumpState.elapsedSeconds > 0.18
-      && translation.y <= physicsConfig.fixedHeight + 0.04
-      && verticalSpeed <= 0.2
-    ) {
-      freeDriveJumpState.airborne = false;
-      freeDriveJumpState.elapsedSeconds = 0;
-      freeDriveJumpState.cooldownSeconds = 0.8;
-      freeDriveJumpState.takeoffElevation = 0;
-    }
+  function drivePhysicalVehicle(deltaSeconds) {
+    const vehicle = physics?.playerVehicle;
+    if (!vehicle || !physics?.playerBody) return;
+    updatePhysicalVehicle({
+      vehicle,
+      chassis: physics.playerBody,
+      deltaSeconds,
+      throttle: state.throttle,
+      brake: state.brake,
+      steering: state.steering,
+      boostActive: state.boostSeconds > 0,
+      maxForwardSpeed: playerMaxForwardSpeed(),
+      acceptsGroundCollider: (collider) => {
+        const tag = physics.colliderTags.get(collider.handle);
+        return isPhysicalVehicleSurface(tag);
+      }
+    });
+    syncPhysicalVehicleState();
   }
 
   function updateOpponent(deltaSeconds) {
@@ -5281,12 +5410,12 @@ export function createRacingGame({
     opponentState.collisionLaneOffset = moveToward(
       opponentState.collisionLaneOffset,
       0,
-      deltaSeconds * collisionConfig.opponentLaneRecovery
+      deltaSeconds * physicalDrivingConfig.opponentLaneRecovery
     );
     opponentState.collisionYawOffset = moveToward(
       opponentState.collisionYawOffset,
       0,
-      deltaSeconds * collisionConfig.opponentYawRecovery
+      deltaSeconds * physicalDrivingConfig.opponentYawRecovery
     );
     physics.opponentCollider.setEnabled(raceState.opponentEnabled);
 
@@ -5309,7 +5438,7 @@ export function createRacingGame({
       const boostMultiplier = opponentState.boostSeconds > 0 ? boostConfig.topSpeedMultiplier : 1;
       const targetSpeed = opponentConfig.speed * boostMultiplier * (
         opponentState.collisionHoldSeconds > 0
-          ? collisionConfig.opponentImpactSpeedMultiplier
+          ? physicalDrivingConfig.opponentImpactSpeedMultiplier
           : 1
       );
       const speedRecovery = opponentState.collisionHoldSeconds > 0
@@ -5330,125 +5459,17 @@ export function createRacingGame({
       : clamp(opponentState.progress + deltaProgress, 0, 1);
 
     syncOpponentPose();
+    const support = resolveSurfaceSupport(
+      opponentState.position,
+      opponentState.heading,
+      Math.round(opponentState.progress * trackConfig.samples)
+    );
     physics.opponentBody.setNextKinematicTranslation({
       x: opponentState.position.x,
-      y: physicsConfig.fixedHeight,
+      y: (support.height ?? 0) + physicsConfig.fixedHeight,
       z: opponentState.position.y
     });
     physics.opponentBody.setNextKinematicRotation(rapierRotationFromYaw(opponentState.heading));
-  }
-
-  function drivePlayerBody(deltaSeconds, verticalVelocity, controlScale = 1) {
-    const velocity = state.velocity.clone();
-    const forward = forwardVector();
-    const right = new THREE.Vector2(forward.y, -forward.x);
-    const boostActive = state.boostSeconds > 0;
-    const maxForwardSpeed = calculateSurfaceSpeedLimit({
-      baseSpeed: playerMaxForwardSpeed(),
-      onRoad: state.onRoad,
-      offRoadMultiplier: handlingConfig.grassTopSpeedMultiplier
-    });
-    let forwardSpeed = velocity.dot(forward);
-    const driftConfig = selectedCar().drift;
-    state.drifting = resolvePlayerDrift({
-      enabled: driftConfig?.enabled === true,
-      drifting: state.drifting,
-      onRoad: state.onRoad,
-      controlScale,
-      throttle: state.throttle,
-      steering: state.steering,
-      forwardSpeed,
-      entrySpeed: handlingConfig.driftEntrySpeed,
-      sustainSpeed: handlingConfig.driftSustainSpeed,
-      steerThreshold: handlingConfig.driftSteerThreshold,
-      throttleThreshold: driftConfig?.throttleThreshold
-    });
-
-    if (state.throttle > 0 && forwardSpeed < maxForwardSpeed) {
-      const force = calculateEngineForce({
-        engineForce: carConfig.engineForce,
-        boostActive,
-        boostMultiplier: boostConfig.engineForceMultiplier,
-        controlScale,
-        forwardSpeed,
-        maxForwardSpeed,
-        launchBoostThreshold: handlingConfig.launchBoostThreshold,
-        launchForceMultiplier: handlingConfig.launchForceMultiplier
-      });
-      velocity.addScaledVector(forward, force * deltaSeconds);
-    }
-
-    if (state.brake > 0) {
-      if (forwardSpeed > 1.2) {
-        const brakeForce = state.drifting
-          ? carConfig.brakeForce * handlingConfig.driftBrakeMultiplier
-          : carConfig.brakeForce;
-        velocity.addScaledVector(forward, -brakeForce * deltaSeconds);
-      } else if (forwardSpeed > -carConfig.maxReverseSpeed) {
-        velocity.addScaledVector(forward, -carConfig.reverseForce * deltaSeconds);
-      }
-    }
-
-    let lateralSpeed = velocity.dot(right);
-    const grip = state.onRoad
-      ? state.drifting ? carConfig.roadGrip * handlingConfig.driftGripMultiplier : carConfig.roadGrip
-      : carConfig.grassGrip;
-    velocity.addScaledVector(right, -lateralSpeed * Math.min(1, grip * deltaSeconds));
-
-    velocity.multiplyScalar(calculateDriveRetention({
-      deltaSeconds,
-      speedSquared: velocity.lengthSq(),
-      rollingResistance: carConfig.rollingResistance,
-      drag: carConfig.drag,
-      onRoad: state.onRoad,
-      throttleActive: state.throttle > 0,
-      boostActive
-    }));
-
-    if (!state.onRoad) {
-      velocity.multiplyScalar(Math.max(0, 1 - handlingConfig.grassDragMultiplier * deltaSeconds));
-    }
-
-    const speed = velocity.length();
-    const speedSign = forwardSpeed >= 0 ? 1 : -1;
-    const lowSpeedBlend = 1 - clamp(speed / handlingConfig.highSpeedSteerStart, 0, 1);
-    const highSpeedBlend = clamp(
-      (speed - handlingConfig.highSpeedSteerStart)
-        / (handlingConfig.highSpeedSteerEnd - handlingConfig.highSpeedSteerStart),
-      0,
-      1
-    );
-    const steerFactor = Math.max(
-      handlingConfig.steerFactorFloor,
-      handlingConfig.lowSpeedSteerBoost * lowSpeedBlend
-        + (1 - highSpeedBlend) * (1 - lowSpeedBlend)
-        + handlingConfig.highSpeedSteerMin * highSpeedBlend
-    );
-    const driftTurnBonus = state.drifting ? handlingConfig.driftTurnMultiplier : 1;
-    const turnRate = state.steering * carConfig.maxSteerRate * steerFactor * speedSign * driftTurnBonus;
-    state.heading += turnRate * deltaSeconds;
-
-    if (state.drifting) {
-      state.heading += state.steering * handlingConfig.driftYawAssist * deltaSeconds;
-    }
-
-    const headingForward = forwardVector();
-    const speedAlongHeading = velocity.dot(headingForward);
-    const maxSpeed = speedAlongHeading >= 0 ? maxForwardSpeed : carConfig.maxReverseSpeed;
-    if (speed > maxSpeed) {
-      velocity.multiplyScalar(maxSpeed / speed);
-    }
-
-    physics.playerBody.setRotation(rapierRotationFromYaw(state.heading), true);
-    physics.playerBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
-    physics.playerBody.setLinvel(
-      {
-        x: velocity.x,
-        y: clamp(verticalVelocity, -12, 12),
-        z: velocity.y
-      },
-      true
-    );
   }
 
   function drainPhysicsEvents() {
@@ -5468,214 +5489,20 @@ export function createRacingGame({
       const otherHandle = handle1 === physics.playerCollider.handle ? handle2 : handle1;
       const tag = physics.colliderTags.get(otherHandle);
       const current = physics.playerBody.linvel();
-      let responseVelocity = null;
-      let impactNormal = null;
-      const headingBeforeImpact = state.heading;
-
-      if (tag === "rail") {
-        impactNormal = currentRailImpactNormal();
-        responseVelocity = resolveRailImpactVelocity(
-          new THREE.Vector2(current.x, current.z),
-          impactNormal
-        );
-        separatePlayerFromImpact(impactNormal, 0.18);
-        physics.playerBody.setLinvel({ x: responseVelocity.x, y: current.y, z: responseVelocity.y }, true);
-        state.boostSeconds = 0;
-        state.drifting = false;
-        state.stoppedByImpactSeconds = Math.max(state.stoppedByImpactSeconds, collisionConfig.stopSeconds);
-      } else if (tag === "opponent" && raceState.opponentEnabled) {
-        const opponentDelta = state.position.clone().sub(opponentState.position).normalize();
-        impactNormal = opponentDelta.lengthSq() > 0.0001 ? opponentDelta : forwardVector();
-        responseVelocity = resolveOpponentCarImpactVelocity(
-          new THREE.Vector2(current.x, current.z),
-          impactNormal,
-          opponentState.currentSpeed
-        );
-        physics.playerBody.setLinvel({ x: responseVelocity.x, y: current.y, z: responseVelocity.y }, true);
-        state.boostSeconds = 0;
-        state.drifting = false;
-        state.stoppedByImpactSeconds = Math.max(state.stoppedByImpactSeconds, collisionConfig.carStopSeconds);
-        opponentState.collisionHoldSeconds = Math.max(
-          opponentState.collisionHoldSeconds,
-          collisionConfig.opponentPauseSeconds
-        );
-        applyOpponentCollisionReaction(impactNormal);
-      } else if (tag?.type === "traffic" && isFreeDrive) {
-        const traffic = freeDriveTraffic[tag.index];
-        if (!traffic) return;
-        const result = applyFreeDriveTrafficCollision(traffic, current);
-        impactNormal = result.impactNormal;
-        responseVelocity = result.responseVelocity;
-      }
-
-      if (responseVelocity) {
-        applyCollisionHeading(responseVelocity);
-        recordCollisionDebug({
-          tag: tag?.type === "traffic" ? "traffic" : tag ?? "unknown",
-          handle: otherHandle,
-          currentVelocity: new THREE.Vector2(current.x, current.z),
-          responseVelocity,
-          impactNormal,
-          headingBefore: headingBeforeImpact,
-          headingAfter: state.heading
-        });
-      }
-    });
-  }
-
-  function resolveFreeDriveTrafficContacts() {
-    if (!isFreeDrive || !physics?.playerBody) return;
-    for (const traffic of freeDriveTraffic) {
-      if (freeDriveJumpState.airborne || traffic.airborne) continue;
-      if (traffic.contactCooldownSeconds > 0) continue;
-      const delta = state.position.clone().sub(traffic.position);
-      const forward = new THREE.Vector2(Math.sin(traffic.heading), Math.cos(traffic.heading));
-      const right = new THREE.Vector2(forward.y, -forward.x);
-      const longitudinal = Math.abs(delta.dot(forward));
-      const lateral = Math.abs(delta.dot(right));
-      if (longitudinal > physicsConfig.carHalfLength * 1.82 || lateral > physicsConfig.carHalfWidth * 1.72) continue;
-      const current = physics.playerBody.linvel();
-      const result = applyFreeDriveTrafficCollision(traffic, current);
-      applyCollisionHeading(result.responseVelocity);
+      const velocity = new THREE.Vector2(current.x, current.z);
+      const impactNormal = velocity.lengthSq() > 0.0001
+        ? velocity.clone().normalize().multiplyScalar(-1)
+        : forwardVector().multiplyScalar(-1);
       recordCollisionDebug({
-        tag: "traffic",
-        handle: traffic.collider.handle,
-        currentVelocity: new THREE.Vector2(current.x, current.z),
-        responseVelocity: result.responseVelocity,
-        impactNormal: result.impactNormal,
+        tag: tag?.type === "traffic" ? "traffic" : tag ?? "unknown",
+        handle: otherHandle,
+        currentVelocity: velocity,
+        responseVelocity: velocity,
+        impactNormal,
         headingBefore: state.heading,
         headingAfter: state.heading
       });
-      break;
-    }
-  }
-
-  function applyFreeDriveTrafficCollision(traffic, currentVelocity) {
-    const trafficDelta = state.position.clone().sub(traffic.position);
-    const impactNormal = trafficDelta.lengthSq() > 0.0001 ? trafficDelta.normalize() : forwardVector();
-    const responseVelocity = resolveOpponentCarImpactVelocity(
-      new THREE.Vector2(currentVelocity.x, currentVelocity.z),
-      impactNormal,
-      traffic.currentSpeed
-    );
-    physics.playerBody.setLinvel({ x: responseVelocity.x, y: currentVelocity.y, z: responseVelocity.y }, true);
-    separatePlayerFromImpact(impactNormal, 0.2);
-    state.boostSeconds = 0;
-    state.drifting = false;
-    state.stoppedByImpactSeconds = Math.max(state.stoppedByImpactSeconds, collisionConfig.carStopSeconds);
-    traffic.collisionHoldSeconds = Math.max(traffic.collisionHoldSeconds, 0.72);
-    traffic.contactCooldownSeconds = 0.55;
-    return { impactNormal, responseVelocity };
-  }
-
-  function currentRailImpactNormal() {
-    const sample = trackSamples[state.trackIndex];
-    const delta = state.position.clone().sub(sample.center);
-    const side = Math.sign(delta.dot(sample.normal)) || 1;
-    return sample.normal.clone().multiplyScalar(side).normalize();
-  }
-
-  function resolveRailImpactVelocity(velocity, surfaceNormal) {
-    const trackTangent = trackSamples[state.trackIndex].tangent.clone();
-    const tangentDirection = velocity.dot(trackTangent) >= 0 ? 1 : -1;
-    const slideDirection = trackTangent.multiplyScalar(tangentDirection);
-    const forwardTrackSpeed = Math.abs(velocity.dot(slideDirection));
-    const slideFloor = state.throttle > 0.1
-      ? railImpactConfig.throttleSlideFloor
-      : railImpactConfig.coastSlideFloor;
-    const slideVelocity = slideDirection.multiplyScalar(
-      Math.max(forwardTrackSpeed * railImpactConfig.slideSpeedRetention, slideFloor)
-    );
-    const bounceVelocity = resolveImpactVelocity(
-      velocity,
-      surfaceNormal,
-      railImpactConfig.tangentDamping,
-      railImpactConfig.bounceFactor
-    );
-
-    return clampVector2Length(
-      slideVelocity.add(bounceVelocity),
-      playerMaxForwardSpeed() * railImpactConfig.maxSpeedMultiplier
-    );
-  }
-
-  function resolveOpponentCarImpactVelocity(velocity, surfaceNormal, opponentForwardSpeed) {
-    const trackTangent = trackSamples[state.trackIndex].tangent.clone();
-    const tangentDirection = velocity.dot(trackTangent) >= 0 ? 1 : -1;
-    const forwardDirection = trackTangent.multiplyScalar(tangentDirection);
-    const currentForwardSpeed = Math.abs(velocity.dot(forwardDirection));
-    const preservedForwardSpeed = Math.max(
-      currentForwardSpeed * collisionConfig.playerOpponentForwardRetention,
-      Math.min(collisionConfig.playerOpponentMinForwardSpeed, playerMaxForwardSpeed() * 0.22)
-    );
-    const shoveDirection = surfaceNormal.clone().normalize();
-    const relativeSpeedBoost = clamp(opponentForwardSpeed / Math.max(opponentConfig.speed, 0.0001), 0.7, 1.3);
-    const shoveVelocity = shoveDirection.multiplyScalar(collisionConfig.playerOpponentSideShove * relativeSpeedBoost);
-    const bounceVelocity = resolveImpactVelocity(velocity, surfaceNormal, 0.58, 0.2);
-
-    return clampVector2Length(forwardDirection
-      .multiplyScalar(preservedForwardSpeed)
-      .add(shoveVelocity)
-      .add(bounceVelocity), playerMaxForwardSpeed() * 0.78);
-  }
-
-  function clampVector2Length(vector, maxLength) {
-    const length = vector.length();
-    return length > maxLength && length > 0 ? vector.multiplyScalar(maxLength / length) : vector;
-  }
-
-  function separatePlayerFromImpact(surfaceNormal, distance) {
-    if (!physics?.playerBody || distance <= 0) {
-      return;
-    }
-
-    const translation = physics.playerBody.translation();
-    physics.playerBody.setTranslation(
-      {
-        x: translation.x + surfaceNormal.x * distance,
-        y: translation.y,
-        z: translation.z + surfaceNormal.y * distance
-      },
-      true
-    );
-  }
-
-  function applyCollisionHeading(responseVelocity) {
-    const responseSpeed = responseVelocity.length();
-    if (responseSpeed < collisionConfig.headingResponseMinSpeed) {
-      return;
-    }
-
-    const targetHeading = Math.atan2(responseVelocity.x, responseVelocity.y);
-    const headingDelta = shortestAngleDelta(state.heading, targetHeading);
-    if (Math.abs(headingDelta) >= collisionConfig.headingIgnoreAngle) {
-      return;
-    }
-
-    state.heading = normalizeAngle(
-      state.heading + clamp(headingDelta, -collisionConfig.headingCorrectionMax, collisionConfig.headingCorrectionMax)
-    );
-  }
-
-  function applyOpponentCollisionReaction(impactNormal) {
-    const sample = trackProfileAtProgress(opponentState.progress);
-    const lateralRelation = impactNormal.dot(sample.normal);
-    const fallbackLateral = state.velocity.dot(sample.normal);
-    const shoveDirection = Math.abs(lateralRelation) > 0.14
-      ? -Math.sign(lateralRelation)
-      : -(Math.sign(fallbackLateral) || 1);
-
-    opponentState.currentSpeed = Math.max(0, opponentState.currentSpeed - collisionConfig.opponentSpeedLoss);
-    opponentState.collisionLaneOffset = clamp(
-      opponentState.collisionLaneOffset + shoveDirection * collisionConfig.opponentLaneKick,
-      -sample.railLimit * 0.55,
-      sample.railLimit * 0.55
-    );
-    opponentState.collisionYawOffset = clamp(
-      opponentState.collisionYawOffset + shoveDirection * collisionConfig.opponentYawKick,
-      -0.5,
-      0.5
-    );
+    });
   }
 
   function recordCollisionDebug({
@@ -5699,17 +5526,6 @@ export function createRacingGame({
         ? `${impactNormal.x.toFixed(2)}, ${impactNormal.y.toFixed(2)}`
         : "--"
     };
-  }
-
-  function resolveImpactVelocity(velocity, surfaceNormal, tangentDamping, bounceFactor) {
-    const normal = surfaceNormal.clone().normalize();
-    const tangent = new THREE.Vector2(-normal.y, normal.x);
-    const normalSpeed = velocity.dot(normal);
-    const tangentSpeed = velocity.dot(tangent);
-    const bouncedNormalSpeed = normalSpeed > 0 ? -normalSpeed * bounceFactor : normalSpeed * 0.2;
-
-    return tangent.multiplyScalar(tangentSpeed * tangentDamping)
-      .add(normal.multiplyScalar(bouncedNormalSpeed));
   }
 
   function updateRaceState(deltaSeconds) {
@@ -5842,7 +5658,6 @@ export function createRacingGame({
     raceState.playerPlace = winner === "player" ? 1 : 2;
     raceState.settleSeconds = 0;
     state.boostSeconds = 0;
-    state.drifting = false;
     keyState.delete("KeyW");
     keyState.delete("ArrowUp");
     keyState.delete("KeyS");
@@ -5865,7 +5680,6 @@ export function createRacingGame({
     raceState.playerPlace = winner === "player" ? 1 : 2;
     state.velocity.set(0, 0);
     state.boostSeconds = 0;
-    state.drifting = false;
     keyState.clear();
     physics?.playerBody?.setLinvel({ x: 0, y: 0, z: 0 }, true);
     physics?.playerBody?.setAngvel({ x: 0, y: 0, z: 0 }, true);
@@ -5874,61 +5688,31 @@ export function createRacingGame({
   }
 
   function updateCarTransform(deltaSeconds = 0) {
-    const roadElevation = freeDriveJumpState.airborne
-      ? freeDriveJumpState.takeoffElevation
-      : state.onRoad
-        ? freeDriveElevationAtProgress(state.trackProgress)
-        : freeDriveGroundElevationAt(state.position, state.trackProgress);
-    const physicsElevation = freeDriveJumpState.airborne && physics?.playerBody
-      ? Math.max(0, physics.playerBody.translation().y - physicsConfig.fixedHeight)
-      : 0;
-    const targetElevation = roadElevation + physicsElevation;
-    const elevationFollow = 1 - Math.exp(-Math.max(deltaSeconds, 1 / 120) * (state.onRoad ? 10 : 3.2));
-    playerVisualElevation += (targetElevation - playerVisualElevation) * elevationFollow;
-    car.position.set(state.position.x, playerVisualElevation, state.position.y);
-    car.rotation.set(0, state.heading, 0);
+    if (!physics?.playerBody) return;
+    const translation = physics.playerBody.translation();
+    const rotation = physics.playerBody.rotation();
+    tempQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+    const chassisUp = new THREE.Vector3(0, 1, 0).applyQuaternion(tempQuaternion);
+    car.position
+      .set(translation.x, translation.y, translation.z)
+      .addScaledVector(chassisUp, -physicalVehicleConfig.visualGroundOffset);
+    car.quaternion.copy(tempQuaternion);
+    playerVisualElevation = car.position.y;
 
     const visualRoot = car.userData.visualRoot;
     if (visualRoot) {
-      const speedRatio = clamp(state.velocity.length() / Math.max(playerMaxForwardSpeed(), 0.001), 0, 1);
-      const forward = forwardVector();
-      const rampSampleDistance = 0.75;
-      const rampRiseAhead = freeDriveJumpRampRise({
-        x: state.position.x + forward.x * rampSampleDistance,
-        y: state.position.y + forward.y * rampSampleDistance
-      }) + freeDriveStuntRampRise({
-        x: state.position.x + forward.x * rampSampleDistance,
-        y: state.position.y + forward.y * rampSampleDistance
-      });
-      const rampRiseBehind = freeDriveJumpRampRise({
-        x: state.position.x - forward.x * rampSampleDistance,
-        y: state.position.y - forward.y * rampSampleDistance
-      }) + freeDriveStuntRampRise({
-        x: state.position.x - forward.x * rampSampleDistance,
-        y: state.position.y - forward.y * rampSampleDistance
-      });
-      const rampPitch = Math.atan2(rampRiseAhead - rampRiseBehind, rampSampleDistance * 2);
-      const verticalSpeed = freeDriveJumpState.airborne && physics?.playerBody
-        ? physics.playerBody.linvel().y
-        : 0;
-      const flightPitch = freeDriveJumpState.airborne
-        ? Math.atan2(verticalSpeed, Math.max(8, state.velocity.length())) * 0.72
-        : 0;
-      const targetPitch = (state.brake * 0.075 - state.throttle * 0.035) * speedRatio
-        - rampPitch
-        - flightPitch;
-      const targetRoll = -state.steering
-        * Math.min(0.17, state.velocity.length() * 0.0052)
-        * (state.drifting ? 1.32 : 1);
-      const response = 1 - Math.exp(-Math.max(deltaSeconds, 1 / 120) * 8.5);
-      visualRoot.rotation.x += (targetPitch - visualRoot.rotation.x) * response;
-      visualRoot.rotation.z += (targetRoll - visualRoot.rotation.z) * response;
-      visualRoot.position.y = (racingSceneConfig.groundOffset ?? 0)
-        + Math.sin(wheelSpinAngle * 0.22) * speedRatio * 0.012;
+      visualRoot.rotation.set(0, 0, 0);
+      visualRoot.position.y = racingSceneConfig.groundOffset ?? 0;
     }
 
-    const forwardSpeed = state.velocity.dot(forwardVector());
-    wheelSpinAngle += (forwardSpeed / 0.36) * deltaSeconds;
+    const controller = physics.playerVehicle?.controller;
+    if (controller?.numWheels()) {
+      let rotationSum = 0;
+      for (let index = 0; index < controller.numWheels(); index += 1) {
+        rotationSum += controller.wheelRotation(index) ?? 0;
+      }
+      wheelSpinAngle = rotationSum / controller.numWheels();
+    }
     animateWheelNodes(car.userData.wheelNodes, wheelSpinAngle);
   }
 
@@ -5946,17 +5730,22 @@ export function createRacingGame({
       return;
     }
 
+    const support = resolveSurfaceSupport(
+      opponentState.position,
+      opponentState.heading,
+      Math.round(opponentState.progress * trackConfig.samples)
+    );
     opponentCar.position.set(
       opponentState.position.x,
-      freeDriveElevationAtProgress(opponentState.progress),
+      support.height ?? 0,
       opponentState.position.y
     );
     opponentCar.rotation.set(0, opponentState.heading, 0);
 
     const visualRoot = opponentCar.userData.visualRoot;
     if (visualRoot) {
-      visualRoot.rotation.x = -Math.abs(opponentState.collisionYawOffset) * 0.08;
-      visualRoot.rotation.z = -opponentState.collisionYawOffset * 0.55;
+      visualRoot.rotation.x = support.pitch - Math.abs(opponentState.collisionYawOffset) * 0.08;
+      visualRoot.rotation.z = support.roll - opponentState.collisionYawOffset * 0.55;
     }
   }
 
@@ -5971,13 +5760,20 @@ export function createRacingGame({
       return;
     }
 
-    const playerBodyHeight = physicsConfig.fixedHeight;
+    const playerBodyHeight = physics?.playerBody?.translation().y ?? physicsConfig.fixedHeight;
     collisionDebug.playerWire.position.set(state.position.x, playerBodyHeight, state.position.y);
-    collisionDebug.playerWire.rotation.set(0, state.heading, 0);
+    if (physics?.playerBody) {
+      const rotation = physics.playerBody.rotation();
+      collisionDebug.playerWire.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+    }
 
     collisionDebug.opponentWire.visible = raceState.opponentEnabled;
     if (raceState.opponentEnabled) {
-      collisionDebug.opponentWire.position.set(opponentState.position.x, playerBodyHeight, opponentState.position.y);
+      collisionDebug.opponentWire.position.set(
+        opponentState.position.x,
+        physics?.opponentBody?.translation().y ?? playerBodyHeight,
+        opponentState.position.y
+      );
       collisionDebug.opponentWire.rotation.set(0, opponentState.heading, 0);
     }
 
@@ -6048,11 +5844,6 @@ export function createRacingGame({
   }
 
   function updateCollisionDebugHud() {
-    if (!collisionDebug.enabled) {
-      updateCollisionDebugVisibility();
-      return;
-    }
-
     const hud = ensureCollisionDebugHud();
     const headingDegrees = THREE.MathUtils.radToDeg(state.heading);
     const velocityHeading = state.velocity.lengthSq() > 0.0001
@@ -6068,15 +5859,30 @@ export function createRacingGame({
           `impact ${lastCollision.impactNormalLabel}`
         ]
       : ["last none"];
+    const physicalVehicleLines = [
+      "PHYSICAL VEHICLE",
+      `wheel contact ${physics?.playerVehicle?.contactCount ?? 0}/4`,
+      `suspension ${(physics?.playerVehicle?.suspensionLengths ?? [])
+        .map((length) => length.toFixed(2))
+        .join(" / ")}`,
+      `steer ${THREE.MathUtils.radToDeg(
+        physics?.playerVehicle?.steeringAngle ?? 0
+      ).toFixed(1)} deg`
+    ];
+    const playerHalfWidth = physicalVehicleConfig.chassisHalfWidth;
+    const playerHalfHeight = physicalVehicleConfig.chassisHalfHeight;
+    const playerHalfLength = physicalVehicleConfig.chassisHalfLength;
 
     hud.textContent = [
-      "Collision Debug  [F2]",
-      `preset ${drivingFeelPreset.id}`,
+      "Physics Telemetry  [F2]",
+      ...physicalVehicleLines,
       `onRoad ${state.onRoad ? "yes" : "no"}  paused ${raceState.paused ? "yes" : "no"}`,
+      `surface ${playerSurfaceState.surfaceId ?? "none"}  contacts ${playerSurfaceState.contacts.length}/4`,
+      `height ${playerSurfaceState.height.toFixed(2)}  pitch ${THREE.MathUtils.radToDeg(playerSurfaceState.pitch).toFixed(1)}  roll ${THREE.MathUtils.radToDeg(playerSurfaceState.roll).toFixed(1)}`,
       `speed ${(state.velocity.length() * 3.6).toFixed(0)} km/h`,
       `heading ${headingDegrees.toFixed(1)} deg`,
       `velocity ${velocityHeading === null ? "--" : velocityHeading.toFixed(1)} deg`,
-      `player box ${(physicsConfig.carHalfWidth * 2).toFixed(2)} x ${(physicsConfig.carHalfHeight * 2).toFixed(2)} x ${(physicsConfig.carHalfLength * 2).toFixed(2)}`,
+      `player box ${(playerHalfWidth * 2).toFixed(2)} x ${(playerHalfHeight * 2).toFixed(2)} x ${(playerHalfLength * 2).toFixed(2)}`,
       ...lastCollisionLines
     ].join("\n");
     updateCollisionDebugVisibility();
@@ -6104,11 +5910,11 @@ export function createRacingGame({
     const elevation = playerVisualElevation;
     const target = new THREE.Vector3(state.position.x, cameraConfig.targetHeight + elevation, state.position.y)
       .addScaledVector(forward, dynamicLookAhead)
-      .addScaledVector(right, state.steering * speedRatio * (state.drifting ? 0.85 : 0.3));
+      .addScaledVector(right, state.steering * speedRatio * 0.3);
     const desired = new THREE.Vector3(state.position.x, elevation, state.position.y)
       .addScaledVector(forward, -cameraConfig.followDistance)
       .addScaledVector(forward, -boostCameraKick * 0.9)
-      .addScaledVector(right, -state.steering * speedRatio * (state.drifting ? 1.25 : 0.42))
+      .addScaledVector(right, -state.steering * speedRatio * 0.42)
       .add(new THREE.Vector3(0, cameraConfig.height + Math.sin(wheelSpinAngle * 0.16) * speedRatio * 0.035, 0));
 
     const follow = 1 - Math.exp(-deltaSeconds * cameraConfig.followTightness);
@@ -6204,10 +6010,6 @@ export function createRacingGame({
       return "加速中";
     }
 
-    if (state.drifting) {
-      return "漂移中";
-    }
-
     if (!state.onRoad) {
       return "草地减速";
     }
@@ -6223,6 +6025,7 @@ export function createRacingGame({
     hideResultOverlay();
     pauseOverlay.hidden = true;
     collisionDebug.lastCollision = null;
+    physicsAccumulator = 0;
 
     const start = trackProfileAtProgress(raceConfig.startProgress);
     const startPosition = start.center.clone().add(start.normal.clone().multiplyScalar(2.8));
@@ -6250,8 +6053,7 @@ export function createRacingGame({
     state.lapArmed = false;
     state.boostSeconds = 0;
     state.boostCharges = boostConfig.charges;
-    state.drifting = false;
-    playerVisualElevation = freeDriveElevationAtProgress(raceConfig.startProgress);
+    playerVisualElevation = 0;
 
     opponentState.progress = opponentConfig.startProgress;
     opponentState.laneOffset = opponentConfig.laneOffset;
@@ -6283,6 +6085,7 @@ export function createRacingGame({
     syncOpponentPose();
     resetFreeDriveTraffic();
     setPlayerBodyPose(startPosition, start.heading);
+    playerVisualElevation = playerSurfaceState.height;
     setOpponentBodyPose(opponentState.position, opponentState.heading);
     if (physics?.opponentCollider) {
       physics.opponentCollider.setEnabled(raceState.opponentEnabled);
@@ -6643,7 +6446,7 @@ export function createRacingGame({
   }
 
   function playerMaxForwardSpeed() {
-    return carConfig.maxForwardSpeed * (state.boostSeconds > 0 ? boostConfig.topSpeedMultiplier : 1);
+    return physicalDrivingConfig.maxForwardSpeed * (state.boostSeconds > 0 ? boostConfig.topSpeedMultiplier : 1);
   }
 
   function formatLapDisplay(completedLaps) {
@@ -6753,7 +6556,6 @@ export function createRacingGame({
     state.onRoad = true;
     state.stoppedByImpactSeconds = 0;
     state.boostSeconds = 0;
-    state.drifting = false;
     syncPlayerTrackMetrics();
     state.previousTrackIndex = state.trackIndex;
     setOpponentBodyPose(opponentState.position, opponentState.heading);
@@ -6791,13 +6593,41 @@ export function createRacingGame({
     state.brake = 0;
     state.stoppedByImpactSeconds = 0;
     state.boostSeconds = 0;
-    state.drifting = false;
     syncPlayerTrackMetrics();
     setPlayerBodyPose(position, heading);
     state.velocity.set(direction * 12, 0);
     physics.playerBody.setLinvel({ x: direction * 12, y: 0, z: 0 }, true);
     updateCarTransform();
     updateCamera(1);
+    renderer.render(scene, camera);
+    return true;
+  }
+
+  function placeWorldScenario(requestedX, requestedZ, requestedHeading = 0) {
+    if (!isFreeDrive || !physics?.playerBody) return false;
+    const x = Number(requestedX);
+    const z = Number(requestedZ);
+    const heading = Number(requestedHeading);
+    if (![x, z, heading].every(Number.isFinite)) return false;
+
+    const position = new THREE.Vector2(x, z);
+    state.position.copy(position);
+    state.previousPosition.copy(position);
+    state.velocity.set(0, 0);
+    state.heading = heading;
+    cameraHeading = heading;
+    state.steering = 0;
+    state.throttle = 0;
+    state.brake = 0;
+    state.stoppedByImpactSeconds = 0;
+    state.boostSeconds = 0;
+    syncPlayerTrackMetrics();
+    setPlayerBodyPose(position, heading);
+    syncPlayerPhysicsState(state.trackIndex);
+    updateCarTransform();
+    updateCamera(1);
+    updateCollisionDebugVisuals();
+    updateCollisionDebugHud();
     renderer.render(scene, camera);
     return true;
   }

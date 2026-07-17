@@ -4,12 +4,11 @@ import test from "node:test";
 import {
   FREE_DRIVE_JUMP,
   FREE_DRIVE_STUNT_JUMP,
+  createFreeDriveStuntRampColliderSpecs,
   freeDriveStuntRampRise,
   freeDriveJumpRampRise,
   isFreeDriveJumpGap,
-  resolveFreeDriveJumpLaunch,
-  resolveFreeDriveStuntBoost,
-  resolveFreeDriveStuntLaunch
+  resolveFreeDriveJumpLaunch
 } from "../racing-jump-rules.mjs";
 
 test("两座大桥都切开中央桥面", () => {
@@ -52,24 +51,13 @@ test("断桥旁草地上有一对相向的等高特技坡道", () => {
   assert.equal(freeDriveStuntRampRise({ x: FREE_DRIVE_STUNT_JUMP.leftTakeoffX, y }), FREE_DRIVE_STUNT_JUMP.rampRise);
   assert.equal(freeDriveStuntRampRise({ x: FREE_DRIVE_STUNT_JUMP.rightTakeoffX, y }), FREE_DRIVE_STUNT_JUMP.rampRise);
   assert.equal(freeDriveStuntRampRise({ x: FREE_DRIVE_STUNT_JUMP.rightRampEndX, y }), 0);
-  assert.equal(resolveFreeDriveStuntBoost({ x: 168, y }, { x: 10, y: 0 }), 1);
-  assert.equal(resolveFreeDriveStuntBoost({ x: 212, y }, { x: -10, y: 0 }), -1);
 });
 
-test("草地坡道飞跃对面坡道后才落地", () => {
-  const y = FREE_DRIVE_STUNT_JUMP.centerY;
-  for (const [position, velocity] of [
-    [{ x: 177, y }, { x: 20, y: 0 }],
-    [{ x: 203, y }, { x: -20, y: 0 }]
-  ]) {
-    const launch = resolveFreeDriveStuntLaunch(position, velocity);
-    assert.ok(launch);
-    const flightDistance = Math.abs(launch.horizontalSpeed)
-      * (2 * launch.verticalSpeed / FREE_DRIVE_STUNT_JUMP.gravity);
-    assert.ok(Math.abs(flightDistance - Math.abs(launch.landingX - position.x)) < 0.01);
-    const peakHeight = launch.verticalSpeed ** 2 / (2 * FREE_DRIVE_STUNT_JUMP.gravity);
-    assert.ok(peakHeight > 6.5);
-    if (launch.direction > 0) assert.ok(launch.landingX > FREE_DRIVE_STUNT_JUMP.rightRampEndX);
-    else assert.ok(launch.landingX < FREE_DRIVE_STUNT_JUMP.leftRampStartX);
-  }
+test("特技坡道为物理车辆提供与视觉坡面一致的碰撞体", () => {
+  const colliders = createFreeDriveStuntRampColliderSpecs();
+  assert.equal(colliders.length, 2);
+  assert.deepEqual(colliders.map((collider) => collider.tag), ["stunt-ramp", "stunt-ramp"]);
+  assert.deepEqual(colliders.map((collider) => collider.roll > 0 ? 1 : -1), [1, -1]);
+  assert.ok(colliders.every((collider) => collider.width > 20));
+  assert.ok(colliders.every((collider) => collider.depth === FREE_DRIVE_STUNT_JUMP.halfWidth * 2));
 });

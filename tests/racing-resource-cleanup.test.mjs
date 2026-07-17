@@ -184,10 +184,15 @@ test("disposePhysicsState frees rapier resources and clears live handles", () =>
     },
     world: {
       freeCalls: 0,
+      removedVehicleController: null,
+      removeVehicleController(controller) {
+        this.removedVehicleController = controller;
+      },
       free() {
         this.freeCalls += 1;
       }
     },
+    playerVehicle: { controller: { handle: "vehicle" } },
     playerBody: {},
     playerCollider: {},
     opponentBody: {},
@@ -199,6 +204,8 @@ test("disposePhysicsState frees rapier resources and clears live handles", () =>
   assert.equal(physics.colliderTags.size, 0);
   assert.equal(physics.eventQueue.freeCalls, 1);
   assert.equal(physics.world.freeCalls, 1);
+  assert.deepEqual(physics.world.removedVehicleController, { handle: "vehicle" });
+  assert.equal(physics.playerVehicle, null);
   assert.equal(physics.playerBody, null);
   assert.equal(physics.playerCollider, null);
   assert.equal(physics.opponentBody, null);
