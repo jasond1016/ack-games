@@ -36,6 +36,7 @@ import {
 } from "./racing-session.mjs";
 import { createBrowserRacingClock, createBrowserRacingInput } from "./racing-runtime-adapters.mjs";
 import { createResourceLeaseCache } from "./racing-resource-leases.mjs";
+import { createRacingAudioController } from "./racing-audio.mjs";
 import {
   shouldActivateComputerBoost
 } from "./racing-driving-dynamics.mjs";
@@ -185,6 +186,7 @@ export function createRacingGame({
   const resultOpponentValue = document.getElementById("racingResultOpponentValue");
   const finishCinematic = createRacingFinishCinematic({ overlay: resultOverlay, canvas: finishCanvas });
   const playAgainButton = document.getElementById("racingPlayAgainButton");
+  const racingAudio = createRacingAudioController();
   let selectedCarId = getRacingCarById(startConfig.playerCarId).id;
   let cameraMode = startConfig.cameraMode;
   let session = null;
@@ -192,8 +194,12 @@ export function createRacingGame({
   let activeSnapshot = initialSnapshot;
   let lockedResult = null;
   let random = initialSnapshot ? createSeededRandom(initialSnapshot.randomSeed) : Math.random;
-  const handleResumeButtonClick = () => setPaused(false);
+  const handleResumeButtonClick = () => {
+    void racingAudio.resume();
+    setPaused(false);
+  };
   const handleStartRaceButtonClick = () => {
+    void racingAudio.resume();
     beginRace();
   };
   const handleStartEditorButtonClick = () => {
@@ -217,6 +223,7 @@ export function createRacingGame({
   const input = createBrowserRacingInput({
     onDrive(code, pressed) {
       if (isStartOverlayVisible() || raceState.paused) return;
+      if (pressed) void racingAudio.resume();
       if (pressed) keyState.add(code);
       else keyState.delete(code);
     },
@@ -224,6 +231,7 @@ export function createRacingGame({
       if (!isStartOverlayVisible()) setPaused(!raceState.paused);
     },
     onBoost: () => {
+      void racingAudio.resume();
       if (isStartOverlayVisible()) {
         beginRace();
       } else if (raceState.resultVisible) {
@@ -559,6 +567,7 @@ export function createRacingGame({
         suspensionLengths: (physics?.playerVehicle?.suspensionLengths ?? [])
           .map((length) => Number(length.toFixed(2)))
       },
+      audio: racingAudio.getState(),
       randomSeed: activeSnapshot?.randomSeed ?? null,
       visualScale,
       collisionScale,
@@ -623,10 +632,12 @@ export function createRacingGame({
     void session?.destroy();
     session = null;
     sessionControls = null;
+    void racingAudio.suspend();
   }
 
   function destroy() {
     stop();
+    racingAudio.destroy();
     startRaceButton.removeEventListener("click", handleStartRaceButtonClick);
     startEditorButton.removeEventListener("click", handleStartEditorButtonClick);
     startHomeButton.removeEventListener("click", handleStartHomeButtonClick);
@@ -5237,6 +5248,7 @@ export function createRacingGame({
       updateCollisionDebugHud();
     }
 
+    updateRacingAudio();
     updateHud();
     renderer.render(scene, camera);
 
@@ -5292,6 +5304,16 @@ export function createRacingGame({
       ? physicalDrivingConfig.steeringReleaseResponse
       : physicalDrivingConfig.steeringResponse;
     state.steering += (targetSteer - state.steering) * steeringResponse;
+  }
+
+  function updateRacingAudio() {
+    racingAudio.update({
+      signedSpeed: physics?.playerVehicle?.speed ?? state.velocity.length(),
+      throttle: state.throttle,
+      boostActive: state.boostSeconds > 0,
+      enabled: active && !raceState.paused && !raceState.resultVisible,
+      maxForwardSpeed: playerMaxForwardSpeed()
+    });
   }
 
   function updateBoostEffect(timestamp) {
