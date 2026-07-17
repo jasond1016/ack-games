@@ -13,7 +13,10 @@ export function calculateRacingAudioState({
   throttle = 0,
   boostActive = false,
   enabled = true,
-  maxForwardSpeed = 50
+  maxForwardSpeed = 50,
+  engineRpm = null,
+  idleRpm = RACING_ENGINE_AUDIO.idleRpm,
+  maximumRpm = RACING_ENGINE_AUDIO.maximumRpm
 } = {}) {
   const speedRatio = clamp(Math.abs(signedSpeed) / Math.max(maxForwardSpeed, 0.001), 0, 1);
   const throttleAmount = clamp(throttle, 0, 1);
@@ -22,19 +25,22 @@ export function calculateRacingAudioState({
     0,
     1
   );
-  const rpm = RACING_ENGINE_AUDIO.idleRpm
-    + (RACING_ENGINE_AUDIO.maximumRpm - RACING_ENGINE_AUDIO.idleRpm) * rpmRatio;
+  const rpm = Number.isFinite(engineRpm)
+    ? clamp(engineRpm, idleRpm, maximumRpm)
+    : RACING_ENGINE_AUDIO.idleRpm
+      + (RACING_ENGINE_AUDIO.maximumRpm - RACING_ENGINE_AUDIO.idleRpm) * rpmRatio;
+  const resolvedRpmRatio = clamp((rpm - idleRpm) / Math.max(maximumRpm - idleRpm, 1), 0, 1);
   const ignitionFrequency = rpm / 60 * RACING_ENGINE_AUDIO.ignitionPulsesPerRevolution;
 
   return Object.freeze({
     rpm: Math.round(rpm),
-    rpmRatio,
+    rpmRatio: resolvedRpmRatio,
     ignitionFrequency,
     engineGain: enabled ? 0.045 + throttleAmount * 0.055 + speedRatio * 0.025 : 0,
-    harmonicGain: enabled ? 0.018 + rpmRatio * 0.035 : 0,
-    filterFrequency: 420 + rpmRatio * 2200,
+    harmonicGain: enabled ? 0.018 + resolvedRpmRatio * 0.035 : 0,
+    filterFrequency: 420 + resolvedRpmRatio * 2200,
     boostGain: enabled && boostActive ? 0.13 : 0,
-    boostFrequency: 72 + rpmRatio * 68,
+    boostFrequency: 72 + resolvedRpmRatio * 68,
     boostActive: Boolean(enabled && boostActive),
     enabled: Boolean(enabled)
   });

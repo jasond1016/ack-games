@@ -28,3 +28,15 @@ test("氮气启用独立喷流声，暂停时所有声部静音", () => {
   assert.equal(paused.harmonicGain, 0);
   assert.equal(paused.boostGain, 0);
 });
+
+test("存在动力系统转速时音效直接使用真实 RPM", () => {
+  const state = calculateRacingAudioState({
+    signedSpeed: 0,
+    throttle: 0,
+    engineRpm: 6420,
+    idleRpm: 850,
+    maximumRpm: 8500
+  });
+  assert.equal(state.rpm, 6420);
+  assert.ok(state.rpmRatio > 0.7);
+});

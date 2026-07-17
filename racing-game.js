@@ -612,6 +612,14 @@ export function createRacingGame({
         suspensionLengths: (physics?.playerVehicle?.suspensionLengths ?? [])
           .map((length) => Number(length.toFixed(2)))
       },
+      drivetrain: physics?.playerVehicle?.drivetrain ? {
+        gear: physics.playerVehicle.drivetrain.gear,
+        engineRpm: Math.round(physics.playerVehicle.drivetrain.engineRpm),
+        shiftSeconds: Number(physics.playerVehicle.drivetrain.shiftSeconds.toFixed(3)),
+        shiftCount: physics.playerVehicle.drivetrain.shiftCount,
+        torqueRatio: Number(physics.playerVehicle.drivetrain.torqueRatio.toFixed(3)),
+        clutch: Number(physics.playerVehicle.drivetrain.clutch.toFixed(3))
+      } : null,
       wheelAnimation: {
         wheelCount: car?.userData.wheelCount ?? 0,
         shaderBindings: car?.userData.wheelShaderBindings?.length ?? 0,
@@ -5634,12 +5642,17 @@ export function createRacingGame({
   }
 
   function updateRacingAudio() {
+    const drivetrain = physics?.playerVehicle?.drivetrain;
+    const vehicleSpec = playerVehicleSpec();
     racingAudio.update({
       signedSpeed: physics?.playerVehicle?.speed ?? state.velocity.length(),
       throttle: state.throttle,
       boostActive: state.boostSeconds > 0,
       enabled: active && !raceState.paused && !raceState.resultVisible,
-      maxForwardSpeed: playerMaxForwardSpeed()
+      maxForwardSpeed: playerMaxForwardSpeed(),
+      engineRpm: drivetrain?.engineRpm,
+      idleRpm: vehicleSpec.idleRpm,
+      maximumRpm: vehicleSpec.redlineRpm
     });
   }
 
