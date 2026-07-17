@@ -4,7 +4,7 @@ export const cloudflarePagesAssetGraph = Object.freeze({
       "index.html", "styles.css", "game.js", "game-lifecycle.mjs",
       "vacuum-game.js", "typing-garage-game.js", "bus-rush-prototype.js",
       "racing-car-config.js", "racing-editor.js",
-      "racing-audio.mjs", "racing-driving-dynamics.mjs", "racing-finish-cinematic.js", "racing-game.js", "racing-jump-rules.mjs", "racing-map-library-core.mjs",
+      "racing-audio.mjs", "racing-driving-dynamics.mjs", "racing-finish-cinematic.js", "racing-game.js", "racing-haptics.mjs", "racing-jump-rules.mjs", "racing-map-library-core.mjs",
       "racing-map-select.js", "racing-map.js",
       "racing-physical-vehicle.mjs", "racing-surface-contact.mjs",
       "racing-resource-cleanup.mjs", "racing-resource-leases.mjs",

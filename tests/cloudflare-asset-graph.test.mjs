@@ -8,6 +8,7 @@ test("Cloudflare asset graph is fail-closed and excludes repository internals", 
   assert.ok(plan.pagesFiles.includes("index.html"));
   assert.ok(plan.pagesFiles.includes("game-lifecycle.mjs"));
   assert.ok(plan.pagesFiles.includes("racing-audio.mjs"));
+  assert.ok(plan.pagesFiles.includes("racing-haptics.mjs"));
   assert.ok(plan.pagesFiles.includes("racing-driving-dynamics.mjs"));
   assert.ok(plan.pagesFiles.includes("racing-jump-rules.mjs"));
   assert.ok(plan.pagesFiles.includes("racing-physical-vehicle.mjs"));

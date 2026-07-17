@@ -37,6 +37,7 @@ import {
 import { createBrowserRacingClock, createBrowserRacingInput } from "./racing-runtime-adapters.mjs";
 import { createResourceLeaseCache } from "./racing-resource-leases.mjs";
 import { createRacingAudioController } from "./racing-audio.mjs";
+import { createRacingHapticsController } from "./racing-haptics.mjs";
 import {
   shouldActivateComputerBoost
 } from "./racing-driving-dynamics.mjs";
@@ -187,6 +188,7 @@ export function createRacingGame({
   const finishCinematic = createRacingFinishCinematic({ overlay: resultOverlay, canvas: finishCanvas });
   const playAgainButton = document.getElementById("racingPlayAgainButton");
   const racingAudio = createRacingAudioController();
+  const racingHaptics = createRacingHapticsController();
   let selectedCarId = getRacingCarById(startConfig.playerCarId).id;
   let cameraMode = startConfig.cameraMode;
   let session = null;
@@ -568,6 +570,7 @@ export function createRacingGame({
           .map((length) => Number(length.toFixed(2)))
       },
       audio: racingAudio.getState(),
+      haptics: racingHaptics.getState(),
       randomSeed: activeSnapshot?.randomSeed ?? null,
       visualScale,
       collisionScale,
@@ -633,6 +636,7 @@ export function createRacingGame({
     session = null;
     sessionControls = null;
     void racingAudio.suspend();
+    racingHaptics.stop();
   }
 
   function destroy() {
@@ -5249,6 +5253,7 @@ export function createRacingGame({
     }
 
     updateRacingAudio();
+    updateRacingHaptics();
     updateHud();
     renderer.render(scene, camera);
 
@@ -5313,6 +5318,20 @@ export function createRacingGame({
       boostActive: state.boostSeconds > 0,
       enabled: active && !raceState.paused && !raceState.resultVisible,
       maxForwardSpeed: playerMaxForwardSpeed()
+    });
+  }
+
+  function updateRacingHaptics() {
+    racingHaptics.update({
+      gamepadIndex: gamepadDrive.index ?? -1,
+      signedSpeed: physics?.playerVehicle?.speed ?? state.velocity.length(),
+      maxForwardSpeed: playerMaxForwardSpeed(),
+      throttle: state.throttle,
+      brake: state.brake,
+      boostActive: state.boostSeconds > 0,
+      grounded: playerSurfaceState.grounded,
+      surfaceId: playerSurfaceState.surfaceId,
+      enabled: active && !raceState.paused && !raceState.resultVisible
     });
   }
 
@@ -5512,6 +5531,9 @@ export function createRacingGame({
       const tag = physics.colliderTags.get(otherHandle);
       const current = physics.playerBody.linvel();
       const velocity = new THREE.Vector2(current.x, current.z);
+      if (velocity.length() > 1) {
+        racingHaptics.pulseImpact(clamp(velocity.length() / 24, 0.12, 1));
+      }
       const impactNormal = velocity.lengthSq() > 0.0001
         ? velocity.clone().normalize().multiplyScalar(-1)
         : forwardVector().multiplyScalar(-1);
