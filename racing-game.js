@@ -40,6 +40,12 @@ import { createRacingAudioController } from "./racing-audio.mjs";
 import { createRacingHapticsController } from "./racing-haptics.mjs";
 import { FREE_DRIVE_TUNNEL, createFreeDriveTunnelSegments } from "./racing-free-drive-features.mjs";
 import {
+  advanceWheelSpin,
+  createWheelAnimationState,
+  findWheelGeometryLayout,
+  isWheelVisualLabel
+} from "./racing-wheel-animation.mjs";
+import {
   shouldActivateComputerBoost
 } from "./racing-driving-dynamics.mjs";
 import {
@@ -571,6 +577,14 @@ export function createRacingGame({
         ).toFixed(1)),
         suspensionLengths: (physics?.playerVehicle?.suspensionLengths ?? [])
           .map((length) => Number(length.toFixed(2)))
+      },
+      wheelAnimation: {
+        wheelCount: car?.userData.wheelCount ?? 0,
+        shaderBindings: car?.userData.wheelShaderBindings?.length ?? 0,
+        spinAngle: Number((car?.userData.wheelAnimationState?.spinAngle ?? 0).toFixed(3)),
+        steeringDegrees: Number(THREE.MathUtils.radToDeg(
+          car?.userData.wheelAnimationState?.steeringAngle ?? 0
+        ).toFixed(1))
       },
       audio: racingAudio.getState(),
       haptics: racingHaptics.getState(),
@@ -4691,6 +4705,7 @@ export function createRacingGame({
       configureCarMaterials(model);
       applyConfiguredCarTint(model, carSpec, tint);
       visualRoot.add(model);
+      const wheelVisuals = configureModelWheelAnimation(model, visualRoot, carSpec);
       const box = new THREE.Box3().setFromObject(model);
       const size = box.getSize(new THREE.Vector3());
       const boostGroup = createBoostGroup(carSpec, size, box.min.z);
@@ -4700,6 +4715,8 @@ export function createRacingGame({
       group.userData.cameraMetrics = { width: size.x, height: size.y, length: size.z };
       group.userData.boostFlames = boostGroup.userData.flames;
       group.userData.boostGroup = boostGroup;
+      group.userData.wheelShaderBindings = wheelVisuals.bindings;
+      group.userData.wheelCount = wheelVisuals.logicalWheelCount;
       visualRoot.add(boostGroup);
       group.add(visualRoot);
       return group;
@@ -4897,7 +4914,7 @@ export function createRacingGame({
       );
       traffic.wheelSpin += traffic.direction * traffic.currentSpeed * deltaSeconds / 0.36;
       syncFreeDriveTrafficPose(traffic);
-      animateWheelNodes(traffic.visual.userData.wheelNodes, traffic.wheelSpin);
+      animateWheelVisuals(traffic.visual, traffic.wheelSpin, 0);
     }
   }
 
@@ -5274,13 +5291,17 @@ export function createRacingGame({
       [1.18, 0.48, -1.36]
     ];
     const fallbackWheelNodes = [];
-    for (const [x, y, z] of wheelPositions) {
+    for (const [index, [x, y, z]] of wheelPositions.entries()) {
       const wheel = new THREE.Mesh(wheelGeometry, darkMaterial);
       wheel.position.set(x, y, z);
       wheel.rotation.z = Math.PI / 2;
       wheel.castShadow = true;
       visualRoot.add(wheel);
-      fallbackWheelNodes.push({ node: wheel, baseQuaternion: wheel.quaternion.clone() });
+      fallbackWheelNodes.push({
+        node: wheel,
+        baseQuaternion: wheel.quaternion.clone(),
+        front: index < 2
+      });
     }
 
     const fallbackExhausts = carSpec?.boostExhausts?.length === 0
@@ -5300,6 +5321,8 @@ export function createRacingGame({
     group.userData.boostFlames = flames;
     group.userData.boostGroup = boostGroup;
     group.userData.wheelNodes = fallbackWheelNodes;
+    group.userData.wheelShaderBindings = [];
+    group.userData.wheelCount = fallbackWheelNodes.length;
     group.userData.visualRoot = visualRoot;
     visualRoot.add(body, hood, cabin, rear, frontLightLeft, frontLightRight);
     visualRoot.add(boostGroup);
@@ -5840,23 +5863,149 @@ export function createRacingGame({
       visualRoot.position.y = racingSceneConfig.groundOffset ?? 0;
     }
 
-    const controller = physics.playerVehicle?.controller;
-    if (controller?.numWheels()) {
-      let rotationSum = 0;
-      for (let index = 0; index < controller.numWheels(); index += 1) {
-        rotationSum += controller.wheelRotation(index) ?? 0;
-      }
-      wheelSpinAngle = rotationSum / controller.numWheels();
-    }
-    animateWheelNodes(car.userData.wheelNodes, wheelSpinAngle);
+    wheelSpinAngle = advanceWheelSpin({
+      spinAngle: wheelSpinAngle,
+      signedSpeed: physics.playerVehicle?.speed ?? 0,
+      deltaSeconds,
+      wheelRadius: physicalVehicleConfig.wheelRadius
+    });
+    animateWheelVisuals(
+      car,
+      wheelSpinAngle,
+      physics?.playerVehicle?.steeringAngle ?? 0
+    );
   }
 
-  function animateWheelNodes(wheelNodes, spinAngle) {
-    if (!wheelNodes?.length) return;
-    const rollingRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), spinAngle);
-    for (const { node, baseQuaternion } of wheelNodes) {
-      node.quaternion.copy(baseQuaternion).multiply(rollingRotation);
+  function animateWheelVisuals(targetCar, spinAngle, steeringAngle = 0) {
+    if (!targetCar) return;
+    const motion = createWheelAnimationState({ spinAngle, steeringAngle });
+    targetCar.userData.wheelAnimationState = motion;
+
+    for (const binding of targetCar.userData.wheelShaderBindings ?? []) {
+      binding.spin.value = motion.spinAngle;
+      binding.steering.value = motion.steeringAngle;
     }
+
+    const wheelNodes = targetCar.userData.wheelNodes;
+    if (!wheelNodes?.length) return;
+    const rollingRotation = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(0, 1, 0),
+      motion.spinAngle
+    );
+    const steeringRotation = new THREE.Quaternion();
+    for (const { node, baseQuaternion, front = false } of wheelNodes) {
+      steeringRotation.setFromAxisAngle(
+        new THREE.Vector3(0, 1, 0),
+        front ? motion.steeringAngle : 0
+      );
+      node.quaternion.copy(steeringRotation).multiply(baseQuaternion).multiply(rollingRotation);
+    }
+  }
+
+  function configureModelWheelAnimation(model, visualRoot, carSpec) {
+    const bindings = [];
+    const logicalCenters = new Set();
+    const frontDirection = Math.cos(THREE.MathUtils.degToRad(carSpec?.modelRotationDegrees || 0)) >= 0 ? 1 : -1;
+    visualRoot.updateMatrixWorld(true);
+
+    model.traverse((mesh) => {
+      if (!mesh.isMesh || !mesh.geometry?.attributes?.position || !mesh.material) return;
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      const label = materials.map((material) => materialLabelFor(mesh, material)).join(" ");
+      if (!isWheelVisualLabel(label)) return;
+
+      const positionAttribute = mesh.geometry.attributes.position;
+      const layout = findWheelGeometryLayout(positionAttribute.array, positionAttribute.itemSize);
+      if (!layout) return;
+      const localCenters = layout.centers.map(({ x, y, z }) => new THREE.Vector3(x, y, z));
+      const carSpaceCenters = localCenters.map((center) => {
+        const worldCenter = center.clone().applyMatrix4(mesh.matrixWorld);
+        return visualRoot.worldToLocal(worldCenter);
+      });
+      for (const center of carSpaceCenters) {
+        logicalCenters.add(`${Math.round(center.x * 10)}:${Math.round(center.z * 10)}`);
+      }
+
+      const singleIsFront = !layout.combined && (carSpaceCenters[0]?.z ?? 0) >= 0;
+      for (const material of materials) {
+        bindings.push(installWheelMaterialAnimation(material, layout, localCenters, {
+          frontDirection,
+          singleIsFront
+        }));
+      }
+    });
+
+    return {
+      bindings,
+      logicalWheelCount: Math.min(4, logicalCenters.size)
+    };
+  }
+
+  function installWheelMaterialAnimation(material, layout, centers, { frontDirection, singleIsFront }) {
+    const spin = { value: 0 };
+    const steering = { value: 0 };
+    const originalCompile = material.onBeforeCompile;
+    const wheelUniforms = layout.combined
+      ? {
+          uWheelCenters: { value: centers },
+          uWheelSplit: { value: new THREE.Vector2(layout.splitX, layout.splitZ) },
+          uWheelFrontDirection: { value: frontDirection }
+        }
+      : {
+          uWheelCenter: { value: centers[0] },
+          uWheelIsFront: { value: singleIsFront ? 1 : 0 }
+        };
+    const declarations = layout.combined
+      ? `
+uniform vec3 uWheelCenters[4];
+uniform vec2 uWheelSplit;
+uniform float uWheelFrontDirection;
+vec3 wheelCenterFor(vec3 point) {
+  if (point.z >= uWheelSplit.y) {
+    return point.x >= uWheelSplit.x ? uWheelCenters[1] : uWheelCenters[0];
+  }
+  return point.x >= uWheelSplit.x ? uWheelCenters[3] : uWheelCenters[2];
+}
+float wheelFrontFor(vec3 point) {
+  return ((point.z - uWheelSplit.y) * uWheelFrontDirection >= 0.0) ? 1.0 : 0.0;
+}`
+      : `
+uniform vec3 uWheelCenter;
+uniform float uWheelIsFront;
+vec3 wheelCenterFor(vec3 point) { return uWheelCenter; }
+float wheelFrontFor(vec3 point) { return uWheelIsFront; }
+`;
+    material.onBeforeCompile = (shader, renderer) => {
+      originalCompile?.(shader, renderer);
+      shader.uniforms.uWheelSpin = spin;
+      shader.uniforms.uWheelSteering = steering;
+      Object.assign(shader.uniforms, wheelUniforms);
+      shader.vertexShader = `
+uniform float uWheelSpin;
+uniform float uWheelSteering;
+${declarations}
+vec3 rotateWheelX(vec3 value, float angle) {
+  float cosine = cos(angle);
+  float sine = sin(angle);
+  return vec3(value.x, cosine * value.y - sine * value.z, sine * value.y + cosine * value.z);
+}
+vec3 rotateWheelY(vec3 value, float angle) {
+  float cosine = cos(angle);
+  float sine = sin(angle);
+  return vec3(cosine * value.x + sine * value.z, value.y, -sine * value.x + cosine * value.z);
+}
+${shader.vertexShader}`
+        .replace("#include <beginnormal_vertex>", `#include <beginnormal_vertex>
+  objectNormal = rotateWheelX(objectNormal, uWheelSpin);
+  objectNormal = rotateWheelY(objectNormal, uWheelSteering * wheelFrontFor(position));`)
+        .replace("#include <begin_vertex>", `#include <begin_vertex>
+  vec3 wheelCenter = wheelCenterFor(position);
+  vec3 wheelOffset = rotateWheelX(transformed - wheelCenter, uWheelSpin);
+  transformed = wheelCenter + rotateWheelY(wheelOffset, uWheelSteering * wheelFrontFor(position));`);
+    };
+    material.customProgramCacheKey = () => `racing-wheel-${layout.combined ? "combined" : "single"}-${singleIsFront ? "front" : "rear"}`;
+    material.needsUpdate = true;
+    return { spin, steering };
   }
 
   function updateOpponentTransform() {

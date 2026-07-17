@@ -9,6 +9,7 @@ export const cloudflarePagesAssetGraph = Object.freeze({
       "racing-physical-vehicle.mjs", "racing-surface-contact.mjs",
       "racing-resource-cleanup.mjs", "racing-resource-leases.mjs",
       "racing-runtime-adapters.mjs", "racing-session.mjs", "racing-start-config.js",
+      "racing-wheel-animation.mjs",
       "racing-track.mjs"
     ]),
     directories: Object.freeze(["assets/typing-garage", "assets/freedrive"]),
