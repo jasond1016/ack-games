@@ -3,9 +3,31 @@ import test from "node:test";
 
 import {
   calculateSignedVehicleSpeed,
+  drivenWheelIndexesFor,
+  getPhysicalVehicleSpec,
   physicalVehicleConfig,
   resolvePhysicalVehicleDriveForces
 } from "../racing-physical-vehicle.mjs";
+
+const racingCarIds = [
+  "aventador", "urus-se", "miura-p400", "countach-lpi-800-4", "dbr9", "bolide",
+  "centodieci", "revuelto", "aventador-classic", "countach-5000qv", "huracan-sto", "veneno"
+];
+
+test("每辆参赛车都有独立且有效的物理规格", () => {
+  const specs = racingCarIds.map(getPhysicalVehicleSpec);
+  assert.equal(new Set(specs.map(({ id }) => id)).size, racingCarIds.length);
+  assert.ok(specs.every(({ mass, wheelBase, wheelTrack, wheelRadius }) =>
+    mass > 900 && wheelBase > 1.7 && wheelTrack > 1 && wheelRadius > 0.35
+  ));
+  assert.notEqual(getPhysicalVehicleSpec("urus-se").mass, getPhysicalVehicleSpec("bolide").mass);
+  assert.notEqual(getPhysicalVehicleSpec("miura-p400").suspensionStiffness, getPhysicalVehicleSpec("dbr9").suspensionStiffness);
+});
+
+test("驱动形式决定获得发动机力的车轮", () => {
+  assert.deepEqual(drivenWheelIndexesFor(getPhysicalVehicleSpec("miura-p400")), [2, 3]);
+  assert.deepEqual(drivenWheelIndexesFor(getPhysicalVehicleSpec("aventador")), [0, 1, 2, 3]);
+});
 
 test("车辆速度按车身前向轴区分前进和倒车", () => {
   const rotation = { x: 0, y: 0, z: 0, w: 1 };

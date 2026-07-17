@@ -65,7 +65,7 @@ import {
 } from "./racing-surface-contact.mjs";
 import {
   createPhysicalVehicle,
-  physicalVehicleConfig,
+  getPhysicalVehicleSpec,
   resetPhysicalVehicleControls,
   updatePhysicalVehicle
 } from "./racing-physical-vehicle.mjs";
@@ -601,6 +601,9 @@ export function createRacingGame({
       cameraMode,
       vehiclePhysics: {
         mode: "physical",
+        specId: playerVehicleSpec().id,
+        mass: playerVehicleSpec().mass,
+        driveLayout: playerVehicleSpec().driveLayout,
         wheelContacts: physics?.playerVehicle?.contactCount ?? 0,
         signedSpeed: Number((physics?.playerVehicle?.speed ?? 0).toFixed(2)),
         steeringDegrees: Number(THREE.MathUtils.radToDeg(
@@ -624,9 +627,9 @@ export function createRacingGame({
       collisionScale,
       trackWidth: trackConfig.width,
       collider: {
-        halfWidth: Number(physicalVehicleConfig.chassisHalfWidth.toFixed(2)),
-        halfHeight: Number(physicalVehicleConfig.chassisHalfHeight.toFixed(2)),
-        halfLength: Number(physicalVehicleConfig.chassisHalfLength.toFixed(2))
+        halfWidth: Number(playerVehicleSpec().chassisHalfWidth.toFixed(2)),
+        halfHeight: Number(playerVehicleSpec().chassisHalfHeight.toFixed(2)),
+        halfLength: Number(playerVehicleSpec().chassisHalfLength.toFixed(2))
       },
       collisionDebugEnabled: collisionDebug.enabled,
       lastCollision: collisionDebug.lastCollision,
@@ -707,6 +710,10 @@ export function createRacingGame({
 
   function selectedCar() {
     return getRacingCarById(selectedCarId);
+  }
+
+  function playerVehicleSpec() {
+    return physics?.playerVehicle?.config ?? getPhysicalVehicleSpec(selectedCarId);
   }
 
   function opponentCarSelection() {
@@ -1355,9 +1362,10 @@ export function createRacingGame({
     group.name = "collision-debug";
     collisionDebug.group = group;
 
-    const playerHalfWidth = physicalVehicleConfig.chassisHalfWidth;
-    const playerHalfHeight = physicalVehicleConfig.chassisHalfHeight;
-    const playerHalfLength = physicalVehicleConfig.chassisHalfLength;
+    const vehicleSpec = playerVehicleSpec();
+    const playerHalfWidth = vehicleSpec.chassisHalfWidth;
+    const playerHalfHeight = vehicleSpec.chassisHalfHeight;
+    const playerHalfLength = vehicleSpec.chassisHalfLength;
     collisionDebug.playerWire = createCollisionWireBox(
       playerHalfWidth * 2,
       playerHalfHeight * 2,
@@ -3004,13 +3012,14 @@ export function createRacingGame({
       .setAngularDamping(1.2)
       .setAdditionalSolverIterations(4);
     physics.playerBody = world.createRigidBody(playerBodyDesc);
+    const vehicleSpec = getPhysicalVehicleSpec(selectedCarId);
     const playerColliderDesc = RAPIER.ColliderDesc.roundCuboid(
-      physicalVehicleConfig.chassisHalfWidth,
-      physicalVehicleConfig.chassisHalfHeight,
-      physicalVehicleConfig.chassisHalfLength,
-      physicalVehicleConfig.chassisRoundRadius
+      vehicleSpec.chassisHalfWidth,
+      vehicleSpec.chassisHalfHeight,
+      vehicleSpec.chassisHalfLength,
+      vehicleSpec.chassisRoundRadius
     )
-      .setMass(physicalVehicleConfig.mass)
+      .setMass(vehicleSpec.mass)
       .setFriction(0.42)
       .setRestitution(0.03);
     physics.playerCollider = world.createCollider(
@@ -3020,7 +3029,8 @@ export function createRacingGame({
     physics.colliderTags.set(physics.playerCollider.handle, "player");
     physics.playerVehicle = createPhysicalVehicle({
       world,
-      chassis: physics.playerBody
+      chassis: physics.playerBody,
+      config: vehicleSpec
     });
 
     const opponentBodyDesc = RAPIER.RigidBodyDesc.kinematicPositionBased()
@@ -3123,7 +3133,7 @@ export function createRacingGame({
     playerSurfaceState.grounded = contacts.length >= 2;
     playerSurfaceState.height = contacts.length
       ? contacts.reduce((sum, contact) => sum + contact.height, 0) / contacts.length
-      : physics.playerBody.translation().y - physicalVehicleConfig.visualGroundOffset;
+      : physics.playerBody.translation().y - playerVehicleSpec().visualGroundOffset;
     playerSurfaceState.pitch = euler.x;
     playerSurfaceState.roll = euler.z;
     playerSurfaceState.surfaceId = [...surfaceCounts.entries()]
@@ -3150,7 +3160,7 @@ export function createRacingGame({
     if (support.grounded) applyPlayerSurfaceState(support);
     physics.playerBody.setTranslation({
       x: position.x,
-      y: (support.height ?? 0) + physicalVehicleConfig.spawnHeight,
+      y: (support.height ?? 0) + playerVehicleSpec().spawnHeight,
       z: position.y
     }, true);
     physics.playerBody.setRotation(rapierRotationFromYaw(heading), true);
@@ -6051,7 +6061,7 @@ export function createRacingGame({
     const chassisUp = new THREE.Vector3(0, 1, 0).applyQuaternion(tempQuaternion);
     car.position
       .set(translation.x, translation.y, translation.z)
-      .addScaledVector(chassisUp, -physicalVehicleConfig.visualGroundOffset);
+      .addScaledVector(chassisUp, -playerVehicleSpec().visualGroundOffset);
     car.quaternion.copy(tempQuaternion);
     playerVisualElevation = car.position.y;
 
@@ -6065,7 +6075,7 @@ export function createRacingGame({
       spinAngle: wheelSpinAngle,
       signedSpeed: physics.playerVehicle?.speed ?? 0,
       deltaSeconds,
-      wheelRadius: physicalVehicleConfig.wheelRadius
+      wheelRadius: playerVehicleSpec().wheelRadius
     });
     animateWheelVisuals(
       car,
@@ -6351,9 +6361,10 @@ ${shader.vertexShader}`
         physics?.playerVehicle?.steeringAngle ?? 0
       ).toFixed(1)} deg`
     ];
-    const playerHalfWidth = physicalVehicleConfig.chassisHalfWidth;
-    const playerHalfHeight = physicalVehicleConfig.chassisHalfHeight;
-    const playerHalfLength = physicalVehicleConfig.chassisHalfLength;
+    const vehicleSpec = playerVehicleSpec();
+    const playerHalfWidth = vehicleSpec.chassisHalfWidth;
+    const playerHalfHeight = vehicleSpec.chassisHalfHeight;
+    const playerHalfLength = vehicleSpec.chassisHalfLength;
 
     hud.textContent = [
       "Physics Telemetry  [F2]",
