@@ -361,7 +361,7 @@ export function createRacingGame({
     charges: 5,
     unlimited: true,
     durationSeconds: 5,
-    topSpeedMultiplier: 2,
+    topSpeedMultiplier: 1.08,
     engineForceMultiplier: 2.15
   };
   const opponentBoostConfig = {
