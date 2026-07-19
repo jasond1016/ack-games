@@ -17,8 +17,10 @@ export function calculateRacingAudioState({
   engineRpm = null,
   idleRpm = RACING_ENGINE_AUDIO.idleRpm,
   maximumRpm = RACING_ENGINE_AUDIO.maximumRpm,
-  tireSlip = 0
+  tireSlip = 0,
+  environment = "road"
 } = {}) {
+  const resolvedEnvironment = ["tunnel", "rally"].includes(environment) ? environment : "road";
   const speedRatio = clamp(Math.abs(signedSpeed) / Math.max(maxForwardSpeed, 0.001), 0, 1);
   const throttleAmount = clamp(throttle, 0, 1);
   const rpmRatio = clamp(
@@ -44,6 +46,11 @@ export function calculateRacingAudioState({
     boostFrequency: 72 + resolvedRpmRatio * 68,
     boostActive: Boolean(enabled && boostActive),
     tireGain: enabled ? clamp((tireSlip - 0.08) * 0.18, 0, 0.12) : 0,
+    environment: resolvedEnvironment,
+    environmentGain: enabled ? (resolvedEnvironment === "tunnel" ? 0.88 : 1) : 0,
+    environmentFilterFrequency: resolvedEnvironment === "tunnel" ? 1650 : resolvedEnvironment === "rally" ? 3100 : 5200,
+    environmentResonance: resolvedEnvironment === "tunnel" ? 4.1 : 1.2,
+    environmentNoiseGain: enabled && resolvedEnvironment === "rally" ? 0.014 : 0,
     enabled: Boolean(enabled)
   });
 }
@@ -65,10 +72,18 @@ export function createRacingAudioController({
     masterGain.gain.value = 0.42;
     masterGain.connect(context.destination);
 
+    const environmentFilter = context.createBiquadFilter();
+    environmentFilter.type = "lowpass";
+    environmentFilter.frequency.value = 5200;
+    const environmentGain = context.createGain();
+    environmentGain.gain.value = 1;
+    environmentFilter.connect(environmentGain);
+    environmentGain.connect(masterGain);
+
     const engineFilter = context.createBiquadFilter();
     engineFilter.type = "lowpass";
     engineFilter.Q.value = 2.2;
-    engineFilter.connect(masterGain);
+    engineFilter.connect(environmentFilter);
 
     const engineGain = context.createGain();
     engineGain.gain.value = 0;
@@ -95,7 +110,7 @@ export function createRacingAudioController({
 
     const boostGain = context.createGain();
     boostGain.gain.value = 0;
-    boostGain.connect(masterGain);
+    boostGain.connect(environmentFilter);
     boostFilter.connect(boostGain);
 
     const noiseBuffer = context.createBuffer(1, context.sampleRate * 2, context.sampleRate);
@@ -116,7 +131,12 @@ export function createRacingAudioController({
     tireGain.gain.value = 0;
     boostNoise.connect(tireFilter);
     tireFilter.connect(tireGain);
-    tireGain.connect(masterGain);
+    tireGain.connect(environmentFilter);
+
+    const environmentNoiseGain = context.createGain();
+    environmentNoiseGain.gain.value = 0;
+    boostNoise.connect(environmentNoiseGain);
+    environmentNoiseGain.connect(environmentFilter);
     boostNoise.start();
 
     const boostToneGain = context.createGain();
@@ -129,6 +149,9 @@ export function createRacingAudioController({
 
     graph = {
       masterGain,
+      environmentFilter,
+      environmentGain,
+      environmentNoiseGain,
       engineFilter,
       engineGain,
       harmonicGain,
@@ -161,6 +184,10 @@ export function createRacingAudioController({
     setTarget(graph.boostOscillator.frequency, state.boostFrequency, 0.06);
     setTarget(graph.boostFilter.frequency, 760 + state.rpmRatio * 980, 0.08);
     setTarget(graph.tireGain.gain, state.tireGain, 0.035);
+    setTarget(graph.environmentGain.gain, state.environmentGain, 0.16);
+    setTarget(graph.environmentFilter.frequency, state.environmentFilterFrequency, 0.18);
+    setTarget(graph.environmentFilter.Q, state.environmentResonance, 0.18);
+    setTarget(graph.environmentNoiseGain.gain, state.environmentNoiseGain, 0.12);
   }
 
   return Object.freeze({

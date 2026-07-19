@@ -45,3 +45,22 @@ test("明显轮胎滑移会产生独立尖叫声部", () => {
   assert.ok(calculateRacingAudioState({ tireSlip: 0.75 }).tireGain > 0);
   assert.equal(calculateRacingAudioState({ tireSlip: 0.02 }).tireGain, 0);
 });
+
+test("audio environment defaults to road and shapes tunnel acoustics", () => {
+  const road = calculateRacingAudioState();
+  const tunnel = calculateRacingAudioState({ environment: "tunnel" });
+  assert.equal(road.environment, "road");
+  assert.equal(tunnel.environment, "tunnel");
+  assert.ok(tunnel.environmentGain < road.environmentGain);
+  assert.ok(tunnel.environmentFilterFrequency < road.environmentFilterFrequency);
+  assert.ok(tunnel.environmentResonance > road.environmentResonance);
+});
+
+test("rally environment adds a subtle noise layer that still obeys mute", () => {
+  const rally = calculateRacingAudioState({ environment: "rally" });
+  const muted = calculateRacingAudioState({ environment: "rally", enabled: false });
+  assert.equal(rally.environment, "rally");
+  assert.ok(rally.environmentNoiseGain > 0);
+  assert.equal(muted.environmentNoiseGain, 0);
+  assert.equal(muted.environmentGain, 0);
+});
