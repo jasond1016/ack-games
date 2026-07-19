@@ -58,6 +58,45 @@ The current Playwright test exercises the main racing start flow:
 - Return home and re-enter the racing flow
 - Verify the reusable selected-car preview canvas is not stuck in a lost WebGL context
 
+## Racing Telemetry And Performance Baseline
+
+Press `F2` while driving to show live vehicle, drivetrain, tire, physics, and rendering telemetry. Select `Coastal Festival Showcase` to run an `ISLAND TOUR` route that connects its road loop, tunnel, and rally branch. The original island free-drive map remains an untimed sandbox.
+
+Run the deterministic scene-complexity and telemetry smoke benchmark with:
+
+```bash
+pnpm run test:e2e:perf
+```
+
+The browser debug interface also supports focused manual runs:
+
+```js
+__ackGamesDebug.racing.listTestScenarios()
+__ackGamesDebug.racing.placeTestScenario("rally")
+__ackGamesDebug.racing.startBenchmark({ label: "rally", durationSeconds: 10 })
+__ackGamesDebug.racing.getTelemetry()
+```
+
+Select `Vehicle Proving Ground` for the flat development circuit, braking markers, skidpads, and slalom. Automated Rapier vehicle protocols are available from the browser debug interface:
+
+```js
+__ackGamesDebug.racing.listProvingGroundTests()
+__ackGamesDebug.racing.startProvingGroundTest("zero-to-100")
+__ackGamesDebug.racing.startProvingGroundTest("100-to-zero")
+__ackGamesDebug.racing.startProvingGroundTest("skidpad")
+__ackGamesDebug.racing.getState().provingGround
+```
+
+Run their browser integration coverage with `pnpm run test:e2e:proving`.
+
+Build a comparable dynamics matrix for the representative classic RWD, modern AWD supercar, and heavy AWD SUV with:
+
+```bash
+pnpm run test:e2e:matrix
+```
+
+The matrix records acceleration, braking, skidpad radius, tire slip, ABS/TCS active time, gear shifts, road-contact ratio, and a 10 Hz acceleration trace containing RPM, gear, drivetrain/TCS scaling, and applied wheel force in `output/racing-vehicle-matrix.json`. Override the catalog subset with a comma-separated `RACING_MATRIX_CARS` environment variable.
+
 ## Notes
 
 - The local static server is `scripts/serve.mjs`.
