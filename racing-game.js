@@ -3579,7 +3579,7 @@ export function createRacingGame({
         const impact = clamp((impactSpeed - 1.5) / 9, 0, 1);
         presentationState.lastLandingImpactSpeed = impactSpeed;
         presentationState.landingKick = Math.max(presentationState.landingKick, impact);
-        if (impact > 0) racingHaptics.pulseImpact(0.18 + impact * 0.7);
+        if (impact > 0) racingHaptics.pulseLanding(0.18 + impact * 0.7);
         presentationState.landingArmed = false;
         presentationState.maximumAirborneDownwardSpeed = 0;
       }
@@ -6268,6 +6268,7 @@ export function createRacingGame({
 
   function updateRacingHaptics() {
     const tireDynamics = physics?.playerVehicle?.tireDynamics;
+    const drivetrain = physics?.playerVehicle?.drivetrain;
     racingHaptics.update({
       gamepadIndex: gamepadDrive.index ?? -1,
       signedSpeed: physics?.playerVehicle?.speed ?? state.velocity.length(),
@@ -6280,7 +6281,8 @@ export function createRacingGame({
       enabled: active && !raceState.paused && !raceState.resultVisible,
       tireSlip: tireDynamics?.maximumSlip ?? 0,
       absActive: tireDynamics?.absActive ?? false,
-      tractionControlActive: tireDynamics?.tractionControlActive ?? false
+      tractionControlActive: tireDynamics?.tractionControlActive ?? false,
+      shiftCount: drivetrain?.shiftCount ?? 0
     });
   }
 
