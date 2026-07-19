@@ -1,4 +1,5 @@
 const TARGET_SPEED_KMH = 100;
+const HIGH_SPEED_TARGET_KMH = 200;
 const STOP_SPEED_KMH = 1;
 const SKIDPAD_DURATION_SECONDS = 12;
 const SKIDPAD_SAMPLE_DELAY_SECONDS = 4;
@@ -9,8 +10,9 @@ const SKIDPAD_CENTER = Object.freeze({ x: 0, z: 40 });
 const SKIDPAD_RADIUS_METERS = 30;
 
 export const PROVING_GROUND_TESTS = Object.freeze([
-  Object.freeze({ id: "zero-to-100", label: "0-100 km/h", setup: Object.freeze({ x: -150, z: -60, heading: Math.PI * 0.5 }) }),
-  Object.freeze({ id: "100-to-zero", label: "100-0 km/h", setup: Object.freeze({ x: -150, z: -60, heading: Math.PI * 0.5 }) }),
+  Object.freeze({ id: "zero-to-100", label: "0-100 km/h", setup: Object.freeze({ x: -450, z: -60, heading: Math.PI * 0.5 }) }),
+  Object.freeze({ id: "zero-to-200", label: "0-200 km/h", setup: Object.freeze({ x: -450, z: -60, heading: Math.PI * 0.5 }) }),
+  Object.freeze({ id: "100-to-zero", label: "100-0 km/h", setup: Object.freeze({ x: -450, z: -60, heading: Math.PI * 0.5 }) }),
   Object.freeze({
     id: "skidpad",
     label: "60 m skidpad",
@@ -85,11 +87,18 @@ export function createProvingGroundTestRunner() {
     run.roadContactSeconds += observation.surfaceId === "road" ? delta : 0;
     run.sampledSeconds += delta;
     run.latestShiftCount = Math.max(run.latestShiftCount, finiteOr(observation.shiftCount, run.latestShiftCount));
-    if (run.testId === "zero-to-100") recordDrivetrainTrace(observation, delta, speedKmh);
+    if (run.testId === "zero-to-100" || run.testId === "zero-to-200") {
+      recordDrivetrainTrace(observation, delta, speedKmh);
+    }
 
     if (run.testId === "zero-to-100" && speedKmh >= TARGET_SPEED_KMH) {
       finish({
         zeroTo100Seconds: run.elapsedSeconds,
+        distanceMeters: distance(run.origin, position)
+      });
+    } else if (run.testId === "zero-to-200" && speedKmh >= HIGH_SPEED_TARGET_KMH) {
+      finish({
+        zeroTo200Seconds: run.elapsedSeconds,
         distanceMeters: distance(run.origin, position)
       });
     } else if (run.testId === "100-to-zero") {

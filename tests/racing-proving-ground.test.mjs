@@ -29,6 +29,19 @@ test("0-100 protocol records elapsed time and distance", () => {
   });
 });
 
+test("0-200 protocol keeps full throttle through automatic shifts", () => {
+  const runner = createProvingGroundTestRunner();
+  assert.equal(runner.start("zero-to-200", { x: 0, z: 0 }), true);
+  assert.deepEqual(runner.controls(), { throttle: 1, brake: 0, steering: 0 });
+  runner.update({ x: 80, z: 0, speedKmh: 120, shiftCount: 2, gear: 3, surfaceId: "road" }, 5);
+  assert.equal(runner.snapshot().status, "running");
+  const result = runner.update({ x: 310, z: 0, speedKmh: 201, shiftCount: 4, gear: 5, surfaceId: "road" }, 7);
+  assert.equal(result.status, "completed");
+  assert.equal(result.zeroTo200Seconds, 12);
+  assert.equal(result.distanceMeters, 310);
+  assert.equal(result.gearShiftCount, 4);
+});
+
 test("100-0 protocol accelerates before measuring full braking", () => {
   const runner = createProvingGroundTestRunner();
   runner.start("100-to-zero", { x: 0, z: 0 });

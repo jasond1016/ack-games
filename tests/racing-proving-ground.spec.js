@@ -12,7 +12,7 @@ test("proving ground runs acceleration, braking, and skidpad protocols against t
   await expect(page.locator("#racingStartOverlay")).toBeHidden({ timeout: 45_000 });
 
   const tests = await page.evaluate(() => globalThis.__ackGamesDebug.racing.listProvingGroundTests());
-  expect(tests.map(({ id }) => id)).toEqual(["zero-to-100", "100-to-zero", "skidpad", "fixed-steer"]);
+  expect(tests.map(({ id }) => id)).toEqual(["zero-to-100", "zero-to-200", "100-to-zero", "skidpad", "fixed-steer"]);
   const world = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().worldColliders);
   expect(world.tunnelPieces).toBe(0);
   expect(world.rallyDirtMeshes).toBe(0);

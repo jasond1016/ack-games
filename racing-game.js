@@ -1792,8 +1792,8 @@ export function createRacingGame({
     }
 
     const markerGeometry = new THREE.BoxGeometry(0.18, 0.025, 18);
-    for (let x = -150; x <= 200; x += 50) {
-      const marker = new THREE.Mesh(markerGeometry, x === -150 ? accentMaterial : lineMaterial);
+    for (let x = -450; x <= 500; x += 50) {
+      const marker = new THREE.Mesh(markerGeometry, x === -450 ? accentMaterial : lineMaterial);
       marker.position.set(x, 0.09, -60);
       scene.add(marker);
     }
