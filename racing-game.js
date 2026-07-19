@@ -80,6 +80,7 @@ import {
   updatePhysicalVehicle
 } from "./racing-physical-vehicle.mjs";
 import {
+  createRailColliderGeometry,
   isPhysicalVehicleSurface,
   physicalFallbackGroundHeight,
   physicalRoadSupportHalfWidth
@@ -1568,9 +1569,9 @@ export function createRacingGame({
 
     for (const rail of physics.debugRailColliders) {
       const wire = createCollisionWireBox(
-        rail.length,
-        physicsConfig.railHalfHeight * 2,
-        physicsConfig.railHalfDepth * 2,
+        rail.halfExtents.x * 2,
+        rail.halfExtents.y * 2,
+        rail.halfExtents.z * 2,
         collisionDebugColors.rail
       );
       wire.position.set(rail.midpoint.x, rail.elevation + physicsConfig.railHalfHeight, rail.midpoint.y);
@@ -3467,21 +3468,25 @@ export function createRacingGame({
       const start = startSample.center.clone().add(startSample.normal.clone().multiplyScalar(startSample.railOffset * side));
       const end = endSample.center.clone().add(endSample.normal.clone().multiplyScalar(endSample.railOffset * side));
       const segment = end.clone().sub(start);
-      const length = segment.length();
+      const geometry = createRailColliderGeometry({
+        deltaX: segment.x,
+        deltaZ: segment.y,
+        halfHeight: physicsConfig.railHalfHeight,
+        halfDepth: physicsConfig.railHalfDepth
+      });
 
-      if (length <= 0.01) {
+      if (!geometry) {
         continue;
       }
 
       const midpoint = start.clone().add(end).multiplyScalar(0.5);
-      const yaw = Math.atan2(segment.x, segment.y);
       const startHeight = 0.06 + freeDriveElevationAtPosition(startSample.center, startSample.progress);
       const endHeight = 0.06 + freeDriveElevationAtPosition(endSample.center, endSample.progress);
       const elevation = (startHeight + endHeight) * 0.5;
       const railCollider = physics.world.createCollider(
-        RAPIER.ColliderDesc.cuboid(length * 0.5, physicsConfig.railHalfHeight, physicsConfig.railHalfDepth)
+        RAPIER.ColliderDesc.cuboid(geometry.halfExtents.x, geometry.halfExtents.y, geometry.halfExtents.z)
           .setTranslation(midpoint.x, elevation + physicsConfig.railHalfHeight, midpoint.y)
-          .setRotation(rapierRotationFromYaw(yaw))
+          .setRotation(rapierRotationFromYaw(geometry.yaw))
           .setFriction(0.12)
           .setRestitution(0.04)
       );
@@ -3490,8 +3495,8 @@ export function createRacingGame({
         handle: railCollider.handle,
         midpoint: midpoint.clone(),
         elevation,
-        yaw,
-        length
+        yaw: geometry.yaw,
+        halfExtents: geometry.halfExtents
       });
     }
   }
