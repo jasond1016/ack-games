@@ -83,6 +83,12 @@ export function createFreeDriveTimeTrial({
     return getState();
   }
 
+  function addPenalty(seconds) {
+    if (phase !== "running" || !Number.isFinite(seconds) || seconds <= 0) return getState();
+    elapsedSeconds += seconds;
+    return getState();
+  }
+
   function getState() {
     return Object.freeze({
       phase,
@@ -96,7 +102,7 @@ export function createFreeDriveTimeTrial({
     });
   }
 
-  return Object.freeze({ start, update, reset, getState });
+  return Object.freeze({ start, update, reset, addPenalty, getState });
 }
 
 export function sampleGhostPose(samples, elapsedSeconds) {

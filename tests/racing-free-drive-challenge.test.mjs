@@ -92,3 +92,17 @@ test("explicit time trials wait for the event countdown before starting", () => 
   assert.equal(trial.getState().elapsedSeconds, 2);
   assert.equal(trial.getState().nextCheckpoint, 2);
 });
+
+test("a running time trial accepts an explicit time penalty", () => {
+  const trial = createFreeDriveTimeTrial({ checkpoints, storage: memoryStorage(), autoStart: false });
+  trial.start({ x: 0, z: 0, heading: 0 });
+  trial.update({ x: 4, z: 0, deltaSeconds: 1.5 });
+  trial.addPenalty(2.5);
+  assert.equal(trial.getState().elapsedSeconds, 4);
+
+  trial.addPenalty(-1);
+  assert.equal(trial.getState().elapsedSeconds, 4);
+  trial.reset();
+  trial.addPenalty(2.5);
+  assert.equal(trial.getState().elapsedSeconds, 0);
+});
