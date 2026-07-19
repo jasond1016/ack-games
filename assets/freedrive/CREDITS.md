@@ -24,5 +24,6 @@ The textures in `textures/` are distributed under the CC0 1.0 license.
 - `models/rollershutter_door-lod0.glb`: optimized derivative of [Rollershutter Door](https://polyhaven.com/a/rollershutter_door), Poly Haven.
 - `models/planter_box_01-lod0.glb`: optimized derivative of [Planter Box 01](https://polyhaven.com/a/planter_box_01), Poly Haven.
 - `models/outdoor_table_chair_set_01-lod0.glb`: optimized derivative of [Outdoor Table Chair Set 01](https://polyhaven.com/a/outdoor_table_chair_set_01), Poly Haven.
+- `models/palm-tree-quaternius-lod0.glb`: optimized derivative of [Palm Tree](https://poly.pizza/m/P0tgwyXBgr), Quaternius, distributed as Public Domain (CC0) by Poly Pizza. The derivative uses WebP texture compression and Draco geometry compression.
 
 Source files were downloaded from Poly Haven's official asset CDN at 1K resolution. They may be copied, modified, and redistributed without attribution; this file preserves provenance for maintainers.
