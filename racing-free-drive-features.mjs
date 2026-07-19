@@ -32,11 +32,43 @@ export const FREE_DRIVE_SHOWCASE = Object.freeze({
   gateRadius: 10
 });
 
+export const COASTAL_SHOWCASE_TUNNEL = Object.freeze({
+  ...FREE_DRIVE_TUNNEL,
+  startProgress: 0.55,
+  endProgress: 0.68,
+  segmentCount: 80
+});
+
+export const COASTAL_SHOWCASE_RALLY = Object.freeze({
+  ...FREE_DRIVE_RALLY,
+  startProgress: 0.73,
+  endProgress: 0.93,
+  sampleCount: 220,
+  halfWidth: 6,
+  maximumGrade: 0.18,
+  waypoints: Object.freeze([
+    Object.freeze({ x: -650, z: -40 }),
+    Object.freeze({ x: -430, z: 90 }),
+    Object.freeze({ x: -220, z: 30 }),
+    Object.freeze({ x: -320, z: -150 }),
+    Object.freeze({ x: -270, z: -310 }),
+    Object.freeze({ x: -100, z: -370 })
+  ])
+});
+
+export const COASTAL_SHOWCASE_ROUTE = Object.freeze({
+  trackProgresses: Object.freeze([0.03, 0.16, 0.32, 0.5, 0.61, 0.73]),
+  rallyProgresses: Object.freeze([0.33, 0.66, 1]),
+  gateRadius: 12
+});
+
 export function createFreeDriveShowcaseRoute({
   sampleTrack,
   elevationAt,
   rallyRoute,
-  config = FREE_DRIVE_SHOWCASE
+  config = FREE_DRIVE_SHOWCASE,
+  tunnelConfig = FREE_DRIVE_TUNNEL,
+  rallyConfig = FREE_DRIVE_RALLY
 } = {}) {
   if (typeof sampleTrack !== "function" || typeof elevationAt !== "function" || !rallyRoute?.length) return [];
   const trackCheckpoints = config.trackProgresses.map((progress, index) => {
@@ -50,9 +82,9 @@ export function createFreeDriveShowcaseRoute({
       normalZ: sample.normal.y,
       section: index === 0
         ? "start"
-        : progress >= FREE_DRIVE_RALLY.startProgress
+        : progress >= rallyConfig.startProgress
           ? "rally"
-          : progress >= FREE_DRIVE_TUNNEL.startProgress && progress <= FREE_DRIVE_TUNNEL.endProgress
+          : progress >= tunnelConfig.startProgress && progress <= tunnelConfig.endProgress
             ? "tunnel"
             : "road"
     });
@@ -72,7 +104,9 @@ export function createFreeDriveShowcaseDrivingLine({
   sampleTrack,
   elevationAt,
   rallyRoute,
-  trackSampleCount = 520
+  trackSampleCount = 520,
+  tunnelConfig = FREE_DRIVE_TUNNEL,
+  rallyConfig = FREE_DRIVE_RALLY
 } = {}) {
   if (typeof sampleTrack !== "function" || typeof elevationAt !== "function" || rallyRoute?.length < 2) return [];
   const points = [];
@@ -101,17 +135,17 @@ export function createFreeDriveShowcaseDrivingLine({
         normalX: sample.normal.x,
         normalZ: sample.normal.y,
         trackProgress: wrapped
-      }, wrapped >= FREE_DRIVE_TUNNEL.startProgress && wrapped <= FREE_DRIVE_TUNNEL.endProgress ? "tunnel" : "road");
+      }, wrapped >= tunnelConfig.startProgress && wrapped <= tunnelConfig.endProgress ? "tunnel" : "road");
     }
   };
-  appendTrackRange(0.03, FREE_DRIVE_RALLY.startProgress);
+  appendTrackRange(0.03, rallyConfig.startProgress);
   for (const sample of rallyRoute) append({
     ...sample,
     heading: Math.atan2(sample.tangentX, sample.tangentZ),
     normalX: -sample.tangentZ,
     normalZ: sample.tangentX
   }, "rally");
-  appendTrackRange(FREE_DRIVE_RALLY.endProgress, 1.03);
+  appendTrackRange(rallyConfig.endProgress, 1.03);
   if (points.length) points[0].section = "start";
   if (points.length > 1) points.at(-1).section = "finish";
   return Object.freeze(points.map((point) => Object.freeze(point)));
@@ -148,6 +182,11 @@ export function sampleFreeDriveShowcaseDrivingLine(route, requestedDistance) {
     section: t < 0.5 ? start.section : end.section,
     distance
   });
+}
+
+export function showcaseRouteLookAheadDistance(signedSpeed = 0) {
+  const speed = Math.abs(Number(signedSpeed) || 0);
+  return Math.min(130, 35 + speed * 1.9);
 }
 
 function showcaseCheckpoint(checkpoint) {

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  COASTAL_SHOWCASE_RALLY,
+  COASTAL_SHOWCASE_TUNNEL,
   FREE_DRIVE_RALLY,
   FREE_DRIVE_TUNNEL,
   createFreeDriveShowcaseDrivingLine,
@@ -9,8 +11,11 @@ import {
   createFreeDriveRallyRibbon,
   createFreeDriveRallyRoute,
   createFreeDriveTunnelSegments,
-  sampleFreeDriveShowcaseDrivingLine
+  sampleFreeDriveShowcaseDrivingLine,
+  showcaseRouteLookAheadDistance
 } from "../racing-free-drive-features.mjs";
+import { racingMapLibrary } from "../racing-map.js";
+import { inspectRacingTrack } from "../racing-track.mjs";
 
 function straightTrack(progress) {
   return { center: { x: progress * 100, y: 20 }, halfWidth: 9 };
@@ -127,4 +132,42 @@ test("dense showcase driving line continuously follows every mixed-route section
     const sample = sampleFreeDriveShowcaseDrivingLine(line, distance);
     assert.ok(Math.abs(Math.hypot(sample.normalX, sample.normalZ) - 1) < 1e-9);
   }
+});
+
+test("Coastal Festival 灰盒路线达到三至五分钟的距离预算", () => {
+  const coastal = racingMapLibrary.snapshot().presets
+    .find(({ mapId }) => mapId === "preset-coastal-showcase").map;
+  const track = inspectRacingTrack(coastal.track);
+  const sampleTrack = (progress) => track.sample(progress);
+  const rallyRoute = createFreeDriveRallyRoute({
+    sampleTrack,
+    elevationAt: () => 0,
+    config: COASTAL_SHOWCASE_RALLY
+  });
+  const line = createFreeDriveShowcaseDrivingLine({
+    sampleTrack,
+    elevationAt: () => 0,
+    rallyRoute,
+    tunnelConfig: COASTAL_SHOWCASE_TUNNEL,
+    rallyConfig: COASTAL_SHOWCASE_RALLY
+  });
+  const sectionLengths = line.slice(1).reduce((lengths, sample, index) => {
+    const section = line[index].section === "start" ? "road" : line[index].section;
+    lengths[section] = (lengths[section] ?? 0) + sample.distance - line[index].distance;
+    return lengths;
+  }, {});
+
+  assert.ok(line.at(-1).distance >= 5600 && line.at(-1).distance <= 6400);
+  assert.ok(sectionLengths.tunnel >= 700 && sectionLengths.tunnel <= 1000);
+  assert.ok(sectionLengths.rally >= 1200 && sectionLengths.rally <= 1500);
+  assert.ok(COASTAL_SHOWCASE_RALLY.halfWidth >= 5.5);
+  for (let index = 1; index < line.length; index += 1) {
+    assert.ok(Math.hypot(line[index].x - line[index - 1].x, line[index].z - line[index - 1].z) < 15);
+  }
+});
+
+test("Festival 导航前瞻距离随速度增加但保持可读范围", () => {
+  assert.equal(showcaseRouteLookAheadDistance(0), 35);
+  assert.ok(showcaseRouteLookAheadDistance(25) > showcaseRouteLookAheadDistance(10));
+  assert.equal(showcaseRouteLookAheadDistance(1000), 130);
 });
