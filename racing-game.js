@@ -45,7 +45,9 @@ import {
 } from "./racing-drivable-surface-validation.mjs";
 import {
   FREE_DRIVE_RALLY,
+  FREE_DRIVE_SHOWCASE,
   FREE_DRIVE_TUNNEL,
+  createFreeDriveShowcaseRoute,
   createFreeDriveRallyRibbon,
   createFreeDriveRallyRoute,
   createFreeDriveTunnelSegments
@@ -63,6 +65,8 @@ import {
 import {
   shouldActivateComputerBoost
 } from "./racing-driving-dynamics.mjs";
+import { createRacingTelemetry } from "./racing-telemetry.mjs";
+import { PROVING_GROUND_TESTS, createProvingGroundTestRunner } from "./racing-proving-ground.mjs";
 import {
   createVehicleContactPoints,
   resolveVehicleSupport
@@ -163,7 +167,12 @@ export function createRacingGame({
   onReplaceSession = () => {}
 } = {}) {
   const qualityPreset = resolveRacingQualityPreset();
-  const mapData = initialSnapshot?.map ?? racingMapLibrary.snapshot().selected.map;
+  const selectedMapEntry = initialSnapshot ? null : racingMapLibrary.snapshot().selected;
+  const mapData = initialSnapshot?.map ?? selectedMapEntry.map;
+  const environmentProfile = initialSnapshot?.environmentProfile ?? selectedMapEntry?.environmentProfile ?? null;
+  const isShowcase = environmentProfile === "coastal-showcase";
+  const isProvingGround = environmentProfile === "proving-ground";
+  const isIslandWorld = environmentProfile === "island-sandbox" || isShowcase;
   const startConfig = initialSnapshot?.startConfig ?? loadActiveRacingStartConfig();
   const canvas = document.getElementById("racingCanvas");
   const hudOverlay = document.getElementById("racingHudOverlay");
@@ -480,6 +489,10 @@ export function createRacingGame({
   let freeDriveRallyCheckpoints = [];
   let freeDriveRallyChallenge = null;
   let freeDriveRallyGhost = null;
+  let freeDriveShowcaseCheckpoints = [];
+  let freeDriveShowcaseChallenge = null;
+  let activeFreeDriveChallenge = null;
+  let displayedFreeDriveChallenge = null;
   let boostCameraKick = 0;
   const startGateLights = [];
   let initialized = false;
@@ -521,6 +534,14 @@ export function createRacingGame({
     railWiresByHandle: new Map(),
     lastCollision: null
   };
+  const racingTelemetry = createRacingTelemetry();
+  const provingGroundRunner = createProvingGroundTestRunner();
+  const testScenarios = Object.freeze([
+    Object.freeze({ id: "asphalt", label: "Asphalt handling" }),
+    Object.freeze({ id: "rally", label: "Rally grip" }),
+    Object.freeze({ id: "tunnel", label: "Tunnel rendering" }),
+    Object.freeze({ id: "stunt-jump", label: "Stunt jump" })
+  ]);
   const debugApi = {
     activateBoost,
     resetRace,
@@ -534,6 +555,14 @@ export function createRacingGame({
     completeRallyChallengeScenario: () => completeRallyChallengeScenario(),
     placeTrackScenario: (progress = 0) => placeTrackScenario(progress),
     placeWorldScenario: (x, z, heading = 0) => placeWorldScenario(x, z, heading),
+    listTestScenarios: () => testScenarios,
+    placeTestScenario,
+    startBenchmark: (options = {}) => racingTelemetry.startBenchmark(options),
+    cancelBenchmark: () => racingTelemetry.cancelBenchmark(),
+    getTelemetry: () => racingTelemetry.snapshot(),
+    listProvingGroundTests: () => PROVING_GROUND_TESTS,
+    startProvingGroundTest,
+    cancelProvingGroundTest: () => provingGroundRunner.cancel(),
     toggleOpponent,
     toggleCollisionDebug: () => setCollisionDebugEnabled(!collisionDebug.enabled),
     getState: () => ({
@@ -543,6 +572,8 @@ export function createRacingGame({
         triangles: renderer.info.render.triangles,
         points: renderer.info.render.points
       } : null,
+      telemetry: racingTelemetry.snapshot(),
+      provingGround: provingGroundRunner.snapshot(),
       lapText: formatLapDisplay(state.completedLaps),
       completedLaps: state.completedLaps,
       lapArmed: state.lapArmed,
@@ -613,6 +644,10 @@ export function createRacingGame({
         specId: playerVehicleSpec().id,
         mass: playerVehicleSpec().mass,
         driveLayout: playerVehicleSpec().driveLayout,
+        wheelRadius: playerVehicleSpec().wheelRadius,
+        finalDrive: playerVehicleSpec().finalDrive,
+        gearRatios: [...playerVehicleSpec().gearRatios],
+        upshiftRpm: playerVehicleSpec().upshiftRpm,
         wheelContacts: physics?.playerVehicle?.contactCount ?? 0,
         signedSpeed: Number((physics?.playerVehicle?.speed ?? 0).toFixed(2)),
         steeringDegrees: Number(THREE.MathUtils.radToDeg(
@@ -635,9 +670,20 @@ export function createRacingGame({
         squeal: Number(physics.playerVehicle.tireDynamics.squeal.toFixed(3)),
         absActive: physics.playerVehicle.tireDynamics.absActive,
         tractionControlActive: physics.playerVehicle.tireDynamics.tractionControlActive,
-        wheelSlip: physics.playerVehicle.tireDynamics.wheels.map((wheel) => Number(wheel.combinedSlip.toFixed(3)))
+        wheels: physics.playerVehicle.tireDynamics.wheels.map((wheel) => ({
+          driven: wheel.driven,
+          normalLoad: Math.round(wheel.normalLoad),
+          longitudinalSlip: Number(wheel.longitudinalSlip.toFixed(3)),
+          lateralSlip: Number(wheel.lateralSlip.toFixed(3)),
+          combinedSlip: Number(wheel.combinedSlip.toFixed(3)),
+          tcsActive: wheel.tractionControlActive,
+          engineScale: Number(wheel.engineScale.toFixed(3)),
+          absActive: wheel.absActive,
+          brakePressure: Number(wheel.brakeScale.toFixed(3))
+        }))
       } : null,
       rallyChallenge: freeDriveRallyChallenge ? formatRallyChallengeDebugState() : null,
+      showcaseChallenge: freeDriveShowcaseChallenge ? formatChallengeDebugState(freeDriveShowcaseChallenge) : null,
       wheelAnimation: {
         wheelCount: car?.userData.wheelCount ?? 0,
         shaderBindings: car?.userData.wheelShaderBindings?.length ?? 0,
@@ -1208,7 +1254,7 @@ export function createRacingGame({
     setStartButtonsDisabled(true);
     setStartStatus(`正在加载 ${selectedCar().name} 与对手车辆...`);
     const savedStartConfig = saveActiveRacingStartConfig({ playerCarId: selectedCarId, cameraMode });
-    activeSnapshot ??= createRacingSnapshot({ map: mapData, startConfig: savedStartConfig });
+    activeSnapshot ??= createRacingSnapshot({ map: mapData, startConfig: savedStartConfig, environmentProfile });
     random = createSeededRandom(activeSnapshot.randomSeed);
     session = createRacingSession({
       snapshot: activeSnapshot,
@@ -1267,6 +1313,8 @@ export function createRacingGame({
       animationFrameId = 0;
     }
     finishCinematic.stop();
+    racingTelemetry.reset();
+    provingGroundRunner.reset();
     invalidateRuntime();
   }
 
@@ -1314,7 +1362,7 @@ export function createRacingGame({
 
       scene.add(car);
       scene.add(opponentCar);
-      if (isFreeDrive) await initializeFreeDriveTraffic();
+      if (isFreeDrive && !isProvingGround) await initializeFreeDriveTraffic();
       if (initializationToken !== runtimeToken) {
         disposeRuntimeResources();
         return;
@@ -1586,11 +1634,15 @@ export function createRacingGame({
     freeDriveRallyCheckpoints = [];
     freeDriveRallyChallenge = null;
     freeDriveRallyGhost = null;
+    freeDriveShowcaseCheckpoints = [];
+    freeDriveShowcaseChallenge = null;
+    activeFreeDriveChallenge = null;
+    displayedFreeDriveChallenge = null;
     startGateLights.length = 0;
-    if (!isFreeDrive) addSkyDome();
-    if (isFreeDrive) addFreeDriveGroundLayers();
+    if (!isFreeDrive || isProvingGround) addSkyDome();
+    if (isIslandWorld) addFreeDriveGroundLayers();
     else addGroundLayers();
-    if (!isFreeDrive) addBackdrop();
+    if (!isFreeDrive || isProvingGround) addBackdrop();
 
     const road = createRoadMesh();
     road.receiveShadow = true;
@@ -1599,13 +1651,13 @@ export function createRacingGame({
     addTrackVerges();
     if (!isFreeDrive) addInfieldSurface();
     if (!isFreeDrive) addStartFinishLines();
-    if (isFreeDrive) addFreeDriveLaneMarks();
+    if (isIslandWorld) addFreeDriveLaneMarks();
     else addLaneMarks();
     if (!isFreeDrive) addGuardRails();
     if (!isFreeDrive) addRoadsideProps();
     if (!isFreeDrive) addVenueCluster();
     if (!isFreeDrive) addFoliage();
-    if (isFreeDrive) {
+    if (isIslandWorld) {
       addFreeDriveRallyRoad();
       addFreeDriveLandmarks();
       addFreeDriveBridge();
@@ -1614,9 +1666,51 @@ export function createRacingGame({
       addFreeDriveCity();
       await Promise.all([addRealFreeDriveVegetation(), addFreeDriveCoastalCliffs(), addRealFreeDriveCityProps()]);
     }
+    if (isProvingGround) addProvingGroundFacilities();
     validateWorldDrivableSurfaces();
     drivingDust = createDrivingDust();
     scene.add(drivingDust.points);
+  }
+
+  function addProvingGroundFacilities() {
+    const apron = new THREE.Mesh(
+      new THREE.CircleGeometry(68, 128),
+      new THREE.MeshStandardMaterial({ color: 0x30343a, roughness: 0.92, metalness: 0.02 })
+    );
+    apron.name = "proving-ground-skidpad-apron";
+    apron.position.set(0, 0.035, 40);
+    apron.rotation.x = -Math.PI * 0.5;
+    apron.receiveShadow = true;
+    scene.add(apron);
+
+    const lineMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+    const accentMaterial = new THREE.MeshBasicMaterial({ color: 0xffc947, side: THREE.DoubleSide });
+    for (const radius of [30, 60]) {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(radius - 0.22, radius + 0.22, 128),
+        radius === 30 ? accentMaterial : lineMaterial
+      );
+      ring.name = `proving-ground-skidpad-${radius}`;
+      ring.position.set(0, 0.075, 40);
+      ring.rotation.x = -Math.PI * 0.5;
+      scene.add(ring);
+    }
+
+    const markerGeometry = new THREE.BoxGeometry(0.18, 0.025, 18);
+    for (let x = -150; x <= 200; x += 50) {
+      const marker = new THREE.Mesh(markerGeometry, x === -150 ? accentMaterial : lineMaterial);
+      marker.position.set(x, 0.09, -60);
+      scene.add(marker);
+    }
+
+    const coneGeometry = new THREE.ConeGeometry(0.38, 1.2, 10);
+    const coneMaterial = new THREE.MeshStandardMaterial({ color: 0xff6b2c, roughness: 0.72 });
+    for (let index = 0; index < 10; index += 1) {
+      const cone = new THREE.Mesh(coneGeometry, coneMaterial);
+      cone.position.set(-120 + index * 18, 0.6, 15 + (index % 2 === 0 ? -4 : 4));
+      cone.castShadow = qualityPreset.shadows;
+      scene.add(cone);
+    }
   }
 
   async function addRealFreeDriveVegetation() {
@@ -2416,9 +2510,29 @@ export function createRacingGame({
       storageKey: `ack-games:racing:rally-ghost:v1:${selectedCarId}`
     });
 
+    if (isShowcase) {
+      freeDriveShowcaseCheckpoints = createFreeDriveShowcaseRoute({
+        sampleTrack: trackProfileAtProgress,
+        elevationAt: (progress) => freeDriveElevationAtProgress(progress) + 0.06,
+        rallyRoute: freeDriveRallyRoute
+      });
+      freeDriveShowcaseChallenge = createFreeDriveTimeTrial({
+        checkpoints: freeDriveShowcaseCheckpoints,
+        gateRadius: FREE_DRIVE_SHOWCASE.gateRadius,
+        storageKey: `ack-games:racing:coastal-showcase:v1:${selectedCarId}`
+      });
+    }
+
     const gateColors = [0x5cff9d, 0x58d8ff, 0xffd45a, 0xff9a54, 0xff5d73];
     freeDriveRallyCheckpoints.forEach((checkpoint, index) => {
       const gate = createRallyCheckpointGate(checkpoint, gateColors[index], index);
+      scene.add(gate);
+    });
+    freeDriveShowcaseCheckpoints.slice(1).forEach((checkpoint, offset) => {
+      const index = offset + 1;
+      const color = checkpoint.section === "rally" ? 0xffb24c : checkpoint.section === "tunnel" ? 0x68e7ff : 0xb8ff68;
+      const gate = createRallyCheckpointGate(checkpoint, color, `showcase-${index}`);
+      gate.scale.setScalar(1.12);
       scene.add(gate);
     });
 
@@ -2853,7 +2967,7 @@ export function createRacingGame({
       segmentsX: groundConfig.nearFieldSegments ?? 28,
       segmentsZ: groundConfig.nearFieldSegments ?? 28,
       y: -0.18,
-      undulation: groundConfig.nearUndulation ?? 0.55,
+      undulation: isProvingGround ? 0 : groundConfig.nearUndulation ?? 0.55,
       textureScale: 22,
       color: groundConfig.nearFieldColor ?? 0x6f9d57,
       texture: createGroundTexture({
@@ -2872,7 +2986,7 @@ export function createRacingGame({
       segmentsX: groundConfig.farFieldSegments ?? 16,
       segmentsZ: groundConfig.farFieldSegments ?? 16,
       y: -0.34,
-      undulation: groundConfig.farUndulation ?? 1.1,
+      undulation: isProvingGround ? 0 : groundConfig.farUndulation ?? 1.1,
       textureScale: 40,
       color: groundConfig.farFieldColor ?? 0x90aa77,
       texture: createGroundTexture({
@@ -2900,7 +3014,7 @@ export function createRacingGame({
   }
 
   function addTrackVerges() {
-    if (isFreeDrive) {
+    if (isIslandWorld) {
       const zones = [
         { test: (sample) => sample.center.x <= 116, prefix: "sparse_grass", color: 0xffffff, roughness: 0.94 },
         { test: (sample) => sample.center.x > 116 && sample.center.x <= 238, prefix: "brushed_concrete", color: 0xb5bbba, roughness: 0.86 },
@@ -3112,13 +3226,13 @@ export function createRacingGame({
       opponentCollider: null
     };
 
-    const fallbackGroundHeight = physicalFallbackGroundHeight(isFreeDrive);
+    const fallbackGroundHeight = physicalFallbackGroundHeight(isIslandWorld);
     const groundCollider = world.createCollider(
       RAPIER.ColliderDesc.cuboid(Math.max(180, farFieldWidth * 0.55), 0.3, Math.max(150, farFieldDepth * 0.55))
         .setTranslation(sceneCenter.x, fallbackGroundHeight - 0.3, sceneCenter.y)
         .setFriction(1.2)
     );
-    physics.colliderTags.set(groundCollider.handle, "ground");
+    physics.colliderTags.set(groundCollider.handle, isProvingGround ? "road" : "ground");
 
     if (roadCollisionMeshData?.vertices.length && roadCollisionMeshData.indices.length) {
       const roadCollider = world.createCollider(
@@ -3155,7 +3269,7 @@ export function createRacingGame({
     if (!isFreeDrive) {
       createRailColliders(1);
       createRailColliders(-1);
-    } else {
+    } else if (isIslandWorld) {
       createRailColliders(1, (sample) => sample.center.x > 116 && sample.center.x < 240);
       createRailColliders(-1, (sample) => sample.center.x > 116 && sample.center.x < 240);
     }
@@ -3377,7 +3491,7 @@ export function createRacingGame({
       const supportHalfWidth = physicalRoadSupportHalfWidth({
         halfWidth: sample.halfWidth,
         centerX: sample.center.x,
-        isFreeDrive
+        isFreeDrive: isIslandWorld
       });
       const collisionLeft = sample.center.clone().add(sample.normal.clone().multiplyScalar(supportHalfWidth));
       const collisionRight = sample.center.clone().add(sample.normal.clone().multiplyScalar(-supportHalfWidth));
@@ -3392,7 +3506,7 @@ export function createRacingGame({
 
     for (let index = 0; index < trackModel.segmentCount; index += 1) {
       const next = trackModel.closed ? (index + 1) % trackConfig.samples : index + 1;
-      if (isFreeDrive && isFreeDriveJumpGapSegment(trackSamples[index].center, trackSamples[next].center)) continue;
+      if (isIslandWorld && isFreeDriveJumpGapSegment(trackSamples[index].center, trackSamples[next].center)) continue;
       const left = index * 2;
       const right = left + 1;
       const nextLeft = next * 2;
@@ -3470,7 +3584,7 @@ export function createRacingGame({
     for (let index = 0; index < trackModel.segmentCount; index += 1) {
       const next = trackModel.closed ? (index + 1) % trackConfig.samples : index + 1;
       if (segmentFilter && (!segmentFilter(trackSamples[index]) || !segmentFilter(trackSamples[next]))) continue;
-      if (isFreeDrive && isFreeDriveJumpGapSegment(trackSamples[index].center, trackSamples[next].center)) continue;
+      if (isIslandWorld && isFreeDriveJumpGapSegment(trackSamples[index].center, trackSamples[next].center)) continue;
       const inner = index * 2;
       const outer = inner + 1;
       const nextInner = next * 2;
@@ -3989,7 +4103,7 @@ export function createRacingGame({
     const edgeGeometry = new THREE.BoxGeometry(0.14, 0.025, 4.8);
     for (let index = 0; index < 140; index += 1) {
       const sample = trackProfileAtProgress(sampleProgressForIndex(index, 140));
-      if (isFreeDriveJumpGap(sample.center)) continue;
+      if (isIslandWorld && isFreeDriveJumpGap(sample.center)) continue;
       const markHeight = 0.105 + freeDriveElevationAtProgress(sampleProgressForIndex(index, 140));
       if (index % 2 === 0) {
         const dash = new THREE.Mesh(dashGeometry, centerMaterial);
@@ -4010,13 +4124,13 @@ export function createRacingGame({
   }
 
   function freeDriveElevationAtProgress(progress) {
-    if (!isFreeDrive) return 0;
+    if (!isIslandWorld) return 0;
     const sample = trackProfileAtProgress(progress);
     return freeDriveElevationAtPosition(sample.center, progress);
   }
 
   function freeDriveElevationAtPosition(position, progress = 0) {
-    if (!isFreeDrive) return 0;
+    if (!isIslandWorld) return 0;
     const islandElevation = freeDriveIslandElevation(progress);
     const stuntRampRise = freeDriveJumpRampRise(position);
     if (position.x >= 238) return 1.15 + stuntRampRise;
@@ -4037,7 +4151,7 @@ export function createRacingGame({
   }
 
   function freeDriveGroundElevationAt(position, progress) {
-    if (!isFreeDrive) return 0;
+    if (!isIslandWorld) return 0;
     const stuntRampRise = freeDriveStuntRampRise(position);
     if (position.x > 238) return stuntRampRise;
     if (position.x > 116) return -1.2 + stuntRampRise;
@@ -4048,11 +4162,11 @@ export function createRacingGame({
 
   function resolveSurfaceSupport(position, heading, preferredIndex = state.trackIndex) {
     const centerProjection = closestTrackSample(position, preferredIndex);
-    const centerInJumpGap = isFreeDrive && isFreeDriveJumpGap(position);
+    const centerInJumpGap = isIslandWorld && isFreeDriveJumpGap(position);
     const roadSupportHalfWidth = physicalRoadSupportHalfWidth({
       halfWidth: centerProjection.sample.halfWidth,
       centerX: centerProjection.sample.center.x,
-      isFreeDrive
+      isFreeDrive: isIslandWorld
     });
     const preferRoadLayer = centerProjection.distance <= roadSupportHalfWidth && !centerInJumpGap;
     const contactPoints = createVehicleContactPoints({
@@ -4071,23 +4185,23 @@ export function createRacingGame({
   function sampleVehicleSurface(point, preferRoadLayer, preferredIndex) {
     const position = new THREE.Vector2(point.x, point.z);
     const projection = closestTrackSample(position, preferredIndex);
-    const inJumpGap = isFreeDrive && isFreeDriveJumpGap(position);
+    const inJumpGap = isIslandWorld && isFreeDriveJumpGap(position);
 
     if (preferRoadLayer) {
       const roadSupportHalfWidth = physicalRoadSupportHalfWidth({
         halfWidth: projection.sample.halfWidth,
         centerX: projection.sample.center.x,
-        isFreeDrive
+        isFreeDrive: isIslandWorld
       });
       if (projection.distance > roadSupportHalfWidth || inJumpGap) return null;
-      const bridge = isFreeDrive && position.x > 116 && position.x < 240;
+      const bridge = isIslandWorld && position.x > 116 && position.x < 240;
       return {
         height: 0.06 + freeDriveElevationAtProgress(projection.progress),
         surfaceId: bridge ? "bridge" : "road"
       };
     }
 
-    const stuntRise = freeDriveStuntRampRise(position);
+    const stuntRise = isIslandWorld ? freeDriveStuntRampRise(position) : 0;
     return {
       height: freeDriveGroundElevationAt(position, projection.progress),
       surfaceId: stuntRise > 0 ? "stunt-ramp" : "ground"
@@ -5253,7 +5367,7 @@ export function createRacingGame({
       }
       const speedRecovery = traffic.boostSeconds > 0 ? 16 : 5.5;
       traffic.currentSpeed = moveToward(traffic.currentSpeed, targetSpeed, deltaSeconds * speedRecovery);
-      if (!traffic.airborne && traffic.jumpCooldownSeconds <= 0) {
+      if (isIslandWorld && !traffic.airborne && traffic.jumpCooldownSeconds <= 0) {
         const launch = resolveFreeDriveJumpLaunch(traffic.position, {
           x: Math.sin(traffic.heading) * traffic.currentSpeed,
           y: Math.cos(traffic.heading) * traffic.currentSpeed
@@ -5703,15 +5817,21 @@ export function createRacingGame({
   function loop(timestamp) {
     if (!active) return;
 
-    const deltaSeconds = Math.min((timestamp - lastFrameTime) / 1000, 0.04);
+    const frameStartedAt = clock.now();
+    const frameDeltaSeconds = Math.max(0, (timestamp - lastFrameTime) / 1000);
+    const deltaSeconds = Math.min(frameDeltaSeconds, 0.04);
     lastFrameTime = timestamp;
+    let physicsMs = 0;
+    let physicsSteps = 0;
     input.pollGamepad();
     if (!raceState.paused) {
       const sprintGlide = raceConfig.mode === "sprint" && raceState.finished && !raceState.resultVisible;
 
       if (!raceState.finished || sprintGlide) {
         updateControls();
-        updatePhysics(deltaSeconds);
+        const physicsStartedAt = clock.now();
+        physicsSteps = updatePhysics(deltaSeconds);
+        physicsMs = clock.now() - physicsStartedAt;
         updateRaceState(deltaSeconds);
       } else {
         state.throttle = 0;
@@ -5733,7 +5853,18 @@ export function createRacingGame({
     updateRacingAudio();
     updateRacingHaptics();
     updateHud();
+    const renderStartedAt = clock.now();
     renderer.render(scene, camera);
+    const renderMs = clock.now() - renderStartedAt;
+    racingTelemetry.recordFrame({
+      deltaSeconds: frameDeltaSeconds,
+      cpuMs: clock.now() - frameStartedAt,
+      physicsMs,
+      renderMs,
+      physicsSteps,
+      simulationActive: !raceState.paused,
+      render: renderer.info.render
+    });
 
     animationFrameId = clock.requestFrame(loop);
   }
@@ -5772,6 +5903,13 @@ export function createRacingGame({
   }
 
   function updateControls() {
+    if (provingGroundRunner.snapshot().status === "running") {
+      const controls = provingGroundRunner.controls();
+      state.throttle = controls.throttle;
+      state.brake = controls.brake;
+      state.steering = controls.steering;
+      return;
+    }
     const throttlePressed = keyState.has("KeyW") || keyState.has("ArrowUp");
     const brakePressed = keyState.has("KeyS") || keyState.has("ArrowDown");
     const leftPressed = keyState.has("KeyA") || keyState.has("ArrowLeft");
@@ -5875,6 +6013,7 @@ export function createRacingGame({
   }
 
   function updatePhysics(deltaSeconds) {
+    let stepCount = 0;
     physicsAccumulator = Math.min(
       physicsAccumulator + deltaSeconds,
       physicsConfig.stepSeconds * 4
@@ -5882,7 +6021,9 @@ export function createRacingGame({
     while (physicsAccumulator >= physicsConfig.stepSeconds) {
       stepPhysics(physicsConfig.stepSeconds);
       physicsAccumulator -= physicsConfig.stepSeconds;
+      stepCount += 1;
     }
+    return stepCount;
   }
 
   function stepPhysics(deltaSeconds) {
@@ -5899,6 +6040,12 @@ export function createRacingGame({
       state.stoppedByImpactSeconds = Math.max(0, state.stoppedByImpactSeconds - deltaSeconds);
     }
 
+    if (provingGroundRunner.snapshot().status === "running") {
+      const controls = provingGroundRunner.controls();
+      state.throttle = controls.throttle;
+      state.brake = controls.brake;
+      state.steering = controls.steering;
+    }
     drivePhysicalVehicle(deltaSeconds);
 
     updateOpponent(deltaSeconds);
@@ -5908,6 +6055,7 @@ export function createRacingGame({
     syncPlayerPhysicsState(state.previousTrackIndex);
     syncPhysicalVehicleState();
     syncOpponentPhysicsState();
+    provingGroundRunner.update(provingGroundObservation(), deltaSeconds);
   }
 
   function drivePhysicalVehicle(deltaSeconds) {
@@ -6068,7 +6216,7 @@ export function createRacingGame({
     if (isFreeDrive) {
       state.maxForwardDistance += state.velocity.length() * deltaSeconds;
       raceState.playerPlace = 1;
-      updateFreeDriveRallyChallenge(deltaSeconds);
+      updateFreeDriveChallenges(deltaSeconds);
       return;
     }
 
@@ -6135,6 +6283,48 @@ export function createRacingGame({
       deltaSeconds
     });
     updateFreeDriveRallyGhost(challengeState);
+    return challengeState;
+  }
+
+  function updateFreeDriveShowcaseChallenge(deltaSeconds) {
+    if (!freeDriveShowcaseChallenge) return;
+    return freeDriveShowcaseChallenge.update({
+      x: state.position.x,
+      z: state.position.y,
+      heading: state.heading,
+      deltaSeconds
+    });
+  }
+
+  function updateFreeDriveChallenges(deltaSeconds) {
+    if (activeFreeDriveChallenge === "showcase") {
+      const challenge = updateFreeDriveShowcaseChallenge(deltaSeconds);
+      if (challenge?.phase === "finished") {
+        activeFreeDriveChallenge = null;
+        displayedFreeDriveChallenge = "showcase";
+      }
+      return;
+    }
+    if (activeFreeDriveChallenge === "rally") {
+      const challenge = updateFreeDriveRallyChallenge(deltaSeconds);
+      if (challenge?.phase === "finished") {
+        activeFreeDriveChallenge = null;
+        displayedFreeDriveChallenge = "rally";
+      }
+      return;
+    }
+
+    const showcase = updateFreeDriveShowcaseChallenge(0);
+    if (showcase?.phase === "running") {
+      activeFreeDriveChallenge = "showcase";
+      displayedFreeDriveChallenge = "showcase";
+      return;
+    }
+    const rally = updateFreeDriveRallyChallenge(0);
+    if (rally?.phase === "running") {
+      activeFreeDriveChallenge = "rally";
+      displayedFreeDriveChallenge = "rally";
+    }
   }
 
   function updateFreeDriveRallyGhost(challengeState) {
@@ -6155,7 +6345,14 @@ export function createRacingGame({
   }
 
   function formatRallyChallengeDebugState() {
-    const challenge = freeDriveRallyChallenge.getState();
+    return {
+      ...formatChallengeDebugState(freeDriveRallyChallenge),
+      ghostVisible: Boolean(freeDriveRallyGhost?.visible)
+    };
+  }
+
+  function formatChallengeDebugState(challengeRuntime) {
+    const challenge = challengeRuntime.getState();
     return {
       phase: challenge.phase,
       elapsedSeconds: Number(challenge.elapsedSeconds.toFixed(2)),
@@ -6165,7 +6362,6 @@ export function createRacingGame({
         ? null
         : Number(challenge.bestTimeSeconds.toFixed(2)),
       ghostSampleCount: challenge.bestGhost.length,
-      ghostVisible: Boolean(freeDriveRallyGhost?.visible),
       newBest: challenge.newBest
     };
   }
@@ -6575,6 +6771,45 @@ ${shader.vertexShader}`
         physics?.playerVehicle?.steeringAngle ?? 0
       ).toFixed(1)} deg`
     ];
+    const drivetrain = physics?.playerVehicle?.drivetrain;
+    const tires = physics?.playerVehicle?.tireDynamics;
+    const telemetry = racingTelemetry.snapshot();
+    const benchmark = telemetry.benchmark;
+    const telemetryLines = [
+      "PERFORMANCE",
+      `fps ${telemetry.live.averageFps.toFixed(1)}  1% ${telemetry.live.onePercentLowFps.toFixed(1)}`,
+      `cpu ${telemetry.live.averageCpuMs.toFixed(2)} ms  physics p95 ${telemetry.live.p95PhysicsMs.toFixed(2)} ms`,
+      `render p95 ${telemetry.live.p95RenderMs.toFixed(2)} ms  calls ${telemetry.live.maximumRenderCalls}`,
+      benchmark.status === "running"
+        ? `benchmark ${benchmark.label} ${(benchmark.progress * 100).toFixed(0)}%`
+        : benchmark.status === "completed"
+          ? `benchmark ${benchmark.label} ${benchmark.averageFps.toFixed(1)} fps / 1% ${benchmark.onePercentLowFps.toFixed(1)}`
+          : "benchmark idle"
+    ];
+    const provingGround = provingGroundRunner.snapshot();
+    const provingGroundLines = [
+      "PROVING GROUND",
+      provingGround.status === "idle"
+        ? "test idle"
+        : provingGround.status === "running"
+          ? `${provingGround.testId} ${provingGround.phase} ${provingGround.elapsedSeconds.toFixed(2)} s`
+          : `${provingGround.testId} completed`,
+      provingGround.status === "completed"
+        ? Object.entries(provingGround)
+            .filter(([key]) => !["testId", "status", "drivetrainTrace"].includes(key))
+            .map(([key, value]) => `${key}=${value}`)
+            .join("  ")
+        : ""
+    ];
+    const dynamicsLines = [
+      "DRIVETRAIN / TIRES",
+      `gear ${drivetrain?.gear ?? "--"}  rpm ${Math.round(drivetrain?.engineRpm ?? 0)}`,
+      `grip ${(tires?.grip ?? 0).toFixed(2)}  max slip ${(tires?.maximumSlip ?? 0).toFixed(3)}`,
+      `wheel slip ${(tires?.wheels ?? []).map((wheel) => wheel.combinedSlip.toFixed(2)).join(" / ") || "--"}`,
+      `wheel load ${(tires?.wheels ?? []).map((wheel) => Math.round(wheel.normalLoad)).join(" / ") || "--"} N`,
+      `brake pressure ${(tires?.wheels ?? []).map((wheel) => wheel.brakeScale.toFixed(2)).join(" / ") || "--"}`,
+      `ABS ${tires?.absActive ? "ON" : "off"}  TCS ${tires?.tractionControlActive ? "ON" : "off"}`
+    ];
     const vehicleSpec = playerVehicleSpec();
     const playerHalfWidth = vehicleSpec.chassisHalfWidth;
     const playerHalfHeight = vehicleSpec.chassisHalfHeight;
@@ -6583,6 +6818,9 @@ ${shader.vertexShader}`
     hud.textContent = [
       "Physics Telemetry  [F2]",
       ...physicalVehicleLines,
+      ...dynamicsLines,
+      ...telemetryLines,
+      ...provingGroundLines,
       `onRoad ${state.onRoad ? "yes" : "no"}  paused ${raceState.paused ? "yes" : "no"}`,
       `surface ${playerSurfaceState.surfaceId ?? "none"}  contacts ${playerSurfaceState.contacts.length}/4`,
       `height ${playerSurfaceState.height.toFixed(2)}  pitch ${THREE.MathUtils.radToDeg(playerSurfaceState.pitch).toFixed(1)}  roll ${THREE.MathUtils.radToDeg(playerSurfaceState.roll).toFixed(1)}`,
@@ -6681,16 +6919,28 @@ ${shader.vertexShader}`
 
   function updateHud() {
     const rallyChallenge = freeDriveRallyChallenge?.getState();
-    if (isFreeDrive && rallyChallenge?.phase === "running") {
+    const showcaseChallenge = freeDriveShowcaseChallenge?.getState();
+    const visibleChallenge = activeFreeDriveChallenge ?? displayedFreeDriveChallenge;
+    if (isFreeDrive && visibleChallenge === "showcase" && showcaseChallenge?.phase === "running") {
+      progressLabel.textContent = "ISLAND TOUR";
+      progressValue.textContent = `${showcaseChallenge.elapsedSeconds.toFixed(2)} S`;
+      placeValue.textContent = `GATE ${Math.min(showcaseChallenge.nextCheckpoint, showcaseChallenge.checkpointCount - 1)} / ${showcaseChallenge.checkpointCount - 1}`;
+    } else if (isFreeDrive && visibleChallenge === "rally" && rallyChallenge?.phase === "running") {
       progressLabel.textContent = "RALLY";
       progressValue.textContent = `${rallyChallenge.elapsedSeconds.toFixed(2)} S`;
       placeValue.textContent = `CP ${Math.min(rallyChallenge.nextCheckpoint, rallyChallenge.checkpointCount - 1)} / ${rallyChallenge.checkpointCount - 1}`;
-    } else if (isFreeDrive && rallyChallenge?.phase === "finished") {
+    } else if (isFreeDrive && visibleChallenge === "rally" && rallyChallenge?.phase === "finished") {
       progressLabel.textContent = rallyChallenge.newBest ? "NEW BEST" : "RALLY";
       progressValue.textContent = `${rallyChallenge.elapsedSeconds.toFixed(2)} S`;
       placeValue.textContent = rallyChallenge.bestTimeSeconds === null
         ? "FREE"
         : `BEST ${rallyChallenge.bestTimeSeconds.toFixed(2)}`;
+    } else if (isFreeDrive && visibleChallenge === "showcase" && showcaseChallenge?.phase === "finished") {
+      progressLabel.textContent = showcaseChallenge.newBest ? "TOUR BEST" : "ISLAND TOUR";
+      progressValue.textContent = `${showcaseChallenge.elapsedSeconds.toFixed(2)} S`;
+      placeValue.textContent = showcaseChallenge.bestTimeSeconds === null
+        ? "FREE"
+        : `BEST ${showcaseChallenge.bestTimeSeconds.toFixed(2)}`;
     } else {
       progressLabel.textContent = isFreeDrive ? "ROAM" : raceConfig.mode === "lap" ? "LAP" : "LEFT";
       progressValue.textContent = isFreeDrive
@@ -6746,6 +6996,11 @@ ${shader.vertexShader}`
     pauseOverlay.hidden = true;
     collisionDebug.lastCollision = null;
     physicsAccumulator = 0;
+    provingGroundRunner.reset();
+    freeDriveRallyChallenge?.reset();
+    freeDriveShowcaseChallenge?.reset();
+    activeFreeDriveChallenge = null;
+    displayedFreeDriveChallenge = null;
 
     const start = trackProfileAtProgress(raceConfig.startProgress);
     const startPosition = start.center.clone().add(start.normal.clone().multiplyScalar(2.8));
@@ -7297,7 +7552,7 @@ ${shader.vertexShader}`
   }
 
   function placeStuntJumpScenario(requestedDirection = 1) {
-    if (!isFreeDrive || !physics?.playerBody) return false;
+    if (!isIslandWorld || !physics?.playerBody) return false;
     const direction = requestedDirection < 0 ? -1 : 1;
     const x = direction > 0
       ? FREE_DRIVE_STUNT_JUMP.leftRampStartX - 4
@@ -7324,7 +7579,7 @@ ${shader.vertexShader}`
   }
 
   function placeTunnelScenario() {
-    if (!isFreeDrive) return false;
+    if (!isIslandWorld) return false;
     const progress = (FREE_DRIVE_TUNNEL.startProgress + FREE_DRIVE_TUNNEL.endProgress) * 0.5;
     const sample = trackProfileAtProgress(progress);
     return placeWorldScenario(sample.center.x, sample.center.y, sample.heading);
@@ -7340,11 +7595,56 @@ ${shader.vertexShader}`
     );
   }
 
+  function placeTestScenario(scenarioId) {
+    if (!testScenarios.some(({ id }) => id === scenarioId)) return false;
+    if (scenarioId === "asphalt") return placeTrackScenario(0.03);
+    if (scenarioId === "rally") return placeRallyScenario();
+    if (scenarioId === "tunnel") return placeTunnelScenario();
+    return placeStuntJumpScenario();
+  }
+
+  function provingGroundObservation() {
+    const vehicle = physics?.playerVehicle;
+    const drivetrain = vehicle?.drivetrain;
+    const tireDynamics = vehicle?.tireDynamics;
+    return {
+      x: state.position.x,
+      z: state.position.y,
+      heading: state.heading,
+      speedKmh: state.velocity.length() * 3.6,
+      steeringAngle: vehicle?.steeringAngle ?? 0,
+      maximumTireSlip: tireDynamics?.maximumSlip ?? 0,
+      absActive: tireDynamics?.absActive ?? false,
+      tractionControlActive: tireDynamics?.tractionControlActive ?? false,
+      shiftCount: drivetrain?.shiftCount ?? 0,
+      gear: drivetrain?.gear ?? 0,
+      engineRpm: drivetrain?.engineRpm ?? 0,
+      torqueRatio: drivetrain?.torqueRatio ?? 0,
+      drivetrainScale: drivetrain?.driveScale ?? 0,
+      tcsEngineScale: tireDynamics?.engineScale ?? 1,
+      engineForcePerWheel: vehicle?.engineForce ?? 0,
+      surfaceId: playerSurfaceState.surfaceId
+    };
+  }
+
+  function startProvingGroundTest(testId) {
+    if (!isProvingGround || !physics?.playerBody) return false;
+    const test = PROVING_GROUND_TESTS.find(({ id }) => id === testId);
+    if (!test) return false;
+    provingGroundRunner.reset();
+    if (!placeWorldScenario(test.setup.x, test.setup.z, test.setup.heading)) return false;
+    return provingGroundRunner.start(testId, provingGroundObservation());
+  }
+
   function startRallyChallengeScenario() {
     if (!isFreeDrive || !freeDriveRallyChallenge || !freeDriveRallyCheckpoints.length) return false;
+    freeDriveRallyChallenge.reset();
+    activeFreeDriveChallenge = null;
+    displayedFreeDriveChallenge = "rally";
     const checkpoint = freeDriveRallyCheckpoints[0];
     if (!placeWorldScenario(checkpoint.x, checkpoint.z, checkpoint.heading)) return false;
-    updateFreeDriveRallyChallenge(0);
+    const challenge = updateFreeDriveRallyChallenge(0);
+    if (challenge?.phase === "running") activeFreeDriveChallenge = "rally";
     updateHud();
     renderer.render(scene, camera);
     return true;

@@ -115,6 +115,7 @@ test("free-drive traffic uses its own limited blue nitro", async ({ page }) => {
 
   const state = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState());
   expect(state.playerBoostUnlimited).toBe(true);
+  expect(state.showcaseChallenge).toBeNull();
   expect(state.traffic.every((traffic) => traffic.boostCharges >= 0 && traffic.boostCharges <= 3)).toBe(true);
 });
 
