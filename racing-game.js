@@ -2332,6 +2332,8 @@ export function createRacingGame({
       scene.add(crossbeam);
     });
 
+    if (isShowcase) addCoastalBridgeCables(bridgeSamples, steel);
+
     const warningMaterial = new THREE.MeshStandardMaterial({ color: 0xf2c94c, roughness: 0.54, metalness: 0.08 });
     for (const corridorSide of [-1, 1]) {
       const corridorSamples = bridgeSamples.filter(
@@ -2362,6 +2364,64 @@ export function createRacingGame({
       }
     }
 
+  }
+
+  function addCoastalBridgeCables(bridgeSamples, steelMaterial) {
+    const cableMaterial = new THREE.MeshStandardMaterial({
+      color: 0xef5b45,
+      emissive: 0x8f1f18,
+      emissiveIntensity: 0.32,
+      roughness: 0.38,
+      metalness: 0.62
+    });
+    for (const corridorSide of [-1, 1]) {
+      const corridor = bridgeSamples.filter((sample) => Math.sign(sample.center.y || corridorSide) === corridorSide);
+      if (!corridor.length) continue;
+      const nearest = (targetX) => corridor.reduce(
+        (best, sample) => Math.abs(sample.center.x - targetX) < Math.abs(best.center.x - targetX) ? sample : best,
+        corridor[0]
+      );
+      const cableSamples = [nearest(124), nearest(154), nearest(179), nearest(204), nearest(232)];
+      for (const side of [-1, 1]) {
+        const points = cableSamples.map((sample, index) => {
+          const edge = sample.center.clone().add(sample.normal.clone().multiplyScalar((sample.halfWidth + 1.2) * side));
+          const deckY = freeDriveElevationAtPosition(sample.center, sample.progress);
+          const cableHeight = index === 1 || index === 3 ? 13.8 : index === 2 ? 5.2 : 2.8;
+          return new THREE.Vector3(edge.x, deckY + cableHeight, edge.y);
+        });
+        const cable = new THREE.Mesh(
+          new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 32, 0.11, 6, false),
+          cableMaterial
+        );
+        cable.castShadow = qualityPreset.shadows;
+        scene.add(cable);
+      }
+    }
+
+    const beaconMaterial = new THREE.MeshStandardMaterial({
+      color: 0x72f2e5,
+      emissive: 0x1ad7ca,
+      emissiveIntensity: 2.4,
+      roughness: 0.24
+    });
+    for (const sample of bridgeSamples.filter((sample) => Math.abs(sample.center.x - 154) < 1.4 || Math.abs(sample.center.x - 204) < 1.4)) {
+      const deckY = freeDriveElevationAtPosition(sample.center, sample.progress);
+      for (const side of [-1, 1]) {
+        const edge = sample.center.clone().add(sample.normal.clone().multiplyScalar((sample.halfWidth + 1.2) * side));
+        const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.32, 10, 8), beaconMaterial);
+        beacon.position.set(edge.x, deckY + 15.2, edge.y);
+        scene.add(beacon);
+      }
+    }
+
+    const bridgeBlade = new THREE.Mesh(
+      new THREE.BoxGeometry(0.35, 5.5, 16),
+      steelMaterial
+    );
+    bridgeBlade.position.set(179, 12.5, 0);
+    bridgeBlade.rotation.x = Math.PI * 0.5;
+    bridgeBlade.castShadow = qualityPreset.shadows;
+    scene.add(bridgeBlade);
   }
 
   function addFreeDriveStuntRamps() {
