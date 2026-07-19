@@ -427,6 +427,7 @@ export function createRacingGame({
 
   const keyState = new Set();
   let gamepadDrive = Object.freeze({ connected: false, steering: 0, throttle: 0, brake: 0 });
+  let showcaseMatrixControls = null;
   const state = {
     position: new THREE.Vector2(),
     velocity: new THREE.Vector2(),
@@ -626,6 +627,10 @@ export function createRacingGame({
     listProvingGroundTests: () => PROVING_GROUND_TESTS,
     startProvingGroundTest,
     cancelProvingGroundTest: () => provingGroundRunner.cancel(),
+    getShowcaseDrivingLine: () => freeDriveShowcaseDrivingLine.map(
+      ({ x, z, heading, section, distance }) => ({ x, z, heading, section, distance })
+    ),
+    setShowcaseMatrixControls: (controls = null) => setShowcaseMatrixControls(controls),
     toggleOpponent,
     toggleCollisionDebug: () => setCollisionDebugEnabled(!collisionDebug.enabled),
     getState: () => ({
@@ -676,6 +681,7 @@ export function createRacingGame({
       status: currentStatusLabel(),
       paused: raceState.paused,
       opponentEnabled: raceState.opponentEnabled,
+      playerHeading: Number(state.heading.toFixed(4)),
       playerPosition: { x: Number(state.position.x.toFixed(2)), y: Number(state.position.y.toFixed(2)) },
       opponentPosition: {
         x: Number(opponentState.position.x.toFixed(2)),
@@ -6166,6 +6172,12 @@ export function createRacingGame({
       state.steering = controls.steering;
       return;
     }
+    if (showcaseMatrixControls && isShowcase && showcaseEvent.phase === "running") {
+      state.throttle = showcaseMatrixControls.throttle;
+      state.brake = showcaseMatrixControls.brake;
+      state.steering = showcaseMatrixControls.steering;
+      return;
+    }
     const throttlePressed = keyState.has("KeyW") || keyState.has("ArrowUp");
     const brakePressed = keyState.has("KeyS") || keyState.has("ArrowDown");
     const leftPressed = keyState.has("KeyA") || keyState.has("ArrowLeft");
@@ -6181,6 +6193,20 @@ export function createRacingGame({
       ? physicalDrivingConfig.steeringReleaseResponse
       : physicalDrivingConfig.steeringResponse;
     state.steering += (targetSteer - state.steering) * steeringResponse;
+  }
+
+  function setShowcaseMatrixControls(controls) {
+    if (controls === null) {
+      showcaseMatrixControls = null;
+      return true;
+    }
+    if (!isShowcase || !controls || typeof controls !== "object") return false;
+    showcaseMatrixControls = Object.freeze({
+      throttle: clamp(Number(controls.throttle) || 0, 0, 1),
+      brake: clamp(Number(controls.brake) || 0, 0, 1),
+      steering: clamp(Number(controls.steering) || 0, -1, 1)
+    });
+    return true;
   }
 
   function updateRacingAudio() {
