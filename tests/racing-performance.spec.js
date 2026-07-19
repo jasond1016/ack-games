@@ -12,6 +12,9 @@ test("free-drive benchmark exposes stable telemetry and scene-complexity budgets
 
   const scenarios = await page.evaluate(() => globalThis.__ackGamesDebug.racing.listTestScenarios());
   expect(scenarios.map(({ id }) => id)).toEqual(["asphalt", "rally", "tunnel", "stunt-jump"]);
+  await expect.poll(() => page.evaluate(() =>
+    globalThis.__ackGamesDebug.racing.getState().showcaseEvent.phase
+  ), { timeout: 8_000 }).toBe("running");
   expect(await page.evaluate(() => globalThis.__ackGamesDebug.racing.placeTestScenario("asphalt"))).toBe(true);
   await page.evaluate(() => globalThis.__ackGamesDebug.racing.startBenchmark({ label: "ci-asphalt", durationSeconds: 1 }));
 
