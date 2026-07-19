@@ -2721,10 +2721,10 @@ export function createRacingGame({
     }
 
     const stage = new THREE.Mesh(new THREE.BoxGeometry(24, 2.2, 9), darkSteel);
-    stage.position.set(sample.halfWidth + 25, 1.1, -49);
+    stage.position.set(-(sample.halfWidth + 25), 1.1, -49);
     const stageScreen = new THREE.Mesh(new THREE.PlaneGeometry(16, 5.4), bannerMaterial);
-    stageScreen.position.set(sample.halfWidth + 18.95, 5.2, -49);
-    stageScreen.rotation.y = -Math.PI * 0.5;
+    stageScreen.position.set(-(sample.halfWidth + 18.95), 5.2, -49);
+    stageScreen.rotation.y = Math.PI * 0.5;
     venue.add(stage, stageScreen);
     venue.traverse((child) => {
       if (!child.isMesh) return;

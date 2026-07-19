@@ -159,6 +159,26 @@ test("Coastal Festival 纯公路路线达到约两分钟的距离预算", () => 
   }
 });
 
+test("Coastal Festival keeps the final approach wider than a hairpin", () => {
+  const coastal = racingMapLibrary.snapshot().presets
+    .find(({ mapId }) => mapId === "preset-coastal-showcase").map;
+  const track = inspectRacingTrack(coastal.track);
+  let maximumCurvature = 0;
+  let previous = track.sample(0.9);
+  for (let index = 649; index <= 756; index += 1) {
+    const progress = (index % 720) / 720;
+    const sample = track.sample(progress);
+    const distance = Math.hypot(sample.center.x - previous.center.x, sample.center.y - previous.center.y);
+    const headingDelta = Math.atan2(
+      Math.sin(sample.heading - previous.heading),
+      Math.cos(sample.heading - previous.heading)
+    );
+    maximumCurvature = Math.max(maximumCurvature, Math.abs(headingDelta) / Math.max(distance, 1e-6));
+    previous = sample;
+  }
+  assert.ok(maximumCurvature <= 0.1, `final approach curvature ${maximumCurvature.toFixed(3)} exceeds 0.1`);
+});
+
 test("Festival 导航前瞻距离随速度增加但保持可读范围", () => {
   assert.equal(showcaseRouteLookAheadDistance(0), 35);
   assert.ok(showcaseRouteLookAheadDistance(25) > showcaseRouteLookAheadDistance(10));
