@@ -1796,9 +1796,16 @@ export function createRacingGame({
       if (isShowcase) {
         addCoastalFestivalVenue();
         addCoastalTunnelMountain();
+        addCoastalBoulevard();
+        addCoastalRoadsideDensity();
       }
       addFreeDriveCity();
-      await Promise.all([addRealFreeDriveVegetation(), addFreeDriveCoastalCliffs(), addRealFreeDriveCityProps()]);
+      await Promise.all([
+        addRealFreeDriveVegetation(),
+        addFreeDriveCoastalCliffs(),
+        addRealFreeDriveCityProps(),
+        isShowcase ? addCoastalPalmTrees() : Promise.resolve()
+      ]);
     }
     if (isProvingGround) addProvingGroundFacilities();
     validateWorldDrivableSurfaces();
@@ -2846,6 +2853,254 @@ export function createRacingGame({
         scene.add(buttress, rockMass);
       }
     }
+  }
+
+  function addCoastalBoulevard() {
+    const boulevard = new THREE.Group();
+    boulevard.name = "coastal-festival-boulevard";
+    const wallMaterial = createFreeDrivePbrMaterial("painted_plaster_wall", {
+      color: 0xc7b39f,
+      repeatX: 4,
+      repeatY: 7
+    });
+    const glass = new THREE.MeshPhysicalMaterial({
+      color: 0x2f6978,
+      roughness: 0.16,
+      metalness: 0.18,
+      transmission: 0.14,
+      envMapIntensity: 1.35
+    });
+    const darkSteel = new THREE.MeshStandardMaterial({ color: 0x26343a, roughness: 0.46, metalness: 0.58 });
+    const plazaMaterial = createFreeDrivePbrMaterial("brick_pavement", {
+      color: 0xa6a197,
+      repeatX: 7,
+      repeatY: 5,
+      roughness: 0.94
+    });
+    const accentMaterial = new THREE.MeshStandardMaterial({
+      color: 0xef5b45,
+      emissive: 0x751a16,
+      emissiveIntensity: 0.22,
+      roughness: 0.48
+    });
+    const transforms = {
+      plazas: [],
+      walls: [],
+      windows: [],
+      crowns: [],
+      accents: [],
+      piers: [],
+      bands: []
+    };
+    const progresses = [0.16, 0.205, 0.25, 0.295, 0.34, 0.385, 0.43, 0.475, 0.515];
+    progresses.forEach((progress, index) => {
+      const sample = trackProfileAtProgress(progress);
+      const side = index % 3 === 1 ? -1 : 1;
+      const offset = sample.halfWidth + 26 + (index % 2) * 5;
+      const anchor = sample.center.clone().add(sample.normal.clone().multiplyScalar(offset * side));
+      const roadY = freeDriveElevationAtProgress(progress);
+      const width = 18 + (index % 3) * 3.5;
+      const height = 15 + (index % 4) * 5;
+      const depth = 12 + (index % 2) * 3;
+      transforms.plazas.push({
+        position: new THREE.Vector3(anchor.x, roadY - 0.3, anchor.y),
+        yaw: sample.heading,
+        scale: new THREE.Vector3(width + 9, 0.7, depth + 9)
+      });
+      transforms.walls.push({
+        position: new THREE.Vector3(anchor.x, roadY + height * 0.5, anchor.y),
+        yaw: sample.heading,
+        scale: new THREE.Vector3(width, height, depth)
+      });
+      for (let bandY = 4; bandY < height; bandY += 4.2) {
+        transforms.bands.push({
+          position: new THREE.Vector3(anchor.x, roadY + bandY, anchor.y),
+          yaw: sample.heading,
+          scale: new THREE.Vector3(width + 0.35, 0.16, depth + 0.35)
+        });
+      }
+      const roadFacingOffset = sample.normal.clone().multiplyScalar(-side * (width * 0.5 + 0.09));
+      transforms.windows.push({
+        position: new THREE.Vector3(
+          anchor.x + roadFacingOffset.x,
+          roadY + height * 0.54,
+          anchor.y + roadFacingOffset.y
+        ),
+        yaw: sample.heading,
+        scale: new THREE.Vector3(0.18, height * 0.62, depth * 0.72)
+      });
+      transforms.crowns.push({
+        position: new THREE.Vector3(anchor.x, roadY + height + 0.25, anchor.y),
+        yaw: sample.heading,
+        scale: new THREE.Vector3(width + 1.1, 0.65, depth + 1.1)
+      });
+      transforms.accents.push({
+        position: new THREE.Vector3(
+          anchor.x + roadFacingOffset.x * 1.02 + sample.tangent.x * depth * 0.28,
+          roadY + height * 0.5,
+          anchor.y + roadFacingOffset.y * 1.02 + sample.tangent.y * depth * 0.28
+        ),
+        yaw: sample.heading,
+        scale: new THREE.Vector3(0.32, height * 0.88, 1.2)
+      });
+      const pierTop = roadY - 0.3;
+      const pierHeight = Math.max(1, pierTop + 1.45);
+      for (const lateral of [-1, 1]) {
+        for (const longitudinal of [-1, 1]) {
+          const point = anchor.clone()
+            .add(sample.normal.clone().multiplyScalar(lateral * width * 0.38))
+            .add(sample.tangent.clone().multiplyScalar(longitudinal * depth * 0.38));
+          transforms.piers.push({
+            position: new THREE.Vector3(point.x, -1.45 + pierHeight * 0.5, point.y),
+            yaw: sample.heading,
+            scale: new THREE.Vector3(0.72, pierHeight, 0.72)
+          });
+        }
+      }
+    });
+    const box = new THREE.BoxGeometry(1, 1, 1);
+    const addInstances = (material, instances, { receiveShadow = true } = {}) => {
+      if (!instances.length) return;
+      const mesh = new THREE.InstancedMesh(box, material, instances.length);
+      const dummy = new THREE.Object3D();
+      instances.forEach((instance, index) => {
+        dummy.position.copy(instance.position);
+        dummy.rotation.set(0, instance.yaw, 0);
+        dummy.scale.copy(instance.scale);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(index, dummy.matrix);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.castShadow = qualityPreset.shadows;
+      mesh.receiveShadow = receiveShadow;
+      boulevard.add(mesh);
+    };
+    addInstances(plazaMaterial, transforms.plazas, { receiveShadow: true });
+    addInstances(wallMaterial, transforms.walls);
+    addInstances(glass, transforms.windows, { receiveShadow: false });
+    addInstances(darkSteel, transforms.crowns);
+    addInstances(darkSteel, transforms.piers);
+    addInstances(darkSteel, transforms.bands, { receiveShadow: false });
+    addInstances(accentMaterial, transforms.accents, { receiveShadow: false });
+    scene.add(boulevard);
+  }
+
+  function addCoastalRoadsideDensity() {
+    const dummy = new THREE.Object3D();
+    const boardGeometry = new THREE.BoxGeometry(2.8, 0.82, 0.2);
+    const boardMaterials = [
+      new THREE.MeshStandardMaterial({ color: 0xef5b45, emissive: 0x751a16, emissiveIntensity: 0.34, roughness: 0.5 }),
+      new THREE.MeshStandardMaterial({ color: 0x3ed8cc, emissive: 0x0b6f69, emissiveIntensity: 0.42, roughness: 0.44 })
+    ];
+    const boardRanges = [[0.115, 0.52], [0.79, 0.98]];
+    boardMaterials.forEach((material, materialIndex) => {
+      const placements = [];
+      boardRanges.forEach(([start, end]) => {
+        for (let progress = start + materialIndex * 0.018; progress <= end; progress += 0.036) {
+          const sample = trackProfileAtProgress(progress);
+          const side = Math.round(progress * 1000) % 2 === 0 ? -1 : 1;
+          const point = sample.center.clone().add(sample.normal.clone().multiplyScalar((sample.halfWidth + 2.2) * side));
+          placements.push({ point, y: freeDriveElevationAtProgress(progress), heading: sample.heading });
+        }
+      });
+      const boards = new THREE.InstancedMesh(boardGeometry, material, placements.length);
+      placements.forEach((placement, index) => {
+        dummy.position.set(placement.point.x, placement.y + 0.42, placement.point.y);
+        dummy.rotation.set(0, placement.heading, 0);
+        dummy.scale.set(1, 1, 1);
+        dummy.updateMatrix();
+        boards.setMatrixAt(index, dummy.matrix);
+      });
+      boards.instanceMatrix.needsUpdate = true;
+      boards.castShadow = qualityPreset.shadows;
+      scene.add(boards);
+    });
+
+    addCoastalSpectatorHotspot(0.13, 1);
+    addCoastalSpectatorHotspot(0.91, -1);
+  }
+
+  async function addCoastalPalmTrees() {
+    try {
+      const url = new URL("./assets/freedrive/models/palm-tree-quaternius-lod0.glb", import.meta.url).href;
+      const gltf = await carModelLoader.loadAsync(url);
+      const template = gltf.scene || gltf.scenes?.[0];
+      if (!template) return;
+      template.updateMatrixWorld(true);
+      let sourceMesh = null;
+      template.traverse((child) => {
+        if (!sourceMesh && child.isMesh) sourceMesh = child;
+      });
+      if (!sourceMesh) return;
+      const geometry = sourceMesh.geometry.clone().applyMatrix4(sourceMesh.matrixWorld);
+      geometry.computeBoundingBox();
+      const bounds = geometry.boundingBox;
+      const center = bounds.getCenter(new THREE.Vector3());
+      geometry.translate(-center.x, -bounds.min.y, -center.z);
+      geometry.computeBoundingBox();
+      const normalizedHeight = Math.max(0.001, geometry.boundingBox.max.y - geometry.boundingBox.min.y);
+      const placements = [];
+      const addRange = (start, end, step) => {
+        for (let progress = start; progress <= end; progress += step) {
+          for (const side of [-1, 1]) {
+            const staggered = Math.min(end, progress + (side > 0 ? step * 0.38 : 0));
+            const sample = trackProfileAtProgress(staggered);
+            const variation = (Math.round(progress * 1000) + (side > 0 ? 1 : 0)) % 3;
+            const offset = sample.halfWidth + 5.4 + variation * 0.8;
+            const position = sample.center.clone().add(sample.normal.clone().multiplyScalar(offset * side));
+            placements.push({
+              position,
+              y: freeDriveElevationAtProgress(staggered),
+              height: 6.2 + (placements.length % 4) * 0.65,
+              rotation: sample.heading + side * 0.08 + (placements.length % 5) * 0.19
+            });
+          }
+        }
+      };
+      addRange(0.125, 0.535, 0.028);
+      addRange(0.785, 0.985, 0.028);
+      const palms = new THREE.InstancedMesh(geometry, sourceMesh.material, placements.length);
+      const dummy = new THREE.Object3D();
+      placements.forEach((placement, index) => {
+        const scale = placement.height / normalizedHeight;
+        dummy.position.set(placement.position.x, placement.y, placement.position.y);
+        dummy.rotation.set(0, placement.rotation, 0);
+        dummy.scale.setScalar(scale * (0.94 + (index % 3) * 0.04));
+        dummy.updateMatrix();
+        palms.setMatrixAt(index, dummy.matrix);
+      });
+      palms.instanceMatrix.needsUpdate = true;
+      palms.castShadow = false;
+      palms.receiveShadow = true;
+      scene.add(palms);
+    } catch (error) {
+      console.warn("Coastal Festival palm model failed to load.", error);
+    }
+  }
+
+  function addCoastalSpectatorHotspot(progress, preferredSide) {
+    const sample = trackProfileAtProgress(progress);
+    const roadY = freeDriveElevationAtProgress(progress);
+    const crowdMaterial = new THREE.MeshStandardMaterial({ color: 0xe9b77e, roughness: 0.94 });
+    const crowd = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.15, 0.48, 3, 5), crowdMaterial, 36);
+    const dummy = new THREE.Object3D();
+    for (let index = 0; index < 36; index += 1) {
+      const row = Math.floor(index / 12);
+      const column = index % 12;
+      const lateral = sample.halfWidth + 5 + row * 1.1;
+      const longitudinal = (column - 5.5) * 1.25;
+      const point = sample.center.clone()
+        .add(sample.normal.clone().multiplyScalar(lateral * preferredSide))
+        .add(sample.tangent.clone().multiplyScalar(longitudinal));
+      dummy.position.set(point.x, roadY + 0.65 + row * 0.12, point.y);
+      dummy.rotation.set(0, sample.heading - preferredSide * Math.PI * 0.5, 0);
+      dummy.scale.setScalar(0.88 + (index % 4) * 0.04);
+      dummy.updateMatrix();
+      crowd.setMatrixAt(index, dummy.matrix);
+    }
+    crowd.instanceMatrix.needsUpdate = true;
+    crowd.castShadow = qualityPreset.shadows;
+    scene.add(crowd);
   }
 
   function addFreeDriveRallyRoad() {
