@@ -77,6 +77,26 @@ export function drivenWheelIndexesFor(config = physicalVehicleConfig) {
   return Object.freeze([0, 1, 2, 3]);
 }
 
+export function calculateLongitudinalWheelLoads({
+  mass = physicalVehicleConfig.mass,
+  longitudinalAcceleration = 0,
+  config = physicalVehicleConfig
+} = {}) {
+  const gravity = 9.81;
+  const totalLoad = mass * gravity;
+  const fullWheelbase = Math.max(0.1, config.wheelBase * 2);
+  const centerOfMassHeight = Math.max(0.3, Math.min(0.8,
+    config.chassisHalfHeight + config.wheelRadius * 0.45
+  ));
+  const acceleration = Math.max(-gravity * 1.2, Math.min(gravity * 1.2, longitudinalAcceleration));
+  const transfer = Math.max(-totalLoad * 0.35, Math.min(totalLoad * 0.35,
+    mass * acceleration * centerOfMassHeight / fullWheelbase
+  ));
+  const frontWheelLoad = (totalLoad / 2 - transfer) / 2;
+  const rearWheelLoad = (totalLoad / 2 + transfer) / 2;
+  return Object.freeze([frontWheelLoad, frontWheelLoad, rearWheelLoad, rearWheelLoad]);
+}
+
 export function createPhysicalVehicle({ world, chassis, config = physicalVehicleConfig }) {
   const controller = world.createVehicleController(chassis);
   controller.indexUpAxis = 1;
@@ -117,6 +137,9 @@ export function createPhysicalVehicle({ world, chassis, config = physicalVehicle
     wheelPositions,
     contactCount: 0,
     speed: 0,
+    previousSignedSpeed: null,
+    engineForce: 0,
+    brakeImpulse: 0,
     steeringAngle: 0,
     suspensionLengths: wheelPositions.map(() => config.suspensionRestLength)
   };
@@ -215,6 +238,15 @@ export function updatePhysicalVehicle({
   const forwardX = 2 * (rotation.x * rotation.z + rotation.w * rotation.y);
   const forwardZ = 1 - 2 * (rotation.x * rotation.x + rotation.y * rotation.y);
   const lateralSpeed = velocity.x * forwardZ - velocity.z * forwardX;
+  const measuredAcceleration = vehicle.previousSignedSpeed == null || deltaSeconds <= 0
+    ? 0
+    : (signedSpeed - vehicle.previousSignedSpeed) / deltaSeconds;
+  const wheelLoads = calculateLongitudinalWheelLoads({
+    mass: config.mass,
+    longitudinalAcceleration: measuredAcceleration,
+    config
+  });
+  const previousWheels = vehicle.tireDynamics?.wheels;
   vehicle.tireDynamics = calculateTireDynamics({
     signedSpeed,
     lateralSpeed,
@@ -225,17 +257,27 @@ export function updatePhysicalVehicle({
     grounded,
     mass: config.mass,
     engineForcePerWheel: config.engineForcePerWheel,
+    requestedEngineForcePerWheel: driveForces.engineForce,
+    requestedBrakeImpulsePerWheel: driveForces.brakeImpulse,
     driveScale: vehicle.drivetrain.driveScale,
-    drivenWheelIndexes: vehicle.drivenWheelIndexes
+    drivenWheelIndexes: vehicle.drivenWheelIndexes,
+    wheelLoads,
+    previousWheelState: previousWheels,
+    deltaSeconds
   });
   const engineForce = driveForces.engineForce * vehicle.tireDynamics.engineScale;
   const brakeImpulse = driveForces.brakeImpulse * vehicle.tireDynamics.brakeScale;
+  vehicle.engineForce = engineForce;
+  vehicle.brakeImpulse = brakeImpulse;
 
   for (let index = 0; index < vehicle.wheelPositions.length; index += 1) {
     controller.setWheelFrictionSlip(index, config.frictionSlip * vehicle.tireDynamics.grip);
     controller.setWheelSteering(index, vehicle.wheelPositions[index].front ? steeringAngle : 0);
-    controller.setWheelEngineForce(index, vehicle.drivenWheelIndexes.includes(index) ? engineForce : 0);
-    controller.setWheelBrake(index, brakeImpulse);
+    const wheelDynamics = vehicle.tireDynamics.wheels[index];
+    controller.setWheelEngineForce(index, wheelDynamics.driven
+      ? driveForces.engineForce * wheelDynamics.engineScale
+      : 0);
+    controller.setWheelBrake(index, driveForces.brakeImpulse * wheelDynamics.brakeScale);
   }
 
   chassis.resetForces(true);
@@ -259,6 +301,7 @@ export function updatePhysicalVehicle({
 
   vehicle.contactCount = 0;
   vehicle.speed = signedSpeed;
+  vehicle.previousSignedSpeed = signedSpeed;
   vehicle.steeringAngle = steeringAngle;
   for (let index = 0; index < vehicle.wheelPositions.length; index += 1) {
     if (controller.wheelIsInContact(index)) vehicle.contactCount += 1;
@@ -278,6 +321,9 @@ export function resetPhysicalVehicleControls(vehicle) {
   }
   vehicle.contactCount = 0;
   vehicle.speed = 0;
+  vehicle.previousSignedSpeed = null;
+  vehicle.engineForce = 0;
+  vehicle.brakeImpulse = 0;
   vehicle.steeringAngle = 0;
   vehicle.drivetrain = createDrivetrainState(vehicle.config ?? physicalVehicleConfig);
   vehicle.tireDynamics = calculateTireDynamics();

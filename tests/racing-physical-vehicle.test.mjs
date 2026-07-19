@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  calculateLongitudinalWheelLoads,
   calculateSignedVehicleSpeed,
   drivenWheelIndexesFor,
   getPhysicalVehicleSpec,
@@ -82,4 +83,14 @@ test("倒车力在接近倒车最高速度时平滑收敛", () => {
 
   assert.ok(Math.abs(accelerating.engineForce) > Math.abs(limited.engineForce));
   assert.equal(limited.engineForce, 0);
+});
+
+test("longitudinal acceleration transfers axle load rearward and braking transfers it forward", () => {
+  const accelerating = calculateLongitudinalWheelLoads({ longitudinalAcceleration: 6 });
+  const braking = calculateLongitudinalWheelLoads({ longitudinalAcceleration: -6 });
+
+  assert.ok(accelerating[2] > accelerating[0]);
+  assert.ok(braking[0] > braking[2]);
+  assert.ok(Math.abs(accelerating.reduce((sum, load) => sum + load, 0)
+    - physicalVehicleConfig.mass * 9.81) < 1e-6);
 });

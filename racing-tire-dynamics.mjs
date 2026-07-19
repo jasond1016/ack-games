@@ -23,27 +23,55 @@ export function calculateTireDynamics({
   grounded = true,
   mass = 1250,
   engineForcePerWheel = 4800,
+  requestedEngineForcePerWheel = null,
+  requestedBrakeImpulsePerWheel = 0,
   driveScale = 1,
-  drivenWheelIndexes = [0, 1, 2, 3]
+  drivenWheelIndexes = [0, 1, 2, 3],
+  wheelLoads = null,
+  previousWheelState = null,
+  deltaSeconds = 1 / 60
 } = {}) {
   const grip = tireSurfaceGrip(surfaceId);
   const contactScale = grounded ? 1 : 0;
-  const drivenCount = Math.max(1, drivenWheelIndexes.length);
-  const requestedDrive = clamp01(throttle) * engineForcePerWheel * driveScale * drivenCount;
-  const availableDrive = Math.max(1, mass * 9.81 * grip * 0.78);
-  const driveExcess = Math.max(0, requestedDrive / availableDrive - 0.82);
+  const fallbackEngineForce = clamp01(throttle) * engineForcePerWheel * driveScale;
+  const requestedEngineForce = Number.isFinite(requestedEngineForcePerWheel)
+    ? Math.abs(requestedEngineForcePerWheel)
+    : fallbackEngineForce;
+  const requestedBrakeImpulse = Math.max(0,
+    Number.isFinite(requestedBrakeImpulsePerWheel) ? requestedBrakeImpulsePerWheel : 0
+  );
+  const loads = Array.from({ length: 4 }, (_, index) => Math.max(1,
+    Number.isFinite(wheelLoads?.[index]) ? wheelLoads[index] : mass * 9.81 / 4
+  ));
+  const step = Math.max(0, Math.min(0.1, Number.isFinite(deltaSeconds) ? deltaSeconds : 1 / 60));
   const lateralRatio = Math.abs(lateralSpeed) / (Math.abs(signedSpeed) + 3.5);
   const steeringLoad = Math.abs(steering) * Math.min(1, Math.abs(signedSpeed) / 22);
-  const brakingSlip = clamp01(brake) * Math.min(1, Math.abs(signedSpeed) / 8) * (1.08 - grip);
 
   const wheels = Array.from({ length: 4 }, (_, index) => {
     const driven = drivenWheelIndexes.includes(index);
     const front = index < 2;
-    const longitudinalSlip = clamp01((
-      (driven ? driveExcess * 0.72 : 0)
-      + brakingSlip * 1.25
-      + (driven ? clamp01(throttle) * (1 - grip) * 0.34 : 0)
-    ) * contactScale);
+    const normalLoad = loads[index];
+    const driveDemandRatio = driven ? requestedEngineForce / Math.max(1, normalLoad * grip) : 0;
+    const driveSlip = Math.max(0, driveDemandRatio - 1);
+    const availableEngineForce = normalLoad * grip;
+    const engineScale = grounded && driven && requestedEngineForce > 0
+      ? clamp01(availableEngineForce / requestedEngineForce)
+      : 1;
+    const tractionControlActive = grounded && driven && requestedEngineForce > 0 && engineScale < 1;
+    const previousPressure = clamp01(previousWheelState?.[index]?.brakeScale ?? 1);
+    const availableBrakeImpulse = normalLoad * grip * step;
+    const targetBrakeScale = grounded && requestedBrakeImpulse > 0
+      ? clamp01(availableBrakeImpulse / requestedBrakeImpulse)
+      : 1;
+    const pressureRate = targetBrakeScale < previousPressure ? 8 : 2.2;
+    const brakeScale = moveToward(previousPressure, targetBrakeScale, pressureRate * step);
+    const controlledBrakeImpulse = requestedBrakeImpulse * brakeScale;
+    const brakeDemandRatio = controlledBrakeImpulse / Math.max(1e-6, availableBrakeImpulse);
+    const brakeSlip = requestedBrakeImpulse > 0 ? Math.max(0, brakeDemandRatio - 1) : 0;
+    const rawLongitudinalSlip = driveSlip + brakeSlip;
+    const longitudinalSlip = clamp01(rawLongitudinalSlip * contactScale);
+    // ABS remains active while pressure is limited, not only during pressure release.
+    const absActive = grounded && requestedBrakeImpulse > 0 && (targetBrakeScale < 1 || brakeScale < 1);
     const lateralSlip = clamp01((
       lateralRatio * 1.35
       + (front ? steeringLoad * 0.28 : steeringLoad * 0.12)
@@ -52,15 +80,19 @@ export function calculateTireDynamics({
     return Object.freeze({
       index,
       driven,
+      normalLoad,
       longitudinalSlip,
       lateralSlip,
-      combinedSlip: clamp01(Math.hypot(longitudinalSlip, lateralSlip))
+      combinedSlip: clamp01(Math.hypot(longitudinalSlip, lateralSlip)),
+      tractionControlActive,
+      engineScale,
+      absActive,
+      brakeScale
     });
   });
   const maximumSlip = Math.max(...wheels.map(({ combinedSlip }) => combinedSlip));
-  const drivenSlip = Math.max(0, ...wheels.filter(({ driven }) => driven).map(({ longitudinalSlip }) => longitudinalSlip));
-  const tractionControlActive = grounded && throttle > 0.16 && drivenSlip > 0.12;
-  const absActive = grounded && brake > 0.28 && Math.abs(signedSpeed) > 3 && brakingSlip > 0.08;
+  const tractionControlActive = wheels.some((wheel) => wheel.tractionControlActive);
+  const absActive = wheels.some((wheel) => wheel.absActive);
   return Object.freeze({
     surfaceId,
     grip,
@@ -68,12 +100,17 @@ export function calculateTireDynamics({
     maximumSlip,
     tractionControlActive,
     absActive,
-    engineScale: tractionControlActive ? Math.max(0.42, 1 - drivenSlip * 0.72) : 1,
-    brakeScale: absActive ? Math.max(0.5, 0.82 - brakingSlip * 0.35) : 1,
+    engineScale: Math.min(...wheels.filter(({ driven }) => driven).map(({ engineScale }) => engineScale), 1),
+    brakeScale: Math.min(...wheels.map(({ brakeScale }) => brakeScale)),
     squeal: clamp01((maximumSlip - 0.1) * 1.7)
   });
 }
 
 function clamp01(value) {
   return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+}
+
+function moveToward(value, target, maximumDelta) {
+  if (value < target) return Math.min(target, value + maximumDelta);
+  return Math.max(target, value - maximumDelta);
 }
