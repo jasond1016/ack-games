@@ -5,7 +5,8 @@ export function createFreeDriveTimeTrial({
   storage = globalThis.localStorage,
   storageKey = defaultStorageKey,
   gateRadius = 6,
-  sampleInterval = 0.08
+  sampleInterval = 0.08,
+  autoStart = true
 } = {}) {
   if (!Array.isArray(checkpoints) || checkpoints.length < 2) {
     throw new Error("计时挑战至少需要起点和终点。");
@@ -34,6 +35,7 @@ export function createFreeDriveTimeTrial({
     if (![x, z, heading].every(Number.isFinite)) return getState();
     const atStart = distanceTo(pose, checkpoints[0]) <= gateRadius;
     if (phase !== "running") {
+      if (!autoStart) return getState();
       if (!atStart) leftStartGate = true;
       if (atStart && (phase === "ready" || leftStartGate)) start(pose);
       return getState();
@@ -94,7 +96,7 @@ export function createFreeDriveTimeTrial({
     });
   }
 
-  return Object.freeze({ update, reset, getState });
+  return Object.freeze({ start, update, reset, getState });
 }
 
 export function sampleGhostPose(samples, elapsedSeconds) {

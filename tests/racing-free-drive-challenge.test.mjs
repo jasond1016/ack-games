@@ -76,3 +76,19 @@ test("a closed route waits for the player to leave before starting again", () =>
   assert.equal(trial.getState().phase, "running");
   assert.equal(trial.getState().elapsedSeconds, 0);
 });
+
+test("explicit time trials wait for the event countdown before starting", () => {
+  const trial = createFreeDriveTimeTrial({
+    checkpoints,
+    storage: memoryStorage(),
+    autoStart: false
+  });
+
+  trial.update({ x: 0, z: 0, deltaSeconds: 2 });
+  assert.equal(trial.getState().phase, "ready");
+  trial.start({ x: 0, z: 0, heading: 0 });
+  trial.update({ x: 10, z: 0, deltaSeconds: 2 });
+  assert.equal(trial.getState().phase, "running");
+  assert.equal(trial.getState().elapsedSeconds, 2);
+  assert.equal(trial.getState().nextCheckpoint, 2);
+});
