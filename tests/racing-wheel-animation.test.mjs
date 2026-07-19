@@ -28,9 +28,50 @@ test("combined wheel geometry is separated into four wheel centers", () => {
   }
   const layout = findWheelGeometryLayout(vertices);
   assert.equal(layout.combined, true);
+  assert.equal(layout.type, "four-wheel");
+  assert.equal(layout.longitudinalAxis, "z");
   assert.equal(layout.centers.length, 4);
   assert.deepEqual(layout.centers.map(({ x, z }) => [x, z]), [
     [-1, 2], [1, 2], [-1, -2], [1, -2]
+  ]);
+});
+
+test("four-wheel geometry can use the local Y axis as the vehicle length", () => {
+  const vertices = [];
+  for (const y of [-2, 2]) {
+    for (const x of [-1, 1]) {
+      vertices.push(
+        x - 0.2, y - 0.4, -0.4,
+        x + 0.2, y - 0.4, -0.4,
+        x - 0.2, y + 0.4, 0.4,
+        x + 0.2, y + 0.4, 0.4
+      );
+    }
+  }
+  const layout = findWheelGeometryLayout(vertices);
+  assert.equal(layout.type, "four-wheel");
+  assert.equal(layout.longitudinalAxis, "y");
+  assert.deepEqual(layout.centers.map(({ x, y }) => [x, y]), [
+    [-1, 2], [1, 2], [-1, -2], [1, -2]
+  ]);
+});
+
+test("combined axle geometry is separated into two wheel centers", () => {
+  const vertices = [];
+  for (const x of [0, 1.5]) {
+    vertices.push(
+      x - 0.2, -0.4, -0.4,
+      x + 0.2, -0.4, -0.4,
+      x - 0.2, 0.4, 0.4,
+      x + 0.2, 0.4, 0.4
+    );
+  }
+  const layout = findWheelGeometryLayout(vertices);
+  assert.equal(layout.combined, true);
+  assert.equal(layout.type, "axle-pair");
+  assert.deepEqual(layout.centers, [
+    { x: 0, y: 0, z: 0 },
+    { x: 1.5, y: 0, z: 0 }
   ]);
 });
 

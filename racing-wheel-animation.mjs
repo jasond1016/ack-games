@@ -17,24 +17,40 @@ export function findWheelGeometryLayout(positionArray, itemSize = 3) {
   if (!isFiniteBounds(bounds)) return null;
 
   const splitX = (bounds.minX + bounds.maxX) * 0.5;
-  const splitZ = (bounds.minZ + bounds.maxZ) * 0.5;
+  const sizeX = Math.abs(bounds.maxX - bounds.minX);
+  const sizeY = Math.abs(bounds.maxY - bounds.minY);
+  const sizeZ = Math.abs(bounds.maxZ - bounds.minZ);
+  const longitudinalAxis = sizeY > sizeZ ? "y" : "z";
+  const splitLongitudinal = longitudinalAxis === "y"
+    ? (bounds.minY + bounds.maxY) * 0.5
+    : (bounds.minZ + bounds.maxZ) * 0.5;
   const quadrants = Array.from({ length: 4 }, createBounds);
+  const sides = Array.from({ length: 2 }, createBounds);
   for (let offset = 0; offset + 2 < positionArray.length; offset += itemSize) {
     const x = positionArray[offset];
     const y = positionArray[offset + 1];
     const z = positionArray[offset + 2];
-    const index = (z < splitZ ? 2 : 0) + (x >= splitX ? 1 : 0);
+    const longitudinal = longitudinalAxis === "y" ? y : z;
+    const index = (longitudinal < splitLongitudinal ? 2 : 0) + (x >= splitX ? 1 : 0);
     expandBounds(quadrants[index], x, y, z);
+    expandBounds(sides[x >= splitX ? 1 : 0], x, y, z);
   }
 
+  const longitudinalSize = Math.max(sizeY, sizeZ);
+  const transverseSize = Math.min(sizeY, sizeZ);
   const hasFourWheels = quadrants.every((quadrant) => quadrant.count >= 4)
-    && Math.abs(bounds.maxX - bounds.minX) > Math.abs(bounds.maxY - bounds.minY) * 1.4
-    && Math.abs(bounds.maxZ - bounds.minZ) > Math.abs(bounds.maxY - bounds.minY) * 1.4;
-  const selectedBounds = hasFourWheels ? quadrants : [bounds];
+    && sizeX > transverseSize * 1.4
+    && longitudinalSize > transverseSize * 1.4;
+  const hasAxlePair = !hasFourWheels
+    && sides.every((side) => side.count >= 4)
+    && sizeX > Math.max(sizeY, sizeZ) * 1.4;
+  const selectedBounds = hasFourWheels ? quadrants : hasAxlePair ? sides : [bounds];
   return Object.freeze({
-    combined: hasFourWheels,
+    combined: hasFourWheels || hasAxlePair,
+    type: hasFourWheels ? "four-wheel" : hasAxlePair ? "axle-pair" : "single",
     splitX,
-    splitZ,
+    splitLongitudinal,
+    longitudinalAxis,
     centers: Object.freeze(selectedBounds.map((entry) => Object.freeze({
       x: (entry.minX + entry.maxX) * 0.5,
       y: (entry.minY + entry.maxY) * 0.5,

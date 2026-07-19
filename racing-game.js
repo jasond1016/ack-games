@@ -5346,7 +5346,7 @@ export function createRacingGame({
       configureCarMaterials(model);
       applyConfiguredCarTint(model, carSpec, tint);
       visualRoot.add(model);
-      const wheelVisuals = configureModelWheelAnimation(model, visualRoot, carSpec);
+      const wheelVisuals = configureModelWheelAnimation(model, visualRoot);
       const box = new THREE.Box3().setFromObject(model);
       const size = box.getSize(new THREE.Vector3());
       const boostGroup = createBoostGroup(carSpec, size, box.min.z);
@@ -7130,10 +7130,9 @@ export function createRacingGame({
     }
   }
 
-  function configureModelWheelAnimation(model, visualRoot, carSpec) {
+  function configureModelWheelAnimation(model, visualRoot) {
     const bindings = [];
     const logicalCenters = new Set();
-    const frontDirection = Math.cos(THREE.MathUtils.degToRad(carSpec?.modelRotationDegrees || 0)) >= 0 ? 1 : -1;
     visualRoot.updateMatrixWorld(true);
 
     model.traverse((mesh) => {
@@ -7154,7 +7153,11 @@ export function createRacingGame({
         logicalCenters.add(`${Math.round(center.x * 10)}:${Math.round(center.z * 10)}`);
       }
 
-      const singleIsFront = !layout.combined && (carSpaceCenters[0]?.z ?? 0) >= 0;
+      const singleIsFront = layout.type !== "four-wheel" && (carSpaceCenters[0]?.z ?? 0) >= 0;
+      const frontDirection = layout.type === "four-wheel"
+        && (carSpaceCenters[0]?.z ?? 0) < (carSpaceCenters[2]?.z ?? 0)
+        ? -1
+        : 1;
       for (const material of materials) {
         bindings.push(installWheelMaterialAnimation(material, layout, localCenters, {
           frontDirection,
@@ -7173,30 +7176,47 @@ export function createRacingGame({
     const spin = { value: 0 };
     const steering = { value: 0 };
     const originalCompile = material.onBeforeCompile;
-    const wheelUniforms = layout.combined
+    const wheelUniforms = layout.type === "four-wheel"
       ? {
           uWheelCenters: { value: centers },
-          uWheelSplit: { value: new THREE.Vector2(layout.splitX, layout.splitZ) },
+          uWheelSplit: { value: new THREE.Vector2(layout.splitX, layout.splitLongitudinal) },
           uWheelFrontDirection: { value: frontDirection }
         }
+      : layout.type === "axle-pair"
+        ? {
+            uWheelCenters: { value: centers },
+            uWheelSplitX: { value: layout.splitX },
+            uWheelIsFront: { value: singleIsFront ? 1 : 0 }
+          }
       : {
           uWheelCenter: { value: centers[0] },
           uWheelIsFront: { value: singleIsFront ? 1 : 0 }
         };
-    const declarations = layout.combined
+    const longitudinalComponent = layout.longitudinalAxis === "y" ? "y" : "z";
+    const declarations = layout.type === "four-wheel"
       ? `
 uniform vec3 uWheelCenters[4];
 uniform vec2 uWheelSplit;
 uniform float uWheelFrontDirection;
 vec3 wheelCenterFor(vec3 point) {
-  if (point.z >= uWheelSplit.y) {
+  if (point.${longitudinalComponent} >= uWheelSplit.y) {
     return point.x >= uWheelSplit.x ? uWheelCenters[1] : uWheelCenters[0];
   }
   return point.x >= uWheelSplit.x ? uWheelCenters[3] : uWheelCenters[2];
 }
 float wheelFrontFor(vec3 point) {
-  return ((point.z - uWheelSplit.y) * uWheelFrontDirection >= 0.0) ? 1.0 : 0.0;
+  return ((point.${longitudinalComponent} - uWheelSplit.y) * uWheelFrontDirection >= 0.0) ? 1.0 : 0.0;
 }`
+      : layout.type === "axle-pair"
+        ? `
+uniform vec3 uWheelCenters[2];
+uniform float uWheelSplitX;
+uniform float uWheelIsFront;
+vec3 wheelCenterFor(vec3 point) {
+  return point.x >= uWheelSplitX ? uWheelCenters[1] : uWheelCenters[0];
+}
+float wheelFrontFor(vec3 point) { return uWheelIsFront; }
+`
       : `
 uniform vec3 uWheelCenter;
 uniform float uWheelIsFront;
@@ -7231,7 +7251,7 @@ ${shader.vertexShader}`
   vec3 wheelOffset = rotateWheelX(transformed - wheelCenter, uWheelSpin);
   transformed = wheelCenter + rotateWheelY(wheelOffset, uWheelSteering * wheelFrontFor(position));`);
     };
-    material.customProgramCacheKey = () => `racing-wheel-${layout.combined ? "combined" : "single"}-${singleIsFront ? "front" : "rear"}`;
+    material.customProgramCacheKey = () => `racing-wheel-${layout.type}-${singleIsFront ? "front" : "rear"}`;
     material.needsUpdate = true;
     return { spin, steering };
   }
