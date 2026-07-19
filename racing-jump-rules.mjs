@@ -1,5 +1,8 @@
 export const FREE_DRIVE_JUMP = Object.freeze({
+  bridgeMinX: 116,
+  bridgeMaxX: 240,
   corridorMinAbsY: 8,
+  corridorMaxAbsY: 80,
   rampMinX: 146,
   gapMinX: 178,
   gapMaxX: 202,
@@ -62,9 +65,16 @@ function smootherstep(value) {
 }
 
 export function isFreeDriveJumpCorridor(position) {
-  return Math.abs(position.y) > FREE_DRIVE_JUMP.corridorMinAbsY
+  return isFreeDriveBridgeCorridor(position)
+    && Math.abs(position.y) > FREE_DRIVE_JUMP.corridorMinAbsY
     && position.x >= FREE_DRIVE_JUMP.rampMinX
     && position.x <= FREE_DRIVE_JUMP.rampMaxX;
+}
+
+export function isFreeDriveBridgeCorridor(position) {
+  return Math.abs(position.y) <= FREE_DRIVE_JUMP.corridorMaxAbsY
+    && position.x > FREE_DRIVE_JUMP.bridgeMinX
+    && position.x < FREE_DRIVE_JUMP.bridgeMaxX;
 }
 
 export function isFreeDriveJumpGap(position) {

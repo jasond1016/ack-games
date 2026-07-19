@@ -7,6 +7,7 @@ import {
   createFreeDriveStuntRampColliderSpecs,
   freeDriveStuntRampRise,
   freeDriveJumpRampRise,
+  isFreeDriveBridgeCorridor,
   isFreeDriveJumpGap,
   resolveFreeDriveJumpLaunch
 } from "../racing-jump-rules.mjs";
@@ -14,6 +15,12 @@ import {
 test("两座大桥都切开中央桥面", () => {
   assert.equal(isFreeDriveJumpGap({ x: 190, y: 34 }), true);
   assert.equal(isFreeDriveJumpGap({ x: 190, y: -18 }), true);
+});
+
+test("远离海岸桥的长路线不会误用桥梁高度和断口", () => {
+  const remoteCrossing = { x: 190, y: 520 };
+  assert.equal(isFreeDriveBridgeCorridor(remoteCrossing), false);
+  assert.equal(isFreeDriveJumpGap(remoteCrossing), false);
 });
 
 test("两座断桥的两端都形成等高斜坡", () => {
