@@ -95,6 +95,47 @@ test("存在虚拟手柄时优先读取 Xbox 手柄", () => {
   assert.equal(state.steering, 1);
 });
 
+test("Chrome 连接事件可在手柄枚举暂时为空时激活输入", () => {
+  const windowObject = createEventTarget();
+  const documentObject = createEventTarget();
+  const buttons = Array.from({ length: 16 }, () => ({ pressed: false, value: 0 }));
+  buttons[7] = { pressed: true, value: 1 };
+  const gamepad = {
+    connected: true,
+    id: "Xbox 360 Controller (XInput STANDARD GAMEPAD)",
+    index: 0,
+    mapping: "standard",
+    axes: [0],
+    buttons
+  };
+  const driveStates = [];
+  const input = createBrowserRacingInput({
+    onDrive() {},
+    onPause() {},
+    onBoost() {},
+    onToggleOpponent() {},
+    onToggleCamera() {},
+    onReplaceSession() {},
+    onToggleDebug() {},
+    onGamepadDrive(state) { driveStates.push(state); },
+    onBlur() {},
+    onHidden() {}
+  }, {
+    windowObject,
+    documentObject,
+    navigatorObject: { getGamepads: () => [] }
+  });
+
+  input.start();
+  windowObject.dispatch("gamepadconnected", { gamepad });
+  input.pollGamepad();
+  input.stop();
+
+  assert.equal(driveStates[0].connected, true);
+  assert.equal(driveStates[0].id, gamepad.id);
+  assert.equal(driveStates[0].throttle, 1);
+});
+
 test("手柄动作按钮只在按下边沿触发", () => {
   const windowObject = createEventTarget();
   const documentObject = createEventTarget();

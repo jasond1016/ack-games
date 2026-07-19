@@ -34,7 +34,8 @@ const GAMEPAD_DEADZONE = 0.16;
 function buttonValue(button) {
   if (!button) return 0;
   const value = Number(button.value);
-  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : button.pressed ? 1 : 0;
+  if (button.pressed && (!Number.isFinite(value) || value <= 0)) return 1;
+  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
 }
 
 function applyGamepadDeadzone(value, deadzone = GAMEPAD_DEADZONE) {
@@ -49,7 +50,7 @@ export function readRacingGamepad(gamepads = []) {
     ?? connectedGamepads.find((candidate) => candidate.mapping === "standard")
     ?? connectedGamepads[0];
   if (!gamepad) {
-    return Object.freeze({ connected: false, index: -1, steering: 0, throttle: 0, brake: 0, buttons: [] });
+    return Object.freeze({ connected: false, id: "", mapping: "", index: -1, steering: 0, throttle: 0, brake: 0, buttons: [] });
   }
 
   const buttons = gamepad.buttons || [];
@@ -59,6 +60,8 @@ export function readRacingGamepad(gamepads = []) {
 
   return Object.freeze({
     connected: true,
+    id: String(gamepad.id || "Unknown gamepad"),
+    mapping: String(gamepad.mapping || "unmapped"),
     index: gamepad.index,
     steering,
     throttle: buttonValue(buttons[7]),
@@ -86,6 +89,7 @@ export function createBrowserRacingInput({
   let listening = false;
   let previousGamepadIndex = -1;
   let previousGamepadButtons = [];
+  const connectedGamepads = new Map();
   const drivingCodes = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "KeyW", "KeyA", "KeyS", "KeyD"]);
   const boostCodes = new Set(["KeyE", "Numpad0"]);
   const handledCodes = new Set([...drivingCodes, ...boostCodes, "KeyC", "KeyH", "KeyR", "Escape", "F2"]);
@@ -110,9 +114,27 @@ export function createBrowserRacingInput({
     if (documentObject.hidden) onHidden();
   }
 
+  function handleGamepadConnected(event) {
+    if (event.gamepad) connectedGamepads.set(event.gamepad.index, event.gamepad);
+  }
+
+  function handleGamepadDisconnected(event) {
+    if (event.gamepad) connectedGamepads.delete(event.gamepad.index);
+  }
+
   function pollGamepad() {
     if (!listening) return;
-    const state = readRacingGamepad(navigatorObject?.getGamepads?.() || []);
+    let enumeratedGamepads = [];
+    try {
+      enumeratedGamepads = [...(navigatorObject?.getGamepads?.() || [])].filter(Boolean);
+    } catch {
+      // Chrome can temporarily reject enumeration while restoring focus. The
+      // connection event still provides a live Gamepad object to poll.
+    }
+    for (const gamepad of enumeratedGamepads) {
+      connectedGamepads.set(gamepad.index, gamepad);
+    }
+    const state = readRacingGamepad(connectedGamepads.values());
     onGamepadDrive(state);
 
     const buttons = state.buttons;
@@ -133,6 +155,8 @@ export function createBrowserRacingInput({
       windowObject.addEventListener("keydown", handleKeyDown);
       windowObject.addEventListener("keyup", handleKeyUp);
       windowObject.addEventListener("blur", onBlur);
+      windowObject.addEventListener("gamepadconnected", handleGamepadConnected);
+      windowObject.addEventListener("gamepaddisconnected", handleGamepadDisconnected);
       documentObject.addEventListener("visibilitychange", handleVisibilityChange);
       previousGamepadIndex = -1;
       previousGamepadButtons = [];
@@ -144,8 +168,11 @@ export function createBrowserRacingInput({
       windowObject.removeEventListener("keydown", handleKeyDown);
       windowObject.removeEventListener("keyup", handleKeyUp);
       windowObject.removeEventListener("blur", onBlur);
+      windowObject.removeEventListener("gamepadconnected", handleGamepadConnected);
+      windowObject.removeEventListener("gamepaddisconnected", handleGamepadDisconnected);
       documentObject.removeEventListener("visibilitychange", handleVisibilityChange);
       onGamepadDrive(readRacingGamepad());
+      connectedGamepads.clear();
       previousGamepadIndex = -1;
       previousGamepadButtons = [];
       listening = false;

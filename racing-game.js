@@ -796,6 +796,16 @@ export function createRacingGame({
           car?.userData.wheelAnimationState?.steeringAngle ?? 0
         ).toFixed(1))
       },
+      gamepad: {
+        apiAvailable: typeof navigator.getGamepads === "function",
+        connected: gamepadDrive.connected,
+        id: gamepadDrive.id ?? "",
+        mapping: gamepadDrive.mapping ?? "",
+        index: gamepadDrive.index ?? -1,
+        steering: Number((gamepadDrive.steering ?? 0).toFixed(3)),
+        throttle: Number((gamepadDrive.throttle ?? 0).toFixed(3)),
+        brake: Number((gamepadDrive.brake ?? 0).toFixed(3))
+      },
       audio: racingAudio.getState(),
       haptics: racingHaptics.getState(),
       randomSeed: activeSnapshot?.randomSeed ?? null,
@@ -7445,6 +7455,14 @@ ${shader.vertexShader}`
       `brake pressure ${(tires?.wheels ?? []).map((wheel) => wheel.brakeScale.toFixed(2)).join(" / ") || "--"}`,
       `ABS ${tires?.absActive ? "ON" : "off"}  TCS ${tires?.tractionControlActive ? "ON" : "off"}`
     ];
+    const gamepadLines = [
+      "GAMEPAD",
+      `api ${typeof navigator.getGamepads === "function" ? "yes" : "NO"}  connected ${gamepadDrive.connected ? "yes" : "no"}`,
+      gamepadDrive.connected
+        ? `#${gamepadDrive.index} ${gamepadDrive.id} [${gamepadDrive.mapping}]`
+        : "press a controller button to activate",
+      `steer ${(gamepadDrive.steering ?? 0).toFixed(2)}  throttle ${(gamepadDrive.throttle ?? 0).toFixed(2)}  brake ${(gamepadDrive.brake ?? 0).toFixed(2)}`
+    ];
     const vehicleSpec = playerVehicleSpec();
     const playerHalfWidth = vehicleSpec.chassisHalfWidth;
     const playerHalfHeight = vehicleSpec.chassisHalfHeight;
@@ -7454,6 +7472,7 @@ ${shader.vertexShader}`
       "Physics Telemetry  [F2]",
       ...physicalVehicleLines,
       ...dynamicsLines,
+      ...gamepadLines,
       ...telemetryLines,
       ...provingGroundLines,
       `onRoad ${state.onRoad ? "yes" : "no"}  paused ${raceState.paused ? "yes" : "no"}`,
