@@ -8,10 +8,10 @@ const carIds = (process.env.RACING_MATRIX_CARS || "miura-p400,veneno,urus-se")
   .map((carId) => carId.trim())
   .filter(Boolean);
 const showcaseOnly = process.env.RACING_MATRIX_SHOWCASE_ONLY === "1";
-const showcaseTimeoutMs = Number(process.env.RACING_MATRIX_SHOWCASE_TIMEOUT_MS || 120_000);
+const showcaseTimeoutMs = Number(process.env.RACING_MATRIX_SHOWCASE_TIMEOUT_MS || 360_000);
 
 test.skip(!enabled, "run explicitly with pnpm run test:e2e:matrix");
-test.setTimeout(carIds.length * 180_000 + 30_000);
+test.setTimeout(carIds.length * (showcaseTimeoutMs + 60_000) + 30_000);
 
 test("builds a real-Rapier vehicle dynamics comparison matrix", async ({ page }, testInfo) => {
   const cars = [];
@@ -169,6 +169,8 @@ async function driveShowcase(page) {
     const sectionsDriven = [...sections];
     const passed = status === "completed"
       && state.showcaseChallenge.nextCheckpoint === state.showcaseChallenge.checkpointCount
+      && state.showcaseChallenge.elapsedSeconds >= 180
+      && state.showcaseChallenge.elapsedSeconds <= 300
       && initialBoostCharges === state.boostCharges
       && ["road", "tunnel", "rally"].every((section) => sectionsDriven.includes(section));
     return {
@@ -205,10 +207,12 @@ function showcaseControls(route, state) {
     && state.playerPosition.y < -8;
   const reverseBridgeEntry = state.playerPosition.x > 220
     && state.playerPosition.x < 320
-    && state.playerPosition.y > 8;
+    && state.playerPosition.y > 8
+    && state.playerPosition.y < 80;
   const reverseBridgeApproach = state.playerPosition.x > 135
     && state.playerPosition.x <= 220
-    && state.playerPosition.y > 8;
+    && state.playerPosition.y > 8
+    && state.playerPosition.y < 80;
   if (bridgeApproach && state.playerPosition.x < 202) {
     desiredHeading = Math.atan2(212 - state.playerPosition.x, -18 - state.playerPosition.y);
   }

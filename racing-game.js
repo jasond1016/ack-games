@@ -44,6 +44,9 @@ import {
   validateDrivableSurfaceSet
 } from "./racing-drivable-surface-validation.mjs";
 import {
+  COASTAL_SHOWCASE_RALLY,
+  COASTAL_SHOWCASE_ROUTE,
+  COASTAL_SHOWCASE_TUNNEL,
   FREE_DRIVE_RALLY,
   FREE_DRIVE_SHOWCASE,
   FREE_DRIVE_TUNNEL,
@@ -52,7 +55,8 @@ import {
   createFreeDriveRallyRibbon,
   createFreeDriveRallyRoute,
   createFreeDriveTunnelSegments,
-  sampleFreeDriveShowcaseDrivingLine
+  sampleFreeDriveShowcaseDrivingLine,
+  showcaseRouteLookAheadDistance
 } from "./racing-free-drive-features.mjs";
 import {
   createFreeDriveTimeTrial,
@@ -91,6 +95,7 @@ import {
   createFreeDriveStuntRampColliderSpecs,
   freeDriveJumpRampRise,
   freeDriveStuntRampRise,
+  isFreeDriveBridgeCorridor,
   isFreeDriveJumpCorridor,
   isFreeDriveJumpGap,
   isFreeDriveJumpGapSegment,
@@ -181,6 +186,9 @@ export function createRacingGame({
   const isShowcase = environmentProfile === "coastal-showcase";
   const isProvingGround = environmentProfile === "proving-ground";
   const isIslandWorld = environmentProfile === "island-sandbox" || isShowcase;
+  const freeDriveTunnelConfig = isShowcase ? COASTAL_SHOWCASE_TUNNEL : FREE_DRIVE_TUNNEL;
+  const freeDriveRallyConfig = isShowcase ? COASTAL_SHOWCASE_RALLY : FREE_DRIVE_RALLY;
+  const freeDriveShowcaseConfig = isShowcase ? COASTAL_SHOWCASE_ROUTE : FREE_DRIVE_SHOWCASE;
   const startConfig = initialSnapshot?.startConfig ?? loadActiveRacingStartConfig();
   const canvas = document.getElementById("racingCanvas");
   const hudOverlay = document.getElementById("racingHudOverlay");
@@ -2131,7 +2139,7 @@ export function createRacingGame({
       const elevation = freeDriveElevationAtProgress(progress);
       const inner = sample.center.clone().add(sample.normal.clone().multiplyScalar((sample.halfWidth + 1.4) * side));
       const outer = sample.center.clone().add(sample.normal.clone().multiplyScalar((sample.halfWidth + 18) * side));
-      const outerHeight = sample.center.x > 238 ? -0.05 : sample.center.x > 116 ? -1.22 : -0.16;
+      const outerHeight = sample.center.x > 238 ? -0.05 : isFreeDriveBridgeCorridor(sample.center) ? -1.22 : -0.16;
       positions.push(inner.x, elevation - 0.02, inner.y, outer.x, outerHeight, outer.y);
       uvs.push(0, sample.distance / 12, 1, sample.distance / 12);
     });
@@ -2275,7 +2283,7 @@ export function createRacingGame({
   function addFreeDriveBridge() {
     const concrete = createFreeDrivePbrMaterial("brushed_concrete", { color: 0xb8bec0, repeatX: 3, repeatY: 2, roughness: 0.82 });
     const steel = new THREE.MeshStandardMaterial({ color: 0x344b58, roughness: 0.36, metalness: 0.72 });
-    const bridgeSamples = trackSamples.filter((sample) => sample.center.x > 116 && sample.center.x < 240);
+    const bridgeSamples = trackSamples.filter((sample) => isFreeDriveBridgeCorridor(sample.center));
 
     for (let index = 0; index < bridgeSamples.length - 1; index += 3) {
       const start = bridgeSamples[index];
@@ -2441,7 +2449,8 @@ export function createRacingGame({
   function addFreeDriveTunnel() {
     const segments = createFreeDriveTunnelSegments({
       sampleTrack: trackProfileAtProgress,
-      elevationAt: freeDriveElevationAtProgress
+      elevationAt: freeDriveElevationAtProgress,
+      config: freeDriveTunnelConfig
     });
     if (!segments.length) return;
 
@@ -2532,7 +2541,8 @@ export function createRacingGame({
         const position = new THREE.Vector2(x, z);
         const projection = closestTrackSample(position);
         return freeDriveGroundElevationAt(position, projection.progress);
-      }
+      },
+      config: freeDriveRallyConfig
     });
     if (!freeDriveRallyRoute.length) return;
 
@@ -2555,7 +2565,9 @@ export function createRacingGame({
       metalness: 0,
       side: THREE.DoubleSide
     });
-    const road = createRallyRibbonMesh(createFreeDriveRallyRibbon(freeDriveRallyRoute), dirtMaterial);
+    const road = createRallyRibbonMesh(createFreeDriveRallyRibbon(freeDriveRallyRoute, {
+      halfWidth: freeDriveRallyConfig.halfWidth
+    }), dirtMaterial);
     road.name = "free-drive-rally-dirt-road";
     road.receiveShadow = true;
     registerStaticWorldMesh(road, FREE_DRIVE_RALLY.surfaceId);
@@ -2581,7 +2593,7 @@ export function createRacingGame({
       }), rutMaterial);
       const edge = createRallyRibbonMesh(createFreeDriveRallyRibbon(freeDriveRallyRoute, {
         halfWidth: 0.24,
-        centerOffset: side * (FREE_DRIVE_RALLY.halfWidth - 0.18),
+        centerOffset: side * (freeDriveRallyConfig.halfWidth - 0.18),
         heightOffset: 0.018
       }), edgeMaterial);
       scene.add(rut, edge);
@@ -2599,9 +2611,9 @@ export function createRacingGame({
           markerMaterials[(index + (side > 0 ? 1 : 0)) % markerMaterials.length]
         );
         marker.position.set(
-          sample.x + sample.normalX * side * (FREE_DRIVE_RALLY.halfWidth + 0.65),
+          sample.x + sample.normalX * side * (freeDriveRallyConfig.halfWidth + 0.65),
           sample.y + 0.56,
-          sample.z + sample.normalZ * side * (FREE_DRIVE_RALLY.halfWidth + 0.65)
+          sample.z + sample.normalZ * side * (freeDriveRallyConfig.halfWidth + 0.65)
         );
         marker.castShadow = qualityPreset.shadows;
         scene.add(marker);
@@ -2628,7 +2640,7 @@ export function createRacingGame({
     });
     freeDriveRallyChallenge = createFreeDriveTimeTrial({
       checkpoints: freeDriveRallyCheckpoints,
-      gateRadius: FREE_DRIVE_RALLY.halfWidth + 1.8,
+      gateRadius: freeDriveRallyConfig.halfWidth + 1.8,
       storageKey: `ack-games:racing:rally-ghost:v1:${selectedCarId}`
     });
 
@@ -2636,12 +2648,18 @@ export function createRacingGame({
       freeDriveShowcaseDrivingLine = createFreeDriveShowcaseDrivingLine({
         sampleTrack: trackProfileAtProgress,
         elevationAt: (progress) => freeDriveElevationAtProgress(progress) + 0.06,
-        rallyRoute: freeDriveRallyRoute
+        rallyRoute: freeDriveRallyRoute,
+        trackSampleCount: 900,
+        tunnelConfig: freeDriveTunnelConfig,
+        rallyConfig: freeDriveRallyConfig
       });
       freeDriveShowcaseCheckpoints = createFreeDriveShowcaseRoute({
         sampleTrack: trackProfileAtProgress,
         elevationAt: (progress) => freeDriveElevationAtProgress(progress) + 0.06,
-        rallyRoute: freeDriveRallyRoute
+        rallyRoute: freeDriveRallyRoute,
+        config: freeDriveShowcaseConfig,
+        tunnelConfig: freeDriveTunnelConfig,
+        rallyConfig: freeDriveRallyConfig
       });
       let minimumLineIndex = 0;
       freeDriveShowcaseCheckpointDistances = freeDriveShowcaseCheckpoints.map((checkpoint) => {
@@ -2660,21 +2678,19 @@ export function createRacingGame({
       });
       freeDriveShowcaseChallenge = createFreeDriveTimeTrial({
         checkpoints: freeDriveShowcaseCheckpoints,
-        gateRadius: FREE_DRIVE_SHOWCASE.gateRadius,
+        gateRadius: freeDriveShowcaseConfig.gateRadius,
         storageKey: `ack-games:racing:coastal-showcase:v1:${selectedCarId}`,
         autoStart: false
       });
     }
 
     const gateColors = [0x5cff9d, 0x58d8ff, 0xffd45a, 0xff9a54, 0xff5d73];
-    freeDriveRallyCheckpoints.forEach((checkpoint, index) => {
+    if (!isShowcase) freeDriveRallyCheckpoints.forEach((checkpoint, index) => {
       const gate = createRallyCheckpointGate(checkpoint, gateColors[index], index);
       scene.add(gate);
     });
-    freeDriveShowcaseCheckpoints.slice(1).forEach((checkpoint, offset) => {
-      const index = offset + 1;
-      const color = checkpoint.section === "rally" ? 0xffb24c : checkpoint.section === "tunnel" ? 0x68e7ff : 0xb8ff68;
-      const gate = createRallyCheckpointGate(checkpoint, color, `showcase-${index}`);
+    freeDriveShowcaseCheckpoints.filter(({ section }) => section === "finish").forEach((checkpoint) => {
+      const gate = createRallyCheckpointGate(checkpoint, 0xb8ff68, "showcase-finish");
       gate.scale.setScalar(1.12);
       scene.add(gate);
     });
@@ -2693,7 +2709,7 @@ export function createRacingGame({
       roughness: 0.34,
       metalness: 0.18
     });
-    const gateHalfWidth = FREE_DRIVE_RALLY.halfWidth + 0.72;
+    const gateHalfWidth = freeDriveRallyConfig.halfWidth + 0.72;
     const height = 3.4;
     const postGeometry = new THREE.CylinderGeometry(0.12, 0.16, height, 10);
     for (const side of [-1, 1]) {
@@ -3413,8 +3429,8 @@ export function createRacingGame({
       createRailColliders(1);
       createRailColliders(-1);
     } else if (isIslandWorld) {
-      createRailColliders(1, (sample) => sample.center.x > 116 && sample.center.x < 240);
-      createRailColliders(-1, (sample) => sample.center.x > 116 && sample.center.x < 240);
+      createRailColliders(1, (sample) => isFreeDriveBridgeCorridor(sample.center));
+      createRailColliders(-1, (sample) => isFreeDriveBridgeCorridor(sample.center));
     }
 
     const playerBodyDesc = RAPIER.RigidBodyDesc.dynamic()
@@ -4311,14 +4327,16 @@ export function createRacingGame({
     if (!isIslandWorld) return 0;
     const islandElevation = freeDriveIslandElevation(progress);
     const stuntRampRise = freeDriveJumpRampRise(position);
+    if (isShowcase && !isFreeDriveBridgeCorridor(position)) return islandElevation + stuntRampRise;
     if (position.x >= 238) return 1.15 + stuntRampRise;
-    if (position.x > 116) {
+    if (isFreeDriveBridgeCorridor(position)) {
       const bridgeProgress = clamp((position.x - 116) / 122, 0, 1);
       const bridgeElevation = 4.8 + Math.sin(bridgeProgress * Math.PI) * 3.2;
       const entryBlend = smoothstep(116, 140, position.x);
       const exitBlend = smoothstep(214, 238, position.x);
       const entryElevation = THREE.MathUtils.lerp(islandElevation, bridgeElevation, entryBlend);
-      return THREE.MathUtils.lerp(entryElevation, 1.15, exitBlend) + stuntRampRise;
+      const exitElevation = isShowcase ? islandElevation : 1.15;
+      return THREE.MathUtils.lerp(entryElevation, exitElevation, exitBlend) + stuntRampRise;
     }
     return islandElevation;
   }
@@ -4332,7 +4350,7 @@ export function createRacingGame({
     if (!isIslandWorld) return 0;
     const stuntRampRise = freeDriveStuntRampRise(position);
     if (position.x > 238) return stuntRampRise;
-    if (position.x > 116) return -1.2 + stuntRampRise;
+    if (isFreeDriveBridgeCorridor(position)) return -1.2 + stuntRampRise;
     const sample = trackProfileAtProgress(progress);
     const distance = position.distanceTo(sample.center);
     return Math.max(0, freeDriveElevationAtProgress(progress) - smoothstep(8, 30, distance) * 3.8);
@@ -4372,7 +4390,7 @@ export function createRacingGame({
         isFreeDrive: isIslandWorld
       });
       if (projection.distance > roadSupportHalfWidth || inJumpGap) return null;
-      const bridge = isIslandWorld && position.x > 116 && position.x < 240;
+      const bridge = isIslandWorld && isFreeDriveBridgeCorridor(position);
       return {
         height: 0.06 + freeDriveElevationAtProgress(projection.progress),
         surfaceId: bridge ? "bridge" : "road"
@@ -5658,7 +5676,9 @@ export function createRacingGame({
           .reduce((gap, other) => Math.min(gap, other.eventDistance - traffic.eventDistance), Infinity);
         if (ahead < 16) targetSpeed *= clamp((ahead - 6) / 10, 0, 1);
         const playerAhead = showcaseEvent.playerDistance - traffic.eventDistance;
-        if (playerAhead > 0 && playerAhead < 12) targetSpeed = Math.min(targetSpeed, state.velocity.length());
+        if (traffic.eventDistance >= 0 && playerAhead > 0 && playerAhead < 12) {
+          targetSpeed = Math.min(targetSpeed, state.velocity.length());
+        }
         traffic.currentSpeed = moveToward(traffic.currentSpeed, targetSpeed, deltaSeconds * 7);
         traffic.eventDistance = Math.min(total, traffic.eventDistance + traffic.currentSpeed * deltaSeconds);
         if (traffic.eventDistance >= total) {
@@ -6255,8 +6275,8 @@ export function createRacingGame({
     const onRally = playerSurfaceState.surfaceId === FREE_DRIVE_RALLY.surfaceId
       || (freeDriveJumpState.airborne && presentationState.environment === "rally");
     const inTunnel = state.onRoad
-      && state.trackProgress >= FREE_DRIVE_TUNNEL.startProgress
-      && state.trackProgress <= FREE_DRIVE_TUNNEL.endProgress;
+      && state.trackProgress >= freeDriveTunnelConfig.startProgress
+      && state.trackProgress <= freeDriveTunnelConfig.endProgress;
     presentationState.environment = showcaseEvent.phase !== "running"
       ? "road" : onRally ? "rally" : inTunnel ? "tunnel" : "road";
     const targetExposure = presentationState.baselineExposure
@@ -6821,7 +6841,6 @@ export function createRacingGame({
     const next = freeDriveShowcaseCheckpoints[nextCheckpoint];
     if (enteredCheckpoint?.section === "tunnel" || enteredCheckpoint?.section === "rally") {
       showcaseEvent.currentSection = enteredCheckpoint.section;
-      queueShowcaseSectionCue(enteredCheckpoint.section);
     } else if (enteredCheckpoint?.section === "road") {
       showcaseEvent.currentSection = "road";
     }
@@ -7636,11 +7655,17 @@ ${shader.vertexShader}`
     const challenge = freeDriveShowcaseChallenge?.getState();
     const index = Math.min(challenge?.nextCheckpoint ?? 1, freeDriveShowcaseCheckpoints.length - 1);
     const checkpoint = freeDriveShowcaseCheckpoints[index];
-    const bearing = Math.atan2(checkpoint.x - state.position.x, checkpoint.z - state.position.y) - state.heading;
+    const checkpointDistance = freeDriveShowcaseCheckpointDistances[index] ?? freeDriveShowcaseDrivingLine.at(-1)?.distance ?? 0;
+    const guideDistance = Math.min(
+      checkpointDistance,
+      showcaseEvent.playerDistance + showcaseRouteLookAheadDistance(physics?.playerVehicle?.speed ?? state.velocity.length())
+    );
+    const guide = sampleFreeDriveShowcaseDrivingLine(freeDriveShowcaseDrivingLine, guideDistance) ?? checkpoint;
+    const bearing = Math.atan2(guide.x - state.position.x, guide.z - state.position.y) - state.heading;
     routeArrow.style.setProperty("--route-bearing", `${THREE.MathUtils.radToDeg(bearing)}deg`);
-    routeDistance.textContent = `${Math.round(Math.hypot(checkpoint.x - state.position.x, checkpoint.z - state.position.y))} M`;
+    routeDistance.textContent = `${Math.round(Math.max(0, checkpointDistance - showcaseEvent.playerDistance))} M`;
     routeSection.textContent = index === freeDriveShowcaseCheckpoints.length - 1
-      ? "FINISH" : (checkpoint.section ?? "road").toUpperCase();
+      ? "FINISH" : (guide.section ?? checkpoint.section ?? "road").toUpperCase();
     routeNotice.hidden = showcaseEvent.recoveryNoticeSeconds <= 0;
   }
 
@@ -8343,7 +8368,7 @@ ${shader.vertexShader}`
 
   function placeTunnelScenario() {
     if (!isIslandWorld) return false;
-    const progress = (FREE_DRIVE_TUNNEL.startProgress + FREE_DRIVE_TUNNEL.endProgress) * 0.5;
+    const progress = (freeDriveTunnelConfig.startProgress + freeDriveTunnelConfig.endProgress) * 0.5;
     const sample = trackProfileAtProgress(progress);
     return placeWorldScenario(sample.center.x, sample.center.y, sample.heading);
   }
