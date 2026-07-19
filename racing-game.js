@@ -47,10 +47,12 @@ import {
   FREE_DRIVE_RALLY,
   FREE_DRIVE_SHOWCASE,
   FREE_DRIVE_TUNNEL,
+  createFreeDriveShowcaseDrivingLine,
   createFreeDriveShowcaseRoute,
   createFreeDriveRallyRibbon,
   createFreeDriveRallyRoute,
-  createFreeDriveTunnelSegments
+  createFreeDriveTunnelSegments,
+  sampleFreeDriveShowcaseDrivingLine
 } from "./racing-free-drive-features.mjs";
 import {
   createFreeDriveTimeTrial,
@@ -501,6 +503,7 @@ export function createRacingGame({
   let freeDriveRallyChallenge = null;
   let freeDriveRallyGhost = null;
   let freeDriveShowcaseCheckpoints = [];
+  let freeDriveShowcaseDrivingLine = [];
   let freeDriveShowcaseChallenge = null;
   let activeFreeDriveChallenge = null;
   let displayedFreeDriveChallenge = null;
@@ -511,7 +514,11 @@ export function createRacingGame({
     finishHoldSeconds: 0,
     startX: 0,
     startZ: 0,
-    startHeading: 0
+    startHeading: 0,
+    playerDistance: 0,
+    playerPlace: 1,
+    finalPlace: null,
+    elapsedSeconds: 0
   };
   let boostCameraKick = 0;
   const startGateLights = [];
@@ -654,7 +661,10 @@ export function createRacingGame({
         boostCharges: traffic.boostCharges,
         boostVisible: (traffic.visual.userData.boostFlames || []).some((flame) => flame.visible),
         collisionHoldSeconds: Number(traffic.collisionHoldSeconds.toFixed(2)),
-        position: { x: Number(traffic.position.x.toFixed(1)), y: Number(traffic.position.y.toFixed(1)) }
+        position: { x: Number(traffic.position.x.toFixed(1)), y: Number(traffic.position.y.toFixed(1)) },
+        eventOpponent: Boolean(traffic.eventOpponent),
+        eventDistance: Number((traffic.eventDistance ?? 0).toFixed(1)),
+        finishTimeSeconds: traffic.finishTimeSeconds == null ? null : Number(traffic.finishTimeSeconds.toFixed(2))
       })),
       carDistance: Number(state.position.distanceTo(opponentState.position).toFixed(2)),
       playerCar: formatCarLabel(selectedCar()),
@@ -707,7 +717,13 @@ export function createRacingGame({
       showcaseChallenge: freeDriveShowcaseChallenge ? formatChallengeDebugState(freeDriveShowcaseChallenge) : null,
       showcaseEvent: isShowcase ? Object.freeze({
         phase: showcaseEvent.phase,
-        countdownSeconds: Number(showcaseEvent.countdownSeconds.toFixed(2))
+        countdownSeconds: Number(showcaseEvent.countdownSeconds.toFixed(2)),
+        playerDistance: Number(showcaseEvent.playerDistance.toFixed(1)),
+        playerPlace: showcaseEvent.playerPlace,
+        opponents: freeDriveTraffic.map(({ eventDistance, finishTimeSeconds }) => ({
+          distance: Number((eventDistance ?? 0).toFixed(1)),
+          finishTimeSeconds: finishTimeSeconds == null ? null : Number(finishTimeSeconds.toFixed(2))
+        }))
       }) : null,
       wheelAnimation: {
         wheelCount: car?.userData.wheelCount ?? 0,
@@ -830,7 +846,7 @@ export function createRacingGame({
     const rival = opponentCarSelection();
     const currentCar = selectedCar();
     startOpponentValue.textContent = isShowcase
-      ? "单人计时赛"
+      ? "3 位 Festival 对手"
       : isFreeDrive ? "无 · 自由探索" : rival.name;
     updateSelectedCarPanel(currentCar);
     carOptions.replaceChildren(
@@ -1192,7 +1208,7 @@ export function createRacingGame({
     startOverlay.hidden = false;
     startMapValue.textContent = mapData.name;
     startModeValue.textContent = isShowcase ? "Festival Showcase" : raceModeLabel;
-    startOpponentValue.textContent = isShowcase ? "单人计时赛" : formatCarLabel(opponentCarSelection());
+    startOpponentValue.textContent = isShowcase ? "3 位 Festival 对手" : formatCarLabel(opponentCarSelection());
     startRaceButton.textContent = isShowcase
       ? "开始 Island Tour"
       : isFreeDrive ? "进入自由驾驶" : raceMode === "lap" ? "开始闭环赛" : "开始冲刺赛";
@@ -2542,6 +2558,11 @@ export function createRacingGame({
     });
 
     if (isShowcase) {
+      freeDriveShowcaseDrivingLine = createFreeDriveShowcaseDrivingLine({
+        sampleTrack: trackProfileAtProgress,
+        elevationAt: (progress) => freeDriveElevationAtProgress(progress) + 0.06,
+        rallyRoute: freeDriveRallyRoute
+      });
       freeDriveShowcaseCheckpoints = createFreeDriveShowcaseRoute({
         sampleTrack: trackProfileAtProgress,
         elevationAt: (progress) => freeDriveElevationAtProgress(progress) + 0.06,
@@ -5278,7 +5299,10 @@ export function createRacingGame({
         jumpCooldownSeconds: 0,
         airborne: false,
         position: new THREE.Vector2(),
-        heading: 0
+        heading: 0,
+        eventOpponent: isShowcase,
+        eventDistance: 0,
+        finishTimeSeconds: null
       };
       const body = physics.world.createRigidBody(
         RAPIER.RigidBodyDesc.kinematicPositionBased()
@@ -5308,6 +5332,18 @@ export function createRacingGame({
 
   function resetFreeDriveTraffic() {
     for (const traffic of freeDriveTraffic) {
+      if (isShowcase) {
+        const gridDistances = [-9, -16, -23];
+        const gridLanes = [-2.4, 0, 2.4];
+        traffic.direction = 1;
+        traffic.laneOffset = gridLanes[traffic.index];
+        traffic.eventDistance = gridDistances[traffic.index];
+        traffic.finishTimeSeconds = null;
+        traffic.currentSpeed = 0;
+        traffic.collisionHoldSeconds = 0;
+        syncShowcaseOpponentPose(traffic, true);
+        continue;
+      }
       traffic.progress = traffic.initialProgress;
       traffic.currentSpeed = traffic.cruiseSpeed;
       traffic.boostSeconds = 0;
@@ -5356,6 +5392,10 @@ export function createRacingGame({
 
   function updateFreeDriveTraffic(deltaSeconds) {
     if (!isFreeDrive || freeDriveTraffic.length === 0) return;
+    if (isShowcase) {
+      updateShowcaseOpponents(deltaSeconds);
+      return;
+    }
     for (const traffic of freeDriveTraffic) {
       traffic.collisionHoldSeconds = Math.max(0, traffic.collisionHoldSeconds - deltaSeconds);
       traffic.boostSeconds = Math.max(0, traffic.boostSeconds - deltaSeconds);
@@ -5424,6 +5464,57 @@ export function createRacingGame({
       );
       traffic.wheelSpin += traffic.direction * traffic.currentSpeed * deltaSeconds / 0.36;
       syncFreeDriveTrafficPose(traffic);
+      animateWheelVisuals(traffic.visual, traffic.wheelSpin, 0);
+    }
+  }
+
+  function syncShowcaseOpponentPose(traffic, immediate = false) {
+    const sample = sampleFreeDriveShowcaseDrivingLine(freeDriveShowcaseDrivingLine, traffic.eventDistance);
+    if (!sample) return;
+    traffic.position.set(sample.x + sample.normalX * traffic.laneOffset, sample.z + sample.normalZ * traffic.laneOffset);
+    traffic.heading = sample.heading;
+    const translation = { x: traffic.position.x, y: sample.y + physicsConfig.fixedHeight, z: traffic.position.y };
+    const rotation = rapierRotationFromYaw(traffic.heading);
+    if (immediate) {
+      traffic.body.setTranslation(translation, true);
+      traffic.body.setRotation(rotation, true);
+    } else {
+      traffic.body.setNextKinematicTranslation(translation);
+      traffic.body.setNextKinematicRotation(rotation);
+    }
+    traffic.visual.position.set(traffic.position.x, sample.y, traffic.position.y);
+    traffic.visual.rotation.set(0, traffic.heading, 0);
+  }
+
+  function updateShowcaseOpponents(deltaSeconds) {
+    const advancing = showcaseEvent.phase === "running" || showcaseEvent.phase === "settling";
+    const total = freeDriveShowcaseDrivingLine.at(-1)?.distance ?? 0;
+    for (const traffic of freeDriveTraffic) {
+      if (advancing && traffic.finishTimeSeconds == null) {
+        const sample = sampleFreeDriveShowcaseDrivingLine(freeDriveShowcaseDrivingLine, traffic.eventDistance);
+        let targetSpeed = traffic.cruiseSpeed * (sample?.section === "rally" ? 0.62 : 0.82);
+        const lookAhead = sampleFreeDriveShowcaseDrivingLine(freeDriveShowcaseDrivingLine, traffic.eventDistance + 14);
+        const headingChange = sample && lookAhead
+          ? Math.abs(shortestAngleDelta(sample.heading, lookAhead.heading))
+          : 0;
+        targetSpeed *= clamp(1 - headingChange / 2.2, 0.28, 1);
+        const ahead = freeDriveTraffic
+          .filter((other) => other !== traffic && other.eventDistance > traffic.eventDistance)
+          .reduce((gap, other) => Math.min(gap, other.eventDistance - traffic.eventDistance), Infinity);
+        if (ahead < 16) targetSpeed *= clamp((ahead - 6) / 10, 0, 1);
+        const playerAhead = showcaseEvent.playerDistance - traffic.eventDistance;
+        if (playerAhead > 0 && playerAhead < 12) targetSpeed = Math.min(targetSpeed, state.velocity.length());
+        traffic.currentSpeed = moveToward(traffic.currentSpeed, targetSpeed, deltaSeconds * 7);
+        traffic.eventDistance = Math.min(total, traffic.eventDistance + traffic.currentSpeed * deltaSeconds);
+        if (traffic.eventDistance >= total) {
+          traffic.finishTimeSeconds = showcaseEvent.elapsedSeconds;
+          traffic.currentSpeed = 0;
+        }
+        traffic.wheelSpin += traffic.currentSpeed * deltaSeconds / 0.36;
+      } else if (!advancing) {
+        traffic.currentSpeed = 0;
+      }
+      syncShowcaseOpponentPose(traffic);
       animateWheelVisuals(traffic.visual, traffic.wheelSpin, 0);
     }
   }
@@ -6384,6 +6475,11 @@ export function createRacingGame({
     showcaseEvent.startX = state.position.x;
     showcaseEvent.startZ = state.position.y;
     showcaseEvent.startHeading = state.heading;
+    showcaseEvent.playerDistance = 0;
+    showcaseEvent.playerPlace = 1;
+    showcaseEvent.finalPlace = null;
+    showcaseEvent.elapsedSeconds = 0;
+    resetFreeDriveTraffic();
     anchorShowcaseStartPose();
     showEventBanner({ value: String(showcaseCountdownSeconds), detail: "ISLAND TOUR" });
     return true;
@@ -6421,12 +6517,17 @@ export function createRacingGame({
     }
 
     if (showcaseEvent.phase === "running") {
+      showcaseEvent.elapsedSeconds += deltaSeconds;
       if (showcaseEvent.bannerSeconds > 0) {
         showcaseEvent.bannerSeconds = Math.max(0, showcaseEvent.bannerSeconds - deltaSeconds);
         if (showcaseEvent.bannerSeconds === 0) hideEventBanner();
       }
+      updateShowcasePlayerProgress();
       const challenge = updateFreeDriveShowcaseChallenge(deltaSeconds);
       if (challenge?.phase !== "finished") return;
+      showcaseEvent.playerDistance = freeDriveShowcaseDrivingLine.at(-1)?.distance ?? showcaseEvent.playerDistance;
+      updateShowcasePlace();
+      showcaseEvent.finalPlace = showcaseEvent.playerPlace;
       showcaseEvent.phase = "settling";
       showcaseEvent.finishHoldSeconds = showcaseFinishHoldSeconds;
       showEventBanner({ value: "FINISH", detail: formatTime(challenge.elapsedSeconds), mode: "finish" });
@@ -6434,9 +6535,34 @@ export function createRacingGame({
     }
 
     if (showcaseEvent.phase === "settling") {
+      showcaseEvent.elapsedSeconds += deltaSeconds;
       showcaseEvent.finishHoldSeconds = Math.max(0, showcaseEvent.finishHoldSeconds - deltaSeconds);
       if (showcaseEvent.finishHoldSeconds === 0) showShowcaseResult();
     }
+  }
+
+  function updateShowcasePlayerProgress() {
+    let nearest = null;
+    let nearestDistance = Infinity;
+    const minimum = Math.max(0, showcaseEvent.playerDistance - 18);
+    const maximum = showcaseEvent.playerDistance + 90;
+    for (const sample of freeDriveShowcaseDrivingLine) {
+      if (sample.distance < minimum || sample.distance > maximum) continue;
+      const distance = Math.hypot(sample.x - state.position.x, sample.z - state.position.y);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearest = sample;
+      }
+    }
+    if (nearest && nearestDistance < 24) showcaseEvent.playerDistance = Math.max(showcaseEvent.playerDistance, nearest.distance);
+    updateShowcasePlace();
+  }
+
+  function updateShowcasePlace() {
+    showcaseEvent.playerPlace = 1 + freeDriveTraffic.filter((traffic) =>
+      traffic.finishTimeSeconds != null || traffic.eventDistance > showcaseEvent.playerDistance + 0.5
+    ).length;
+    raceState.playerPlace = showcaseEvent.playerPlace;
   }
 
   function showEventBanner({ value, detail, mode = "countdown" }) {
@@ -7054,7 +7180,7 @@ ${shader.vertexShader}`
     } else if (isFreeDrive && visibleChallenge === "showcase" && showcaseChallenge?.phase === "running") {
       progressLabel.textContent = "ISLAND TOUR";
       progressValue.textContent = `${showcaseChallenge.elapsedSeconds.toFixed(2)} S`;
-      placeValue.textContent = `GATE ${Math.min(showcaseChallenge.nextCheckpoint, showcaseChallenge.checkpointCount - 1)} / ${showcaseChallenge.checkpointCount - 1}`;
+      placeValue.textContent = `POS ${showcaseEvent.playerPlace} / 4 · GATE ${Math.min(showcaseChallenge.nextCheckpoint, showcaseChallenge.checkpointCount - 1)} / ${showcaseChallenge.checkpointCount - 1}`;
     } else if (isFreeDrive && visibleChallenge === "rally" && rallyChallenge?.phase === "running") {
       progressLabel.textContent = "RALLY";
       progressValue.textContent = `${rallyChallenge.elapsedSeconds.toFixed(2)} S`;
@@ -7319,13 +7445,15 @@ ${shader.vertexShader}`
     hideEventBanner();
     raceState.finished = true;
     raceState.resultVisible = true;
-    raceState.winner = "player";
-    resultCard.classList.add("is-win");
-    resultCard.classList.remove("is-loss");
+    const playerPlace = showcaseEvent.finalPlace ?? showcaseEvent.playerPlace;
+    const winner = playerPlace === 1 ? "player" : "opponent";
+    raceState.winner = winner;
+    resultCard.classList.toggle("is-win", winner === "player");
+    resultCard.classList.toggle("is-loss", winner !== "player");
     lockedResult = createRacingResult({
       snapshot: activeSnapshot,
-      winner: "player",
-      playerPlace: 1,
+      winner,
+      playerPlace,
       elapsedSeconds: challenge.elapsedSeconds,
       details: {
         mode: "coastal-showcase",
@@ -7336,17 +7464,17 @@ ${shader.vertexShader}`
     });
     sessionControls?.transition("cinematic", { result: lockedResult });
     resultTag.textContent = challenge.newBest ? "NEW FESTIVAL RECORD" : "FESTIVAL SHOWCASE";
-    resultTitle.textContent = "ISLAND TOUR 完赛";
-    finishPlaceNumber.textContent = "1";
-    finishPlaceSuffix.textContent = "ST";
+    resultTitle.textContent = playerPlace === 1 ? "ISLAND TOUR 冠军" : `ISLAND TOUR 第 ${playerPlace} 名`;
+    finishPlaceNumber.textContent = String(playerPlace);
+    finishPlaceSuffix.textContent = ["TH", "ST", "ND", "RD", "TH"][playerPlace];
     finishTrack.textContent = `${mapData.name} · ISLAND TOUR`;
     resultSummary.textContent = challenge.newBest
       ? "海岸公路、隧道和拉力赛段全部完成，新的最快纪录已经保存。"
       : "海岸公路、隧道和拉力赛段全部完成。再跑一次，挑战你的最佳成绩。";
     resultPlayerLabel.textContent = "本次成绩";
     resultPlayerValue.textContent = formatTime(challenge.elapsedSeconds);
-    resultOpponentLabel.textContent = "个人最佳";
-    resultOpponentValue.textContent = formatTime(challenge.bestTimeSeconds);
+    resultOpponentLabel.textContent = "FINAL POSITION";
+    resultOpponentValue.textContent = `${playerPlace} / 4`;
     playAgainButton.textContent = "再次挑战";
     hudOverlay.hidden = true;
     resultOverlay.hidden = false;
@@ -7381,6 +7509,7 @@ ${shader.vertexShader}`
   }
 
   function toggleOpponent() {
+    if (isShowcase) return false;
     raceState.opponentEnabled = !raceState.opponentEnabled;
     opponentState.collisionHoldSeconds = 0;
     raceState.playerPlace = 1;

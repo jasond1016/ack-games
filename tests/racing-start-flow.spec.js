@@ -129,7 +129,7 @@ test("Coastal Showcase runs countdown, timed route, result, and in-place retry",
   const startOverlay = page.locator("#racingStartOverlay");
   await expect(startOverlay).toBeVisible({ timeout: 25_000 });
   await expect(page.locator("#racingStartModeValue")).toHaveText("Festival Showcase");
-  await expect(page.locator("#racingStartOpponentValue")).toHaveText("单人计时赛");
+  await expect(page.locator("#racingStartOpponentValue")).toHaveText("3 位 Festival 对手");
   await page.locator("#racingStartRaceButton").click();
   await expect(startOverlay).toBeHidden({ timeout: 45_000 });
 
@@ -137,8 +137,11 @@ test("Coastal Showcase runs countdown, timed route, result, and in-place retry",
   await expect(eventBanner).toBeVisible();
   const countdownStart = await page.evaluate(() => {
     const state = globalThis.__ackGamesDebug.racing.getState();
-    return { position: state.playerPosition, speedKmh: state.speedKmh };
+    return { position: state.playerPosition, speedKmh: state.speedKmh, opponents: state.showcaseEvent.opponents };
   });
+  expect(countdownStart.opponents).toHaveLength(3);
+  await page.keyboard.press("KeyH");
+  expect(await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().opponentEnabled)).toBe(false);
   await page.keyboard.down("KeyW");
   await page.waitForTimeout(700);
   const heldDuringCountdown = await page.evaluate(() => {
@@ -149,12 +152,17 @@ test("Coastal Showcase runs countdown, timed route, result, and in-place retry",
   expect(heldDuringCountdown.position).toEqual(countdownStart.position);
   expect(heldDuringCountdown.speedKmh).toBe(0);
   expect(heldDuringCountdown.boost).toBe(0);
+  expect((await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().showcaseEvent.opponents))
+    .map(({ distance }) => distance)).toEqual(countdownStart.opponents.map(({ distance }) => distance));
   await expect.poll(() => page.evaluate(() =>
     globalThis.__ackGamesDebug.racing.getState().showcaseEvent.phase
   ), { timeout: 8_000 }).toBe("running");
   await expect.poll(() => page.evaluate(() =>
     globalThis.__ackGamesDebug.racing.getState().showcaseChallenge.elapsedSeconds
   )).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() =>
+    Math.max(...globalThis.__ackGamesDebug.racing.getState().showcaseEvent.opponents.map(({ distance }) => distance))
+  )).toBeGreaterThan(Math.max(...countdownStart.opponents.map(({ distance }) => distance)));
 
   expect(await page.evaluate(() =>
     globalThis.__ackGamesDebug.racing.completeShowcaseEventScenario()
@@ -163,8 +171,11 @@ test("Coastal Showcase runs countdown, timed route, result, and in-place retry",
     globalThis.__ackGamesDebug.racing.getState().showcaseEvent.phase
   ), { timeout: 5_000 }).toBe("result");
   await expect(page.locator("#racingResultOverlay")).toBeVisible();
-  await expect(page.locator("#racingResultTitle")).toHaveText("ISLAND TOUR 完赛");
+  await expect(page.locator("#racingResultTitle")).toContainText("ISLAND TOUR");
   await expect(page.locator("#racingResultPlayerValue")).not.toHaveText("--");
+  const finalPosition = Number(await page.locator("#racingFinishPlaceNumber").textContent());
+  expect(finalPosition).toBeGreaterThanOrEqual(1);
+  expect(finalPosition).toBeLessThanOrEqual(4);
 
   await page.locator("#racingPlayAgainButton").click();
   await expect(page.locator("#racingResultOverlay")).toBeHidden();
