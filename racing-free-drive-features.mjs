@@ -62,6 +62,88 @@ export function createFreeDriveShowcaseRoute({
   ]);
 }
 
+export function createFreeDriveShowcaseDrivingLine({
+  sampleTrack,
+  elevationAt,
+  rallyRoute,
+  trackSampleCount = 520
+} = {}) {
+  if (typeof sampleTrack !== "function" || typeof elevationAt !== "function" || rallyRoute?.length < 2) return [];
+  const points = [];
+  const append = (sample, section) => {
+    const previous = points.at(-1);
+    if (previous && Math.hypot(sample.x - previous.x, sample.z - previous.z) < 0.001) return;
+    const distance = (previous?.distance ?? 0) + (previous
+      ? Math.hypot(sample.x - previous.x, sample.y - previous.y, sample.z - previous.z)
+      : 0);
+    points.push({ ...sample, section, distance });
+  };
+  const appendTrackRange = (start, end) => {
+    const span = end - start;
+    const count = Math.max(2, Math.ceil(trackSampleCount * span));
+    for (let index = 0; index <= count; index += 1) {
+      const progress = start + span * index / count;
+      const wrapped = progress >= 1 ? progress - 1 : progress;
+      const sample = sampleTrack(wrapped);
+      append({
+        x: sample.center.x,
+        y: elevationAt(wrapped),
+        z: sample.center.y,
+        heading: sample.heading,
+        tangentX: Math.sin(sample.heading),
+        tangentZ: Math.cos(sample.heading),
+        normalX: sample.normal.x,
+        normalZ: sample.normal.y,
+        trackProgress: wrapped
+      }, wrapped >= FREE_DRIVE_TUNNEL.startProgress && wrapped <= FREE_DRIVE_TUNNEL.endProgress ? "tunnel" : "road");
+    }
+  };
+  appendTrackRange(0.03, FREE_DRIVE_RALLY.startProgress);
+  for (const sample of rallyRoute) append({
+    ...sample,
+    heading: Math.atan2(sample.tangentX, sample.tangentZ),
+    normalX: -sample.tangentZ,
+    normalZ: sample.tangentX
+  }, "rally");
+  appendTrackRange(FREE_DRIVE_RALLY.endProgress, 1.03);
+  if (points.length) points[0].section = "start";
+  if (points.length > 1) points.at(-1).section = "finish";
+  return Object.freeze(points.map((point) => Object.freeze(point)));
+}
+
+export function sampleFreeDriveShowcaseDrivingLine(route, requestedDistance) {
+  if (!Array.isArray(route) || route.length < 2) return null;
+  const total = route.at(-1).distance;
+  let distance = Number.isFinite(requestedDistance) ? requestedDistance : 0;
+  if (distance < 0) distance = Math.max(0, total + distance);
+  distance = Math.min(total, distance);
+  let low = 0;
+  let high = route.length - 1;
+  while (low + 1 < high) {
+    const middle = (low + high) >> 1;
+    if (route[middle].distance <= distance) low = middle;
+    else high = middle;
+  }
+  const start = route[low];
+  const end = route[high];
+  const span = Math.max(0.0001, end.distance - start.distance);
+  const t = (distance - start.distance) / span;
+  const headingDelta = Math.atan2(Math.sin(end.heading - start.heading), Math.cos(end.heading - start.heading));
+  const normalX = start.normalX + (end.normalX - start.normalX) * t;
+  const normalZ = start.normalZ + (end.normalZ - start.normalZ) * t;
+  const normalLength = Math.max(0.0001, Math.hypot(normalX, normalZ));
+  return Object.freeze({
+    x: start.x + (end.x - start.x) * t,
+    y: start.y + (end.y - start.y) * t,
+    z: start.z + (end.z - start.z) * t,
+    heading: start.heading + headingDelta * t,
+    normalX: normalX / normalLength,
+    normalZ: normalZ / normalLength,
+    section: t < 0.5 ? start.section : end.section,
+    distance
+  });
+}
+
 function showcaseCheckpoint(checkpoint) {
   return Object.freeze({
     x: checkpoint.x,

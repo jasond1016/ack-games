@@ -4,10 +4,12 @@ import test from "node:test";
 import {
   FREE_DRIVE_RALLY,
   FREE_DRIVE_TUNNEL,
+  createFreeDriveShowcaseDrivingLine,
   createFreeDriveShowcaseRoute,
   createFreeDriveRallyRibbon,
   createFreeDriveRallyRoute,
-  createFreeDriveTunnelSegments
+  createFreeDriveTunnelSegments,
+  sampleFreeDriveShowcaseDrivingLine
 } from "../racing-free-drive-features.mjs";
 
 function straightTrack(progress) {
@@ -94,4 +96,33 @@ test("showcase route crosses road, tunnel, rally, and returns to its start", () 
     { x: route.at(-1).x, z: route.at(-1).z },
     { x: route[0].x, z: route[0].z }
   );
+});
+
+test("dense showcase driving line continuously follows every mixed-route section", () => {
+  const sampleTrack = (progress) => ({
+    center: { x: Math.sin(progress * Math.PI * 2) * 100, y: Math.cos(progress * Math.PI * 2) * 100 },
+    normal: { x: Math.sin(progress * Math.PI * 2), y: Math.cos(progress * Math.PI * 2) },
+    heading: progress * Math.PI * 2 + Math.PI / 2
+  });
+  const rallyRoute = Array.from({ length: 30 }, (_, index) => {
+    const t = index / 29;
+    const progress = FREE_DRIVE_RALLY.startProgress + (FREE_DRIVE_RALLY.endProgress - FREE_DRIVE_RALLY.startProgress) * t;
+    const center = sampleTrack(progress).center;
+    return { x: center.x, y: 1, z: center.y, tangentX: Math.cos(progress * Math.PI * 2), tangentZ: -Math.sin(progress * Math.PI * 2), normalX: 0, normalZ: 1 };
+  });
+  const line = createFreeDriveShowcaseDrivingLine({ sampleTrack, elevationAt: () => 1, rallyRoute });
+  assert.ok(line.length > 400);
+  assert.deepEqual(new Set(line.map(({ section }) => section)), new Set(["start", "road", "tunnel", "rally", "finish"]));
+  for (let index = 1; index < line.length; index += 1) {
+    assert.ok(line[index].distance > line[index - 1].distance);
+    assert.ok(Math.hypot(line[index].x - line[index - 1].x, line[index].z - line[index - 1].z) < 5);
+  }
+  assert.ok(Math.hypot(line[0].x - line.at(-1).x, line[0].z - line.at(-1).z) < 0.1);
+  const grid = sampleFreeDriveShowcaseDrivingLine(line, -8);
+  assert.ok(grid.distance > line.at(-1).distance - 9);
+  assert.ok(Math.hypot(grid.x - line[0].x, grid.z - line[0].z) < 9);
+  for (let distance = 0; distance <= line.at(-1).distance; distance += 3) {
+    const sample = sampleFreeDriveShowcaseDrivingLine(line, distance);
+    assert.ok(Math.abs(Math.hypot(sample.normalX, sample.normalZ) - 1) < 1e-9);
+  }
 });
