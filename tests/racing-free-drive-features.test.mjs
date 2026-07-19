@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  COASTAL_SHOWCASE_RALLY,
   COASTAL_SHOWCASE_TUNNEL,
   FREE_DRIVE_RALLY,
   FREE_DRIVE_TUNNEL,
@@ -134,22 +133,16 @@ test("dense showcase driving line continuously follows every mixed-route section
   }
 });
 
-test("Coastal Festival 灰盒路线达到三至五分钟的距离预算", () => {
+test("Coastal Festival 纯公路路线达到约两分钟的距离预算", () => {
   const coastal = racingMapLibrary.snapshot().presets
     .find(({ mapId }) => mapId === "preset-coastal-showcase").map;
   const track = inspectRacingTrack(coastal.track);
   const sampleTrack = (progress) => track.sample(progress);
-  const rallyRoute = createFreeDriveRallyRoute({
-    sampleTrack,
-    elevationAt: () => 0,
-    config: COASTAL_SHOWCASE_RALLY
-  });
   const line = createFreeDriveShowcaseDrivingLine({
     sampleTrack,
     elevationAt: () => 0,
-    rallyRoute,
-    tunnelConfig: COASTAL_SHOWCASE_TUNNEL,
-    rallyConfig: COASTAL_SHOWCASE_RALLY
+    rallyRoute: [],
+    tunnelConfig: COASTAL_SHOWCASE_TUNNEL
   });
   const sectionLengths = line.slice(1).reduce((lengths, sample, index) => {
     const section = line[index].section === "start" ? "road" : line[index].section;
@@ -157,10 +150,10 @@ test("Coastal Festival 灰盒路线达到三至五分钟的距离预算", () => 
     return lengths;
   }, {});
 
-  assert.ok(line.at(-1).distance >= 5600 && line.at(-1).distance <= 6400);
-  assert.ok(sectionLengths.tunnel >= 700 && sectionLengths.tunnel <= 1000);
-  assert.ok(sectionLengths.rally >= 1200 && sectionLengths.rally <= 1500);
-  assert.ok(COASTAL_SHOWCASE_RALLY.halfWidth >= 5.5);
+  assert.ok(line.at(-1).distance >= 2900 && line.at(-1).distance <= 3300);
+  assert.ok(sectionLengths.tunnel >= 550 && sectionLengths.tunnel <= 750);
+  assert.equal(sectionLengths.rally, undefined);
+  assert.deepEqual(new Set(line.map(({ section }) => section)), new Set(["start", "road", "tunnel", "finish"]));
   for (let index = 1; index < line.length; index += 1) {
     assert.ok(Math.hypot(line[index].x - line[index - 1].x, line[index].z - line[index - 1].z) < 15);
   }

@@ -34,31 +34,14 @@ export const FREE_DRIVE_SHOWCASE = Object.freeze({
 
 export const COASTAL_SHOWCASE_TUNNEL = Object.freeze({
   ...FREE_DRIVE_TUNNEL,
-  startProgress: 0.55,
-  endProgress: 0.68,
-  segmentCount: 80
-});
-
-export const COASTAL_SHOWCASE_RALLY = Object.freeze({
-  ...FREE_DRIVE_RALLY,
-  startProgress: 0.73,
-  endProgress: 0.93,
-  sampleCount: 220,
-  halfWidth: 6,
-  maximumGrade: 0.18,
-  waypoints: Object.freeze([
-    Object.freeze({ x: -650, z: -40 }),
-    Object.freeze({ x: -430, z: 90 }),
-    Object.freeze({ x: -220, z: 30 }),
-    Object.freeze({ x: -320, z: -150 }),
-    Object.freeze({ x: -270, z: -310 }),
-    Object.freeze({ x: -100, z: -370 })
-  ])
+  startProgress: 0.56,
+  endProgress: 0.76,
+  segmentCount: 64
 });
 
 export const COASTAL_SHOWCASE_ROUTE = Object.freeze({
-  trackProgresses: Object.freeze([0.03, 0.16, 0.32, 0.5, 0.61, 0.73]),
-  rallyProgresses: Object.freeze([0.33, 0.66, 1]),
+  trackProgresses: Object.freeze([0.03, 0.18, 0.36, 0.55, 0.7, 0.86]),
+  rallyProgresses: Object.freeze([]),
   gateRadius: 12
 });
 
@@ -70,7 +53,8 @@ export function createFreeDriveShowcaseRoute({
   tunnelConfig = FREE_DRIVE_TUNNEL,
   rallyConfig = FREE_DRIVE_RALLY
 } = {}) {
-  if (typeof sampleTrack !== "function" || typeof elevationAt !== "function" || !rallyRoute?.length) return [];
+  if (typeof sampleTrack !== "function" || typeof elevationAt !== "function") return [];
+  const hasRally = rallyRoute?.length >= 2 && config.rallyProgresses.length > 0;
   const trackCheckpoints = config.trackProgresses.map((progress, index) => {
     const sample = sampleTrack(progress);
     return showcaseCheckpoint({
@@ -82,17 +66,17 @@ export function createFreeDriveShowcaseRoute({
       normalZ: sample.normal.y,
       section: index === 0
         ? "start"
-        : progress >= rallyConfig.startProgress
+        : hasRally && progress >= rallyConfig.startProgress
           ? "rally"
           : progress >= tunnelConfig.startProgress && progress <= tunnelConfig.endProgress
             ? "tunnel"
             : "road"
     });
   });
-  const rallyCheckpoints = config.rallyProgresses.map((progress) => {
+  const rallyCheckpoints = hasRally ? config.rallyProgresses.map((progress) => {
     const sample = rallyRoute[Math.round((rallyRoute.length - 1) * progress)];
     return showcaseCheckpoint({ ...sample, heading: Math.atan2(sample.tangentX, sample.tangentZ), section: "rally" });
-  });
+  }) : [];
   return Object.freeze([
     ...trackCheckpoints,
     ...rallyCheckpoints,
@@ -108,7 +92,8 @@ export function createFreeDriveShowcaseDrivingLine({
   tunnelConfig = FREE_DRIVE_TUNNEL,
   rallyConfig = FREE_DRIVE_RALLY
 } = {}) {
-  if (typeof sampleTrack !== "function" || typeof elevationAt !== "function" || rallyRoute?.length < 2) return [];
+  if (typeof sampleTrack !== "function" || typeof elevationAt !== "function") return [];
+  const hasRally = rallyRoute?.length >= 2;
   const points = [];
   const append = (sample, section) => {
     const previous = points.at(-1);
@@ -138,14 +123,18 @@ export function createFreeDriveShowcaseDrivingLine({
       }, wrapped >= tunnelConfig.startProgress && wrapped <= tunnelConfig.endProgress ? "tunnel" : "road");
     }
   };
-  appendTrackRange(0.03, rallyConfig.startProgress);
-  for (const sample of rallyRoute) append({
-    ...sample,
-    heading: Math.atan2(sample.tangentX, sample.tangentZ),
-    normalX: -sample.tangentZ,
-    normalZ: sample.tangentX
-  }, "rally");
-  appendTrackRange(rallyConfig.endProgress, 1.03);
+  if (hasRally) {
+    appendTrackRange(0.03, rallyConfig.startProgress);
+    for (const sample of rallyRoute) append({
+      ...sample,
+      heading: Math.atan2(sample.tangentX, sample.tangentZ),
+      normalX: -sample.tangentZ,
+      normalZ: sample.tangentX
+    }, "rally");
+    appendTrackRange(rallyConfig.endProgress, 1.03);
+  } else {
+    appendTrackRange(0.03, 1.03);
+  }
   if (points.length) points[0].section = "start";
   if (points.length > 1) points.at(-1).section = "finish";
   return Object.freeze(points.map((point) => Object.freeze(point)));

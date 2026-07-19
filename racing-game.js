@@ -44,7 +44,6 @@ import {
   validateDrivableSurfaceSet
 } from "./racing-drivable-surface-validation.mjs";
 import {
-  COASTAL_SHOWCASE_RALLY,
   COASTAL_SHOWCASE_ROUTE,
   COASTAL_SHOWCASE_TUNNEL,
   FREE_DRIVE_RALLY,
@@ -187,7 +186,7 @@ export function createRacingGame({
   const isProvingGround = environmentProfile === "proving-ground";
   const isIslandWorld = environmentProfile === "island-sandbox" || isShowcase;
   const freeDriveTunnelConfig = isShowcase ? COASTAL_SHOWCASE_TUNNEL : FREE_DRIVE_TUNNEL;
-  const freeDriveRallyConfig = isShowcase ? COASTAL_SHOWCASE_RALLY : FREE_DRIVE_RALLY;
+  const freeDriveRallyConfig = FREE_DRIVE_RALLY;
   const freeDriveShowcaseConfig = isShowcase ? COASTAL_SHOWCASE_ROUTE : FREE_DRIVE_SHOWCASE;
   const startConfig = initialSnapshot?.startConfig ?? loadActiveRacingStartConfig();
   const canvas = document.getElementById("racingCanvas");
@@ -1788,7 +1787,8 @@ export function createRacingGame({
     if (!isFreeDrive) addVenueCluster();
     if (!isFreeDrive) addFoliage();
     if (isIslandWorld) {
-      addFreeDriveRallyRoad();
+      if (isShowcase) addFreeDriveShowcaseRoute();
+      else addFreeDriveRallyRoad();
       addFreeDriveLandmarks();
       addFreeDriveBridge();
       addFreeDriveStuntRamps();
@@ -2644,59 +2644,58 @@ export function createRacingGame({
       storageKey: `ack-games:racing:rally-ghost:v1:${selectedCarId}`
     });
 
-    if (isShowcase) {
-      freeDriveShowcaseDrivingLine = createFreeDriveShowcaseDrivingLine({
-        sampleTrack: trackProfileAtProgress,
-        elevationAt: (progress) => freeDriveElevationAtProgress(progress) + 0.06,
-        rallyRoute: freeDriveRallyRoute,
-        trackSampleCount: 900,
-        tunnelConfig: freeDriveTunnelConfig,
-        rallyConfig: freeDriveRallyConfig
-      });
-      freeDriveShowcaseCheckpoints = createFreeDriveShowcaseRoute({
-        sampleTrack: trackProfileAtProgress,
-        elevationAt: (progress) => freeDriveElevationAtProgress(progress) + 0.06,
-        rallyRoute: freeDriveRallyRoute,
-        config: freeDriveShowcaseConfig,
-        tunnelConfig: freeDriveTunnelConfig,
-        rallyConfig: freeDriveRallyConfig
-      });
-      let minimumLineIndex = 0;
-      freeDriveShowcaseCheckpointDistances = freeDriveShowcaseCheckpoints.map((checkpoint) => {
-        let nearestIndex = minimumLineIndex;
-        let nearestDistance = Infinity;
-        for (let index = minimumLineIndex; index < freeDriveShowcaseDrivingLine.length; index += 1) {
-          const sample = freeDriveShowcaseDrivingLine[index];
-          const distance = Math.hypot(sample.x - checkpoint.x, sample.z - checkpoint.z);
-          if (distance < nearestDistance) {
-            nearestDistance = distance;
-            nearestIndex = index;
-          }
-        }
-        minimumLineIndex = nearestIndex;
-        return freeDriveShowcaseDrivingLine[nearestIndex]?.distance ?? 0;
-      });
-      freeDriveShowcaseChallenge = createFreeDriveTimeTrial({
-        checkpoints: freeDriveShowcaseCheckpoints,
-        gateRadius: freeDriveShowcaseConfig.gateRadius,
-        storageKey: `ack-games:racing:coastal-showcase:v1:${selectedCarId}`,
-        autoStart: false
-      });
-    }
-
     const gateColors = [0x5cff9d, 0x58d8ff, 0xffd45a, 0xff9a54, 0xff5d73];
-    if (!isShowcase) freeDriveRallyCheckpoints.forEach((checkpoint, index) => {
+    freeDriveRallyCheckpoints.forEach((checkpoint, index) => {
       const gate = createRallyCheckpointGate(checkpoint, gateColors[index], index);
-      scene.add(gate);
-    });
-    freeDriveShowcaseCheckpoints.filter(({ section }) => section === "finish").forEach((checkpoint) => {
-      const gate = createRallyCheckpointGate(checkpoint, 0xb8ff68, "showcase-finish");
-      gate.scale.setScalar(1.12);
       scene.add(gate);
     });
 
     freeDriveRallyGhost = createRallyGhostCar();
     scene.add(freeDriveRallyGhost);
+  }
+
+  function addFreeDriveShowcaseRoute() {
+    const routeOptions = {
+      sampleTrack: trackProfileAtProgress,
+      elevationAt: (progress) => freeDriveElevationAtProgress(progress) + 0.06,
+      rallyRoute: [],
+      tunnelConfig: freeDriveTunnelConfig
+    };
+    freeDriveShowcaseDrivingLine = createFreeDriveShowcaseDrivingLine({
+      ...routeOptions,
+      trackSampleCount: 720
+    });
+    freeDriveShowcaseCheckpoints = createFreeDriveShowcaseRoute({
+      ...routeOptions,
+      config: freeDriveShowcaseConfig
+    });
+    let minimumLineIndex = 0;
+    freeDriveShowcaseCheckpointDistances = freeDriveShowcaseCheckpoints.map((checkpoint) => {
+      let nearestIndex = minimumLineIndex;
+      let nearestDistance = Infinity;
+      for (let index = minimumLineIndex; index < freeDriveShowcaseDrivingLine.length; index += 1) {
+        const sample = freeDriveShowcaseDrivingLine[index];
+        const distance = Math.hypot(sample.x - checkpoint.x, sample.z - checkpoint.z);
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestIndex = index;
+        }
+      }
+      minimumLineIndex = nearestIndex;
+      return freeDriveShowcaseDrivingLine[nearestIndex]?.distance ?? 0;
+    });
+    freeDriveShowcaseChallenge = createFreeDriveTimeTrial({
+      checkpoints: freeDriveShowcaseCheckpoints,
+      gateRadius: freeDriveShowcaseConfig.gateRadius,
+      storageKey: `ack-games:racing:coastal-showcase:v1:${selectedCarId}`,
+      autoStart: false
+    });
+    const finish = freeDriveShowcaseCheckpoints.at(-1);
+    if (finish) {
+      const gate = createRallyCheckpointGate(finish, 0xb8ff68, "showcase-finish");
+      gate.scale.setScalar(1.12);
+      scene.add(gate);
+    }
   }
 
   function createRallyCheckpointGate(checkpoint, color, index) {
