@@ -90,6 +90,7 @@ import {
   createFreeDriveStuntRampColliderSpecs,
   freeDriveJumpRampRise,
   freeDriveStuntRampRise,
+  isFreeDriveJumpCorridor,
   isFreeDriveJumpGap,
   isFreeDriveJumpGapSegment,
   resolveFreeDriveJumpLaunch
@@ -6768,7 +6769,14 @@ export function createRacingGame({
     if (!physics?.playerBody || showcaseEvent.phase !== "running") return;
     showcaseEvent.recoveryCooldownSeconds = Math.max(0, showcaseEvent.recoveryCooldownSeconds - deltaSeconds);
     showcaseEvent.recoveryNoticeSeconds = Math.max(0, showcaseEvent.recoveryNoticeSeconds - deltaSeconds);
-    if (physics.playerBody.translation().y < -12) {
+    const body = physics.playerBody.translation();
+    const velocity = physics.playerBody.linvel();
+    const bridgeSurfaceHeight = isFreeDriveJumpCorridor(state.position)
+      ? freeDriveElevationAtPosition(state.position, state.trackProgress) : null;
+    const strandedBelowBridge = bridgeSurfaceHeight !== null
+      && body.y < bridgeSurfaceHeight - 4
+      && velocity.y <= 1;
+    if (body.y < -12 || strandedBelowBridge) {
       recoverShowcasePlayer();
       return;
     }
@@ -6778,7 +6786,6 @@ export function createRacingGame({
     tempQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
     const upright = new THREE.Vector3(0, 1, 0).applyQuaternion(tempQuaternion).y;
     const support = upright < 0.45 ? resolveSurfaceSupport(state.position, state.heading, state.trackIndex) : null;
-    const body = physics.playerBody.translation();
     const nearGround = support?.grounded
       && body.y - support.height < playerVehicleSpec().spawnHeight + 1.6
       && Math.abs(physics.playerBody.linvel().y) < 2;
@@ -8293,12 +8300,18 @@ ${shader.vertexShader}`
 
   function completeShowcaseEventScenario() {
     if (!isShowcase || showcaseEvent.phase !== "running" || freeDriveShowcaseCheckpoints.length < 2) return false;
-    for (const checkpoint of freeDriveShowcaseCheckpoints.slice(1)) {
-      showcaseEvent.bannerSeconds = 0;
-      hideEventBanner();
-      if (showcaseEvent.pendingSectionCue) showPendingShowcaseSectionCue();
-      placeWorldScenario(checkpoint.x, checkpoint.z, checkpoint.heading);
-      updateShowcaseEvent(1.25);
+    const recoveryCooldownSeconds = showcaseEvent.recoveryCooldownSeconds;
+    showcaseEvent.recoveryCooldownSeconds = Number.POSITIVE_INFINITY;
+    try {
+      for (const checkpoint of freeDriveShowcaseCheckpoints.slice(1)) {
+        showcaseEvent.bannerSeconds = 0;
+        hideEventBanner();
+        if (showcaseEvent.pendingSectionCue) showPendingShowcaseSectionCue();
+        placeWorldScenario(checkpoint.x, checkpoint.z, checkpoint.heading);
+        updateShowcaseEvent(1.25);
+      }
+    } finally {
+      showcaseEvent.recoveryCooldownSeconds = recoveryCooldownSeconds;
     }
     updateHud();
     renderer.render(scene, camera);
@@ -8320,8 +8333,9 @@ ${shader.vertexShader}`
 
   function recoverShowcaseScenario() {
     if (!isShowcase || showcaseEvent.phase !== "running" || !physics?.playerBody) return false;
-    const translation = physics.playerBody.translation();
-    physics.playerBody.setTranslation({ x: translation.x, y: -13, z: translation.z }, true);
+    physics.playerBody.setTranslation({ x: 190, y: 0, z: -18 }, true);
+    physics.playerBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    syncPlayerPhysicsState();
     updateShowcaseRecovery(0.016);
     updateHud();
     renderer.render(scene, camera);
