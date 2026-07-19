@@ -48,7 +48,13 @@ export function createFreeDriveShowcaseRoute({
       heading: sample.heading,
       normalX: sample.normal.x,
       normalZ: sample.normal.y,
-      section: index === 0 ? "start" : progress >= FREE_DRIVE_TUNNEL.startProgress ? "tunnel" : "road"
+      section: index === 0
+        ? "start"
+        : progress >= FREE_DRIVE_RALLY.startProgress
+          ? "rally"
+          : progress >= FREE_DRIVE_TUNNEL.startProgress && progress <= FREE_DRIVE_TUNNEL.endProgress
+            ? "tunnel"
+            : "road"
     });
   });
   const rallyCheckpoints = config.rallyProgresses.map((progress) => {

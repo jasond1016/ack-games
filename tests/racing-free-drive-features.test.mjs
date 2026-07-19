@@ -96,6 +96,8 @@ test("showcase route crosses road, tunnel, rally, and returns to its start", () 
     { x: route.at(-1).x, z: route.at(-1).z },
     { x: route[0].x, z: route[0].z }
   );
+  assert.equal(route[4].section, "tunnel");
+  assert.equal(route[5].section, "rally");
 });
 
 test("dense showcase driving line continuously follows every mixed-route section", () => {
