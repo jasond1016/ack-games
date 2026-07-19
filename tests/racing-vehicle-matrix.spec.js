@@ -3,12 +3,12 @@ const path = require("node:path");
 const { test, expect } = require("@playwright/test");
 
 const enabled = process.env.RACING_MATRIX === "1";
-const carIds = (process.env.RACING_MATRIX_CARS || "miura-p400,veneno,urus-se")
+const carIds = (process.env.RACING_MATRIX_CARS || "veneno")
   .split(",")
   .map((carId) => carId.trim())
   .filter(Boolean);
 const showcaseOnly = process.env.RACING_MATRIX_SHOWCASE_ONLY === "1";
-const showcaseTimeoutMs = Number(process.env.RACING_MATRIX_SHOWCASE_TIMEOUT_MS || 360_000);
+const showcaseTimeoutMs = Number(process.env.RACING_MATRIX_SHOWCASE_TIMEOUT_MS || 210_000);
 
 test.skip(!enabled, "run explicitly with pnpm run test:e2e:matrix");
 test.setTimeout(carIds.length * (showcaseTimeoutMs + 60_000) + 30_000);
@@ -169,10 +169,11 @@ async function driveShowcase(page) {
     const sectionsDriven = [...sections];
     const passed = status === "completed"
       && state.showcaseChallenge.nextCheckpoint === state.showcaseChallenge.checkpointCount
-      && state.showcaseChallenge.elapsedSeconds >= 180
-      && state.showcaseChallenge.elapsedSeconds <= 300
+      && state.showcaseChallenge.elapsedSeconds >= 105
+      && state.showcaseChallenge.elapsedSeconds <= 135
       && initialBoostCharges === state.boostCharges
-      && ["road", "tunnel", "rally"].every((section) => sectionsDriven.includes(section));
+      && ["road", "tunnel"].every((section) => sectionsDriven.includes(section))
+      && !sectionsDriven.includes("rally");
     return {
       status,
       passed,

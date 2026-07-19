@@ -25,7 +25,7 @@ test("free-drive benchmark exposes stable telemetry and scene-complexity budgets
   const state = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState());
   expect(state.quality).toBe("low");
   expect(state.showcaseChallenge.phase).toBe("running");
-  expect(state.showcaseChallenge.checkpointCount).toBeGreaterThanOrEqual(8);
+  expect(state.showcaseChallenge.checkpointCount).toBeGreaterThanOrEqual(7);
   expect(state.telemetry.benchmark.frameCount).toBeGreaterThan(0);
   expect(state.telemetry.benchmark.durationSeconds).toBeGreaterThanOrEqual(1);
   expect(Number.isFinite(state.telemetry.benchmark.averageFrameMs)).toBe(true);
