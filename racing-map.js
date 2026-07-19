@@ -99,6 +99,7 @@ const presetMaps = [
   {
     mapId: "preset-island-freedrive",
     kind: "preset",
+    environmentProfile: "island-sandbox",
     map: {
       version: MAP_VERSION,
       name: "海风岛·都市自由驾驶",
@@ -115,6 +116,52 @@ const presetMaps = [
           [432, -18], [426, 58], [382, 108], [310, 116], [248, 78],
           [190, 34], [132, 30], [98, 58], [48, 92], [-12, 104],
           [-72, 78], [-112, 38], [-88, 6]
+        ]
+      }
+    }
+  },
+  {
+    mapId: "preset-coastal-showcase",
+    kind: "preset",
+    environmentProfile: "coastal-showcase",
+    map: {
+      version: MAP_VERSION,
+      name: "Coastal Festival Showcase",
+      activity: RACING_ACTIVITIES.FREE_DRIVE,
+      track: {
+        shape: TRACK_SHAPES.LOOP,
+        surface: TRACK_SURFACES.ASPHALT,
+        width: 18,
+        samples: 720,
+        startPosition: { progress: 0.03 },
+        controlPoints: [
+          [-108, -38], [-72, -76], [-10, -88], [58, -76], [116, -42],
+          [148, -18], [190, -18], [246, -40], [304, -70], [362, -60],
+          [400, -14], [392, 50], [350, 92], [292, 102], [236, 72],
+          [184, 34], [128, 28], [92, 52], [44, 82], [-10, 92],
+          [-62, 70], [-96, 34], [-76, 2]
+        ]
+      }
+    }
+  },
+  {
+    mapId: "preset-proving-ground",
+    kind: "preset",
+    environmentProfile: "proving-ground",
+    map: {
+      version: MAP_VERSION,
+      name: "Vehicle Proving Ground",
+      activity: RACING_ACTIVITIES.FREE_DRIVE,
+      track: {
+        shape: TRACK_SHAPES.LOOP,
+        surface: TRACK_SURFACES.ASPHALT,
+        width: 20,
+        samples: 600,
+        startPosition: { progress: 0.02 },
+        controlPoints: [
+          [-220, -60], [-80, -60], [80, -60], [220, -60],
+          [260, -20], [260, 80], [220, 120], [40, 120],
+          [-120, 120], [-200, 90], [-240, 40], [-240, -20]
         ]
       }
     }

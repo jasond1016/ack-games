@@ -89,3 +89,27 @@ test("用户地图按更新时间与 mapId 稳定排序", () => {
   });
   assert.deepEqual(harness({ stored }).library.snapshot().userMaps.map((entry) => entry.mapId), ["a", "b"]);
 });
+
+test("preset environment metadata survives snapshots but does not leak into user maps", () => {
+  const storage = createInMemoryRacingMapStorage();
+  const library = createRacingMapLibraryCore({
+    storage,
+    presets: [{
+      mapId: "showcase",
+      kind: "preset",
+      environmentProfile: "coastal-showcase",
+      map: { name: "Showcase" }
+    }],
+    defaultPresetId: "showcase",
+    defaultMap: { name: "Default" },
+    normalizeMap: (map) => ({ name: map.name }),
+    identity: { createMapId: () => "user-1", now: () => new Date(0).toISOString() }
+  });
+
+  assert.equal(library.snapshot().selected.environmentProfile, "coastal-showcase");
+  const editing = library.beginEditingSelected();
+  assert.equal(editing.selected.kind, "user");
+  assert.equal(editing.selected.environmentProfile, undefined);
+  assert.ok(editing.selected.map.name.startsWith("Showcase"));
+  assert.equal(JSON.parse(storage.inspect().value).userEntries[0].environmentProfile, undefined);
+});

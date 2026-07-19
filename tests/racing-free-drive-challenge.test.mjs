@@ -43,3 +43,36 @@ test("幽灵车在相邻记录点之间插值并处理航向回绕", () => {
   assert.deepEqual({ x: pose.x, z: pose.z }, { x: 5, z: 2 });
   assert.ok(Math.abs(pose.heading) > 3);
 });
+
+test("reset starts a fresh run while retaining the best ghost", () => {
+  const trial = createFreeDriveTimeTrial({ checkpoints, storage: memoryStorage() });
+  trial.update({ x: 0, z: 0 });
+  trial.update({ x: 10, z: 0, deltaSeconds: 2 });
+  trial.update({ x: 20, z: 0, deltaSeconds: 2 });
+  assert.equal(trial.getState().bestTimeSeconds, 4);
+
+  const reset = trial.reset();
+  assert.equal(reset.phase, "ready");
+  assert.equal(reset.elapsedSeconds, 0);
+  assert.equal(reset.nextCheckpoint, 1);
+  assert.equal(reset.bestTimeSeconds, 4);
+});
+
+test("a closed route waits for the player to leave before starting again", () => {
+  const trial = createFreeDriveTimeTrial({
+    checkpoints: [{ x: 0, z: 0 }, { x: 10, z: 0 }, { x: 0, z: 0 }],
+    storage: memoryStorage(),
+    gateRadius: 2
+  });
+  trial.update({ x: 0, z: 0 });
+  trial.update({ x: 10, z: 0, deltaSeconds: 2 });
+  trial.update({ x: 0, z: 0, deltaSeconds: 2 });
+  assert.equal(trial.getState().phase, "finished");
+
+  trial.update({ x: 0, z: 0, deltaSeconds: 1 });
+  assert.equal(trial.getState().phase, "finished");
+  trial.update({ x: 5, z: 0 });
+  trial.update({ x: 0, z: 0 });
+  assert.equal(trial.getState().phase, "running");
+  assert.equal(trial.getState().elapsedSeconds, 0);
+});

@@ -21,7 +21,7 @@ const ACTIVE_PHASES = new Set([
   RACING_SESSION_PHASES.FAILED
 ]);
 
-export function createRacingSnapshot({ map, startConfig, randomSeed = createRandomSeed() }) {
+export function createRacingSnapshot({ map, startConfig, environmentProfile = null, randomSeed = createRandomSeed() }) {
   if (!map || !startConfig) {
     throw new Error("比赛快照需要当前选中地图和开赛配置。");
   }
@@ -29,6 +29,7 @@ export function createRacingSnapshot({ map, startConfig, randomSeed = createRand
   return deepFreeze({
     map: structuredCloneValue(map),
     startConfig: structuredCloneValue(startConfig),
+    environmentProfile: typeof environmentProfile === "string" ? environmentProfile : null,
     randomSeed: normalizeRandomSeed(randomSeed)
   });
 }

@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   FREE_DRIVE_RALLY,
   FREE_DRIVE_TUNNEL,
+  createFreeDriveShowcaseRoute,
   createFreeDriveRallyRibbon,
   createFreeDriveRallyRoute,
   createFreeDriveTunnelSegments
@@ -65,4 +66,32 @@ test("隧道净空覆盖道路且墙体和顶板都有物理规格", () => {
   assert.equal(segment.walls[0].tag, "tunnel-wall");
   assert.equal(segment.roof.tag, "tunnel-roof");
   assert.ok(segment.roof.y - segment.roadHeight > 6);
+});
+
+test("showcase route crosses road, tunnel, rally, and returns to its start", () => {
+  const sampleTrack = (progress) => ({
+    center: { x: progress * 100, y: progress * 20 },
+    normal: { x: 0, y: 1 },
+    heading: 0.25
+  });
+  const rallyRoute = Array.from({ length: 5 }, (_, index) => ({
+    x: 90 + index,
+    y: 1,
+    z: 18 + index,
+    tangentX: 1,
+    tangentZ: 0,
+    normalX: 0,
+    normalZ: -1
+  }));
+  const route = createFreeDriveShowcaseRoute({ sampleTrack, elevationAt: () => 1, rallyRoute });
+
+  assert.ok(route.length >= 8);
+  assert.equal(route[0].section, "start");
+  assert.ok(route.some(({ section }) => section === "tunnel"));
+  assert.ok(route.some(({ section }) => section === "rally"));
+  assert.equal(route.at(-1).section, "finish");
+  assert.deepEqual(
+    { x: route.at(-1).x, z: route.at(-1).z },
+    { x: route[0].x, z: route[0].z }
+  );
 });

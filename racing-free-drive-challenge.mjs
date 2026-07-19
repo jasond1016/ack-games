@@ -59,6 +59,7 @@ export function createFreeDriveTimeTrial({
   function finish(pose) {
     recording.push(ghostSample(elapsedSeconds, pose));
     phase = "finished";
+    leftStartGate = false;
     newBest = !best || elapsedSeconds < best.timeSeconds;
     if (newBest) {
       best = Object.freeze({
@@ -67,6 +68,17 @@ export function createFreeDriveTimeTrial({
       });
       saveBest(storage, storageKey, best);
     }
+  }
+
+  function reset() {
+    phase = "ready";
+    elapsedSeconds = 0;
+    nextCheckpoint = 1;
+    recording = [];
+    sampleCarry = 0;
+    leftStartGate = false;
+    newBest = false;
+    return getState();
   }
 
   function getState() {
@@ -82,7 +94,7 @@ export function createFreeDriveTimeTrial({
     });
   }
 
-  return Object.freeze({ update, getState });
+  return Object.freeze({ update, reset, getState });
 }
 
 export function sampleGhostPose(samples, elapsedSeconds) {

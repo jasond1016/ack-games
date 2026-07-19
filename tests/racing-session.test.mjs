@@ -11,13 +11,14 @@ import {
 test("比赛快照冻结地图、开赛配置与随机种子", () => {
   const map = { name: "测试赛道", track: { shape: "open" } };
   const startConfig = { playerCarId: "car-1", cameraMode: "chase" };
-  const snapshot = createRacingSnapshot({ map, startConfig, randomSeed: 42 });
+  const snapshot = createRacingSnapshot({ map, startConfig, environmentProfile: "coastal-showcase", randomSeed: 42 });
 
   map.name = "已修改";
   startConfig.playerCarId = "car-2";
 
   assert.equal(snapshot.map.name, "测试赛道");
   assert.equal(snapshot.startConfig.playerCarId, "car-1");
+  assert.equal(snapshot.environmentProfile, "coastal-showcase");
   assert.equal(snapshot.randomSeed, 42);
   assert.ok(Object.isFrozen(snapshot.map.track));
 });

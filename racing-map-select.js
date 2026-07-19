@@ -145,6 +145,12 @@ export function createRacingMapSelect({ onHome = () => {}, onRace = () => {}, on
   }
 
   function formatMapMeta(entry) {
+    if (entry.environmentProfile === "proving-ground") {
+      return `DEVELOPMENT · ${getTrackSurfaceLabel(entry.map.track.surface)}`;
+    }
+    if (entry.environmentProfile === "coastal-showcase") {
+      return `VERTICAL SLICE · ${getTrackSurfaceLabel(entry.map.track.surface)}`;
+    }
     if (entry.map.activity === "free-drive") {
       return `自由驾驶 · ${getTrackSurfaceLabel(entry.map.track.surface)}`;
     }

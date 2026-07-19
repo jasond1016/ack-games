@@ -26,6 +26,54 @@ export const FREE_DRIVE_RALLY = Object.freeze({
   ])
 });
 
+export const FREE_DRIVE_SHOWCASE = Object.freeze({
+  trackProgresses: Object.freeze([0.03, 0.24, 0.48, 0.68, 0.795, 0.895]),
+  rallyProgresses: Object.freeze([0.5, 1]),
+  gateRadius: 10
+});
+
+export function createFreeDriveShowcaseRoute({
+  sampleTrack,
+  elevationAt,
+  rallyRoute,
+  config = FREE_DRIVE_SHOWCASE
+} = {}) {
+  if (typeof sampleTrack !== "function" || typeof elevationAt !== "function" || !rallyRoute?.length) return [];
+  const trackCheckpoints = config.trackProgresses.map((progress, index) => {
+    const sample = sampleTrack(progress);
+    return showcaseCheckpoint({
+      x: sample.center.x,
+      y: elevationAt(progress),
+      z: sample.center.y,
+      heading: sample.heading,
+      normalX: sample.normal.x,
+      normalZ: sample.normal.y,
+      section: index === 0 ? "start" : progress >= FREE_DRIVE_TUNNEL.startProgress ? "tunnel" : "road"
+    });
+  });
+  const rallyCheckpoints = config.rallyProgresses.map((progress) => {
+    const sample = rallyRoute[Math.round((rallyRoute.length - 1) * progress)];
+    return showcaseCheckpoint({ ...sample, heading: Math.atan2(sample.tangentX, sample.tangentZ), section: "rally" });
+  });
+  return Object.freeze([
+    ...trackCheckpoints,
+    ...rallyCheckpoints,
+    Object.freeze({ ...trackCheckpoints[0], section: "finish" })
+  ]);
+}
+
+function showcaseCheckpoint(checkpoint) {
+  return Object.freeze({
+    x: checkpoint.x,
+    y: checkpoint.y,
+    z: checkpoint.z,
+    heading: checkpoint.heading,
+    normalX: checkpoint.normalX,
+    normalZ: checkpoint.normalZ,
+    section: checkpoint.section
+  });
+}
+
 export function createFreeDriveTunnelSegments({
   sampleTrack,
   elevationAt,
