@@ -6,7 +6,7 @@ export const FREE_DRIVE_JUMP = Object.freeze({
   rampMaxX: 234,
   rampRise: 5,
   landingRun: 10,
-  minLaunchSpeed: 25,
+  minLaunchSpeed: 22,
   minVerticalSpeed: 5.5,
   maxVerticalSpeed: 14,
   gravity: 18

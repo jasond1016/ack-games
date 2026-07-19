@@ -452,7 +452,8 @@ export function createRacingGame({
   };
   const freeDriveJumpState = {
     airborne: false,
-    wasGrounded: true
+    wasGrounded: true,
+    launchCooldownSeconds: 0
   };
   const playerSurfaceState = {
     grounded: true,
@@ -611,6 +612,7 @@ export function createRacingGame({
     completeRallyChallengeScenario: () => completeRallyChallengeScenario(),
     completeShowcaseEventScenario: () => completeShowcaseEventScenario(),
     advanceShowcaseCheckpointScenario: () => advanceShowcaseCheckpointScenario(),
+    launchShowcaseBridgeScenario: (speedKmh = 88) => launchShowcaseBridgeScenario(speedKmh),
     recoverShowcaseScenario: () => recoverShowcaseScenario(),
     rollShowcaseScenario: () => rollShowcaseScenario(),
     placeTrackScenario: (progress = 0) => placeTrackScenario(progress),
@@ -3583,6 +3585,7 @@ export function createRacingGame({
     physics.playerBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
     resetPhysicalVehicleControls(physics.playerVehicle);
     freeDriveJumpState.airborne = false;
+    freeDriveJumpState.launchCooldownSeconds = 0;
   }
 
   function setOpponentBodyPose(position, heading) {
@@ -6318,6 +6321,7 @@ export function createRacingGame({
     const anchorShowcase = isShowcase && showcaseEvent.phase === "countdown";
     if (anchorShowcase) anchorShowcaseStartPose();
     else drivePhysicalVehicle(deltaSeconds);
+    applyPlayerJumpLaunch(deltaSeconds);
 
     updateOpponent(deltaSeconds);
     updateFreeDriveTraffic(deltaSeconds);
@@ -6328,6 +6332,27 @@ export function createRacingGame({
     syncPhysicalVehicleState();
     syncOpponentPhysicsState();
     provingGroundRunner.update(provingGroundObservation(), deltaSeconds);
+  }
+
+  function applyPlayerJumpLaunch(deltaSeconds) {
+    freeDriveJumpState.launchCooldownSeconds = Math.max(
+      0,
+      freeDriveJumpState.launchCooldownSeconds - deltaSeconds
+    );
+    if (!isIslandWorld || freeDriveJumpState.launchCooldownSeconds > 0 || !physics?.playerBody) return;
+    const position = physics.playerBody.translation();
+    const velocity = physics.playerBody.linvel();
+    const launch = resolveFreeDriveJumpLaunch(
+      { x: position.x, y: position.z },
+      { x: velocity.x, y: velocity.z }
+    );
+    if (!launch) return;
+    physics.playerBody.setLinvel({
+      x: velocity.x,
+      y: Math.max(velocity.y, launch.verticalSpeed),
+      z: velocity.z
+    }, true);
+    freeDriveJumpState.launchCooldownSeconds = 0.8;
   }
 
   function drivePhysicalVehicle(deltaSeconds) {
@@ -7652,6 +7677,7 @@ ${shader.vertexShader}`
     presentationState.maximumAirborneDownwardSpeed = 0;
     presentationState.suppressJumpTransitions = false;
     freeDriveJumpState.wasGrounded = true;
+    freeDriveJumpState.launchCooldownSeconds = 0;
     if (renderer) renderer.toneMappingExposure = presentationState.baselineExposure;
   }
 
@@ -8300,6 +8326,14 @@ ${shader.vertexShader}`
     updateHud();
     renderer.render(scene, camera);
     return showcaseEvent.recoveryCount > 0;
+  }
+
+  function launchShowcaseBridgeScenario(speedKmh = 88) {
+    if (!isShowcase || showcaseEvent.phase !== "running" || !physics?.playerBody) return false;
+    if (!placeWorldScenario(FREE_DRIVE_JUMP.gapMinX - 2, -18, Math.PI * 0.5)) return false;
+    const speed = Math.max(0, Number(speedKmh) || 0) / 3.6;
+    physics.playerBody.setLinvel({ x: speed, y: 0, z: 0 }, true);
+    return true;
   }
 
   function rollShowcaseScenario() {

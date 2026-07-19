@@ -42,6 +42,15 @@ test("两座大桥达到 90 km/h 后从任一侧都能起跳", () => {
   assert.equal(resolveFreeDriveJumpLaunch({ x: 177, y: 34 }, { x: 20, y: 0 }), null);
 });
 
+test("Urus 以玩家实际遇到的 88 km/h 到达桥沿时仍能越过断口", () => {
+  const speed = 88 / 3.6;
+  const launch = resolveFreeDriveJumpLaunch({ x: 177, y: -18 }, { x: speed, y: 0 });
+  assert.ok(launch);
+  const flightDistance = speed * (2 * launch.verticalSpeed / FREE_DRIVE_JUMP.gravity);
+  assert.ok(flightDistance >= FREE_DRIVE_JUMP.gapMaxX - FREE_DRIVE_JUMP.gapMinX
+    + FREE_DRIVE_JUMP.landingRun);
+});
+
 test("断桥旁草地上有一对相向的等高特技坡道", () => {
   const y = FREE_DRIVE_STUNT_JUMP.centerY;
   assert.equal(FREE_DRIVE_STUNT_JUMP.leftTakeoffX - FREE_DRIVE_STUNT_JUMP.leftRampStartX, 20);

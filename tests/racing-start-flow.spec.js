@@ -213,6 +213,35 @@ test("Coastal Showcase runs countdown, timed route, result, and in-place retry",
   await expect(eventBanner).toBeVisible();
 });
 
+test("Urus clears the first Showcase bridge at 88 km/h", async ({ page }) => {
+  await page.goto("/?quality=low");
+  await page.locator("#racingGameCard").click();
+  await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
+  await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-coastal-showcase"] .map-select-card-button').click();
+  await page.locator("#racingMapSelectRaceButton").click();
+  await expect(page.locator("#racingStartOverlay")).toBeVisible({ timeout: 25_000 });
+  await page.locator('#racingCarOptions .race-car-option[data-car-id="urus-se"]').click();
+  await page.locator("#racingStartRaceButton").click();
+  await expect(page.locator("#racingStartOverlay")).toBeHidden({ timeout: 45_000 });
+  await expect.poll(() => page.evaluate(() =>
+    globalThis.__ackGamesDebug.racing.getState().showcaseEvent.phase
+  ), { timeout: 8_000 }).toBe("running");
+
+  expect(await page.evaluate(() =>
+    globalThis.__ackGamesDebug.racing.launchShowcaseBridgeScenario(88)
+  )).toBe(true);
+  await expect.poll(() => page.evaluate(() => {
+    const state = globalThis.__ackGamesDebug.racing.getState();
+    return state.playerPosition.x > 205
+      && state.playerPosition.x < 220
+      && state.physicsHeight > 10
+      && state.surface.contacts > 0;
+  }), { timeout: 5_000 }).toBe(true);
+  const landed = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState());
+  expect(landed.physicsHeight).toBeGreaterThan(10);
+  expect(landed.showcaseEvent.recoveryCount).toBe(0);
+});
+
 test("jsDelivr failure is isolated to racing and can be retried", async ({ page }) => {
   await page.route("https://cdn.jsdelivr.net/**", (route) => route.abort("failed"));
   await page.goto("/");
