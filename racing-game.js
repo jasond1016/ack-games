@@ -1793,6 +1793,10 @@ export function createRacingGame({
       addFreeDriveBridge();
       addFreeDriveStuntRamps();
       addFreeDriveTunnel();
+      if (isShowcase) {
+        addCoastalFestivalVenue();
+        addCoastalTunnelMountain();
+      }
       addFreeDriveCity();
       await Promise.all([addRealFreeDriveVegetation(), addFreeDriveCoastalCliffs(), addRealFreeDriveCityProps()]);
     }
@@ -2592,6 +2596,256 @@ export function createRacingGame({
       tunnel.add(portal);
     }
     scene.add(tunnel);
+  }
+
+  function addCoastalFestivalVenue() {
+    const progress = 0.03;
+    const sample = trackProfileAtProgress(progress);
+    const roadY = freeDriveElevationAtProgress(progress);
+    const venue = new THREE.Group();
+    venue.name = "coastal-festival-venue";
+    venue.position.set(sample.center.x, roadY, sample.center.y);
+    venue.rotation.y = sample.heading;
+
+    const coral = new THREE.MeshStandardMaterial({
+      color: 0xef5b45,
+      emissive: 0x7d1f19,
+      emissiveIntensity: 0.34,
+      roughness: 0.5,
+      metalness: 0.18
+    });
+    const turquoise = new THREE.MeshStandardMaterial({
+      color: 0x3ed8cc,
+      emissive: 0x126f70,
+      emissiveIntensity: 0.5,
+      roughness: 0.4,
+      metalness: 0.25
+    });
+    const darkSteel = new THREE.MeshStandardMaterial({ color: 0x1d2a31, roughness: 0.4, metalness: 0.68 });
+    const paleConcrete = createFreeDrivePbrMaterial("brushed_concrete", {
+      color: 0xd8d2c5,
+      repeatX: 5,
+      repeatY: 3,
+      roughness: 0.86
+    });
+    const bannerTexture = createCoastalFestivalBannerTexture();
+    const bannerMaterial = new THREE.MeshStandardMaterial({
+      map: bannerTexture,
+      emissiveMap: bannerTexture,
+      emissive: 0xffffff,
+      emissiveIntensity: 0.42,
+      roughness: 0.55,
+      side: THREE.DoubleSide
+    });
+    const gateHalfWidth = sample.halfWidth + 3.6;
+    for (const side of [-1, 1]) {
+      const pillar = new THREE.Mesh(new THREE.BoxGeometry(1.15, 9.4, 1.15), darkSteel);
+      pillar.position.set(gateHalfWidth * side, 4.7, 18);
+      pillar.castShadow = qualityPreset.shadows;
+      venue.add(pillar);
+    }
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(gateHalfWidth * 2 + 1.15, 0.9, 1.15), darkSteel);
+    beam.position.set(0, 9, 18);
+    beam.castShadow = qualityPreset.shadows;
+    const banner = new THREE.Mesh(new THREE.PlaneGeometry(11.5, 2.65), bannerMaterial);
+    banner.position.set(0, 7.2, 17.38);
+    banner.rotation.y = Math.PI;
+    venue.add(beam, banner);
+
+    for (const side of [-1, 1]) {
+      for (const z of [-30, 2, 34]) {
+        const stand = new THREE.Group();
+        stand.position.set(side * (sample.halfWidth + 12.5), 0, z);
+        stand.rotation.y = side * -0.06;
+        for (let tier = 0; tier < 4; tier += 1) {
+          const step = new THREE.Mesh(new THREE.BoxGeometry(12, 0.7 + tier * 0.55, 4), paleConcrete);
+          step.position.set(0, (0.7 + tier * 0.55) * 0.5, 5.5 - tier * 3.1);
+          step.castShadow = step.receiveShadow = qualityPreset.shadows;
+          stand.add(step);
+        }
+        const canopy = new THREE.Mesh(new THREE.BoxGeometry(13.5, 0.28, 8), side > 0 ? coral : turquoise);
+        canopy.position.set(0, 6.2, 0.2);
+        canopy.rotation.z = side * 0.08;
+        canopy.castShadow = qualityPreset.shadows;
+        stand.add(canopy);
+        venue.add(stand);
+      }
+    }
+
+    const crowdGeometry = new THREE.CapsuleGeometry(0.16, 0.52, 3, 5);
+    const crowdMaterial = new THREE.MeshStandardMaterial({ color: 0xf2c68f, roughness: 0.92 });
+    const crowd = new THREE.InstancedMesh(crowdGeometry, crowdMaterial, 108);
+    const dummy = new THREE.Object3D();
+    let crowdIndex = 0;
+    for (const side of [-1, 1]) {
+      for (const zCenter of [-30, 2, 34]) {
+        for (let row = 0; row < 3; row += 1) {
+          for (let column = 0; column < 6; column += 1) {
+            dummy.position.set(
+              side * (sample.halfWidth + 9.5 + row * 1.45),
+              1.25 + row * 0.55,
+              zCenter - 6.5 + column * 2.4 + (row % 2) * 0.5
+            );
+            dummy.rotation.y = side > 0 ? -Math.PI * 0.5 : Math.PI * 0.5;
+            dummy.scale.setScalar(0.85 + ((column + row) % 3) * 0.08);
+            dummy.updateMatrix();
+            crowd.setMatrixAt(crowdIndex, dummy.matrix);
+            crowdIndex += 1;
+          }
+        }
+      }
+    }
+    crowd.instanceMatrix.needsUpdate = true;
+    crowd.castShadow = qualityPreset.shadows;
+    venue.add(crowd);
+
+    const poleGeometry = new THREE.CylinderGeometry(0.07, 0.09, 7, 6);
+    const flagGeometry = new THREE.PlaneGeometry(2.4, 1.05);
+    for (let index = 0; index < 10; index += 1) {
+      const side = index % 2 === 0 ? -1 : 1;
+      const z = -48 + Math.floor(index / 2) * 24;
+      const x = side * (sample.halfWidth + 5.4);
+      const pole = new THREE.Mesh(poleGeometry, darkSteel);
+      pole.position.set(x, 3.5, z);
+      const flag = new THREE.Mesh(flagGeometry, index % 4 < 2 ? coral : turquoise);
+      flag.position.set(x + side * 1.2, 5.5, z);
+      flag.rotation.y = side > 0 ? -Math.PI * 0.5 : Math.PI * 0.5;
+      venue.add(pole, flag);
+    }
+
+    const stage = new THREE.Mesh(new THREE.BoxGeometry(24, 2.2, 9), darkSteel);
+    stage.position.set(sample.halfWidth + 25, 1.1, -49);
+    const stageScreen = new THREE.Mesh(new THREE.PlaneGeometry(16, 5.4), bannerMaterial);
+    stageScreen.position.set(sample.halfWidth + 18.95, 5.2, -49);
+    stageScreen.rotation.y = -Math.PI * 0.5;
+    venue.add(stage, stageScreen);
+    venue.traverse((child) => {
+      if (!child.isMesh) return;
+      child.receiveShadow = child.receiveShadow || qualityPreset.shadows;
+    });
+    scene.add(venue);
+  }
+
+  function createCoastalFestivalBannerTexture() {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1024;
+    canvas.height = 256;
+    const context = canvas.getContext("2d");
+    const gradient = context.createLinearGradient(0, 0, canvas.width, 0);
+    gradient.addColorStop(0, "#e94739");
+    gradient.addColorStop(0.58, "#f46b4f");
+    gradient.addColorStop(1, "#27bfb8");
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "rgba(9, 25, 31, 0.2)";
+    for (let x = -160; x < canvas.width + 160; x += 150) {
+      context.beginPath();
+      context.moveTo(x, canvas.height);
+      context.lineTo(x + 180, 0);
+      context.lineTo(x + 230, 0);
+      context.lineTo(x + 50, canvas.height);
+      context.fill();
+    }
+    context.fillStyle = "#fff8e8";
+    context.font = "900 92px sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText("COASTAL FESTIVAL", canvas.width * 0.5, canvas.height * 0.48);
+    context.fillStyle = "#12272d";
+    context.font = "700 26px sans-serif";
+    context.fillText("SUN  ·  SPEED  ·  SEA", canvas.width * 0.5, canvas.height * 0.82);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return texture;
+  }
+
+  function addCoastalTunnelMountain() {
+    const sectionCount = 40;
+    const crossOffsets = [-42, -30, -22, -16, -13, 0, 13, 16, 22, 30, 42];
+    const positions = [];
+    const uvs = [];
+    const indices = [];
+    for (let section = 0; section <= sectionCount; section += 1) {
+      const t = section / sectionCount;
+      const progress = THREE.MathUtils.lerp(
+        freeDriveTunnelConfig.startProgress + 0.002,
+        freeDriveTunnelConfig.endProgress - 0.002,
+        t
+      );
+      const sample = trackProfileAtProgress(progress);
+      const roadY = freeDriveElevationAtProgress(progress);
+      crossOffsets.forEach((offset, offsetIndex) => {
+        const position = sample.center.clone().add(sample.normal.clone().multiplyScalar(offset));
+        const normalizedOffset = Math.abs(offset) / 42;
+        const ridge = -1.2 + Math.pow(1 - normalizedOffset, 0.62) * 16;
+        const variation = Math.sin(section * 1.37 + offsetIndex * 2.1) * 1.8
+          + Math.sin(section * 0.47 - offsetIndex) * 1.2;
+        const edgeHeight = ridge + variation * (1 - normalizedOffset);
+        positions.push(position.x, roadY + edgeHeight, position.y);
+        uvs.push(offsetIndex / (crossOffsets.length - 1) * 5, t * 18);
+      });
+    }
+    const rowWidth = crossOffsets.length;
+    for (let section = 0; section < sectionCount; section += 1) {
+      for (let offsetIndex = 0; offsetIndex < rowWidth - 1; offsetIndex += 1) {
+        const a = section * rowWidth + offsetIndex;
+        const b = a + 1;
+        const c = a + rowWidth;
+        const d = c + 1;
+        indices.push(a, b, c, b, d, c);
+      }
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    const mountainMaterial = new THREE.MeshStandardMaterial({
+      color: 0x4f493f,
+      emissive: 0x100d09,
+      emissiveIntensity: 0.14,
+      roughness: 0.98,
+      metalness: 0,
+      flatShading: true,
+      side: THREE.DoubleSide
+    });
+    const mountain = new THREE.Mesh(geometry, mountainMaterial);
+    mountain.name = "coastal-tunnel-mountain";
+    mountain.castShadow = mountain.receiveShadow = qualityPreset.shadows;
+    scene.add(mountain);
+
+    const portalMaterial = createFreeDrivePbrMaterial("brushed_concrete", {
+      color: 0xc6bca8,
+      repeatX: 3,
+      repeatY: 3,
+      roughness: 0.9
+    });
+    for (const progress of [freeDriveTunnelConfig.startProgress, freeDriveTunnelConfig.endProgress]) {
+      const sample = trackProfileAtProgress(progress);
+      const roadY = freeDriveElevationAtProgress(progress);
+      const cap = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 1), mountainMaterial);
+      cap.position.set(sample.center.x, roadY + 15.5, sample.center.y);
+      cap.rotation.y = sample.heading;
+      cap.scale.set(28, 8, 11);
+      cap.castShadow = cap.receiveShadow = qualityPreset.shadows;
+      scene.add(cap);
+      for (const side of [-1, 1]) {
+        const point = sample.center.clone().add(sample.normal.clone().multiplyScalar((sample.halfWidth + 7.5) * side));
+        const buttress = new THREE.Mesh(new THREE.CylinderGeometry(5.5, 8.5, 14, 7), portalMaterial);
+        buttress.position.set(point.x, roadY + 5.5, point.y);
+        buttress.rotation.y = sample.heading + side * 0.25;
+        buttress.scale.set(1, 1, 1.35);
+        buttress.castShadow = buttress.receiveShadow = qualityPreset.shadows;
+        const rockPoint = sample.center.clone().add(sample.normal.clone().multiplyScalar((sample.halfWidth + 20) * side));
+        const rockMass = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 1), mountainMaterial);
+        rockMass.position.set(rockPoint.x, roadY + 7.5, rockPoint.y);
+        rockMass.rotation.y = sample.heading + side * 0.18;
+        rockMass.scale.set(14, 9, 18);
+        rockMass.castShadow = rockMass.receiveShadow = qualityPreset.shadows;
+        scene.add(buttress, rockMass);
+      }
+    }
   }
 
   function addFreeDriveRallyRoad() {
@@ -6858,7 +7112,7 @@ export function createRacingGame({
       });
       showcaseEvent.phase = "running";
       showcaseEvent.bannerSeconds = showcaseGoBannerSeconds;
-      showEventBanner({ value: "GO!", detail: "COAST · TUNNEL · RALLY", mode: "go" });
+      showEventBanner({ value: "GO!", detail: "COAST · BRIDGE · TUNNEL", mode: "go" });
       return;
     }
 
