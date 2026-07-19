@@ -189,6 +189,12 @@ test("Coastal Showcase runs countdown, timed route, result, and in-place retry",
   expect(await page.evaluate(() =>
     globalThis.__ackGamesDebug.racing.completeShowcaseEventScenario()
   )).toBe(true);
+  const completedPresentation = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState());
+  expect(new Set(completedPresentation.showcaseEvent.announcedSections))
+    .toEqual(new Set(["tunnel", "rally", "final"]));
+  expect([completedPresentation.presentation.exposure, completedPresentation.presentation.jumpFovPulse,
+    completedPresentation.presentation.jumpLiftPulse, completedPresentation.presentation.landingKick]
+    .every(Number.isFinite)).toBe(true);
   await expect.poll(() => page.evaluate(() =>
     globalThis.__ackGamesDebug.racing.getState().showcaseEvent.phase
   ), { timeout: 5_000 }).toBe("result");

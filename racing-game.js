@@ -451,7 +451,8 @@ export function createRacingGame({
     boostCharges: boostConfig.charges,
   };
   const freeDriveJumpState = {
-    airborne: false
+    airborne: false,
+    wasGrounded: true
   };
   const playerSurfaceState = {
     grounded: true,
@@ -530,9 +531,25 @@ export function createRacingGame({
     offRouteSeconds: 0,
     recoveryCooldownSeconds: 0,
     recoveryNoticeSeconds: 0,
-    recoveryCount: 0
+    recoveryCount: 0,
+    currentSection: "road",
+    lastAnnouncedSection: null,
+    announcedSections: new Set(),
+    pendingSectionCue: null
   };
   let boostCameraKick = 0;
+  const presentationState = {
+    environment: "road",
+    exposure: 1,
+    baselineExposure: 1,
+    jumpFovPulse: 0,
+    jumpLiftPulse: 0,
+    landingKick: 0,
+    lastLandingImpactSpeed: 0,
+    landingArmed: false,
+    maximumAirborneDownwardSpeed: 0,
+    suppressJumpTransitions: false
+  };
   const startGateLights = [];
   let initialized = false;
   let active = false;
@@ -593,6 +610,7 @@ export function createRacingGame({
     startRallyChallengeScenario: () => startRallyChallengeScenario(),
     completeRallyChallengeScenario: () => completeRallyChallengeScenario(),
     completeShowcaseEventScenario: () => completeShowcaseEventScenario(),
+    advanceShowcaseCheckpointScenario: () => advanceShowcaseCheckpointScenario(),
     recoverShowcaseScenario: () => recoverShowcaseScenario(),
     rollShowcaseScenario: () => rollShowcaseScenario(),
     placeTrackScenario: (progress = 0) => placeTrackScenario(progress),
@@ -737,11 +755,22 @@ export function createRacingGame({
         playerDistance: Number(showcaseEvent.playerDistance.toFixed(1)),
         playerPlace: showcaseEvent.playerPlace,
         recoveryCount: showcaseEvent.recoveryCount,
+        currentSection: showcaseEvent.currentSection,
+        lastAnnouncedSection: showcaseEvent.lastAnnouncedSection,
+        announcedSections: [...showcaseEvent.announcedSections],
         opponents: freeDriveTraffic.map(({ eventDistance, finishTimeSeconds }) => ({
           distance: Number((eventDistance ?? 0).toFixed(1)),
           finishTimeSeconds: finishTimeSeconds == null ? null : Number(finishTimeSeconds.toFixed(2))
         }))
       }) : null,
+      presentation: Object.freeze({
+        environment: presentationState.environment,
+        exposure: Number(presentationState.exposure.toFixed(3)),
+        jumpFovPulse: Number(presentationState.jumpFovPulse.toFixed(3)),
+        jumpLiftPulse: Number(presentationState.jumpLiftPulse.toFixed(3)),
+        landingKick: Number(presentationState.landingKick.toFixed(3)),
+        lastLandingImpactSpeed: Number(presentationState.lastLandingImpactSpeed.toFixed(2))
+      }),
       wheelAnimation: {
         wheelCount: car?.userData.wheelCount ?? 0,
         shaderBindings: car?.userData.wheelShaderBindings?.length ?? 0,
@@ -1393,6 +1422,8 @@ export function createRacingGame({
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = (racingSceneConfig.toneMappingExposure ?? 1) * (isFreeDrive ? 0.98 : 1);
+      presentationState.baselineExposure = renderer.toneMappingExposure;
+      presentationState.exposure = renderer.toneMappingExposure;
       renderer.shadowMap.enabled = qualityPreset.shadows;
       renderer.shadowMap.type = THREE.PCFShadowMap;
 
@@ -3485,6 +3516,8 @@ export function createRacingGame({
     const rotation = physics.playerBody.rotation();
     tempQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
     const euler = new THREE.Euler().setFromQuaternion(tempQuaternion, "YXZ");
+    const velocity = physics.playerBody.linvel();
+    const downwardSpeed = Math.max(0, -(velocity?.y ?? 0));
     playerSurfaceState.grounded = contacts.length >= 2;
     playerSurfaceState.height = contacts.length
       ? contacts.reduce((sum, contact) => sum + contact.height, 0) / contacts.length
@@ -3495,6 +3528,32 @@ export function createRacingGame({
       .sort((left, right) => right[1] - left[1])[0]?.[0] ?? "air";
     playerSurfaceState.contacts = contacts;
     freeDriveJumpState.airborne = contacts.length === 0;
+    if (isShowcase && showcaseEvent.phase === "running" && !presentationState.suppressJumpTransitions) {
+      const planarSpeed = Math.hypot(velocity?.x ?? 0, velocity?.z ?? 0);
+      if (!presentationState.landingArmed && contacts.length === 0 && freeDriveJumpState.wasGrounded
+        && planarSpeed > 8 && (velocity?.y ?? 0) > 0.35) {
+        presentationState.landingArmed = true;
+        presentationState.maximumAirborneDownwardSpeed = 0;
+        presentationState.jumpFovPulse = Math.max(presentationState.jumpFovPulse, 1);
+        presentationState.jumpLiftPulse = Math.max(presentationState.jumpLiftPulse, 1);
+      }
+      if (presentationState.landingArmed) {
+        presentationState.maximumAirborneDownwardSpeed = Math.max(
+          presentationState.maximumAirborneDownwardSpeed,
+          downwardSpeed
+        );
+      }
+      if (presentationState.landingArmed && contacts.length >= 2) {
+        const impactSpeed = presentationState.maximumAirborneDownwardSpeed;
+        const impact = clamp((impactSpeed - 1.5) / 9, 0, 1);
+        presentationState.lastLandingImpactSpeed = impactSpeed;
+        presentationState.landingKick = Math.max(presentationState.landingKick, impact);
+        if (impact > 0) racingHaptics.pulseImpact(0.18 + impact * 0.7);
+        presentationState.landingArmed = false;
+        presentationState.maximumAirborneDownwardSpeed = 0;
+      }
+    }
+    freeDriveJumpState.wasGrounded = playerSurfaceState.grounded;
   }
 
   function syncOpponentPhysicsState() {
@@ -6031,6 +6090,7 @@ export function createRacingGame({
       updateFreeDriveWater(deltaSeconds);
       updateOpponentTransform();
       updateCamera(deltaSeconds);
+      updateShowcaseAtmosphere(deltaSeconds);
       updateCollisionDebugVisuals();
       updateCollisionDebugHud();
     }
@@ -6131,8 +6191,25 @@ export function createRacingGame({
       engineRpm: drivetrain?.engineRpm,
       idleRpm: vehicleSpec.idleRpm,
       maximumRpm: vehicleSpec.redlineRpm,
-      tireSlip: tireDynamics?.squeal ?? 0
+      tireSlip: tireDynamics?.squeal ?? 0,
+      environment: isShowcase ? presentationState.environment : "road"
     });
+  }
+
+  function updateShowcaseAtmosphere(deltaSeconds) {
+    if (!isShowcase || !renderer || raceState.resultVisible) return;
+    const onRally = playerSurfaceState.surfaceId === FREE_DRIVE_RALLY.surfaceId
+      || (freeDriveJumpState.airborne && presentationState.environment === "rally");
+    const inTunnel = state.onRoad
+      && state.trackProgress >= FREE_DRIVE_TUNNEL.startProgress
+      && state.trackProgress <= FREE_DRIVE_TUNNEL.endProgress;
+    presentationState.environment = showcaseEvent.phase !== "running"
+      ? "road" : onRally ? "rally" : inTunnel ? "tunnel" : "road";
+    const targetExposure = presentationState.baselineExposure
+      * (presentationState.environment === "tunnel" ? 0.82 : 1);
+    const follow = 1 - Math.exp(-deltaSeconds * 3.4);
+    presentationState.exposure += (targetExposure - presentationState.exposure) * follow;
+    renderer.toneMappingExposure = presentationState.exposure;
   }
 
   function updateRacingHaptics() {
@@ -6541,6 +6618,10 @@ export function createRacingGame({
     showcaseEvent.playerPlace = 1;
     showcaseEvent.finalPlace = null;
     showcaseEvent.elapsedSeconds = 0;
+    showcaseEvent.currentSection = "road";
+    showcaseEvent.lastAnnouncedSection = null;
+    showcaseEvent.announcedSections.clear();
+    showcaseEvent.pendingSectionCue = null;
     resetShowcaseRecoveryState();
     resetFreeDriveTraffic();
     anchorShowcaseStartPose();
@@ -6587,7 +6668,14 @@ export function createRacingGame({
       }
       updateShowcasePlayerProgress();
       updateShowcaseRecovery(deltaSeconds);
+      const previousChallenge = freeDriveShowcaseChallenge.getState();
       const challenge = updateFreeDriveShowcaseChallenge(deltaSeconds);
+      if (challenge?.nextCheckpoint > previousChallenge.nextCheckpoint) {
+        announceShowcaseSectionProgress(challenge.nextCheckpoint);
+      }
+      if (showcaseEvent.bannerSeconds === 0 && showcaseEvent.pendingSectionCue) {
+        showPendingShowcaseSectionCue();
+      }
       if (challenge?.phase !== "finished") return;
       showcaseEvent.playerDistance = freeDriveShowcaseDrivingLine.at(-1)?.distance ?? showcaseEvent.playerDistance;
       updateShowcasePlace();
@@ -6603,6 +6691,43 @@ export function createRacingGame({
       showcaseEvent.finishHoldSeconds = Math.max(0, showcaseEvent.finishHoldSeconds - deltaSeconds);
       if (showcaseEvent.finishHoldSeconds === 0) showShowcaseResult();
     }
+  }
+
+  function announceShowcaseSectionProgress(nextCheckpoint) {
+    const enteredCheckpoint = freeDriveShowcaseCheckpoints[Math.max(0, nextCheckpoint - 1)];
+    const next = freeDriveShowcaseCheckpoints[nextCheckpoint];
+    if (enteredCheckpoint?.section === "tunnel" || enteredCheckpoint?.section === "rally") {
+      showcaseEvent.currentSection = enteredCheckpoint.section;
+      queueShowcaseSectionCue(enteredCheckpoint.section);
+    } else if (enteredCheckpoint?.section === "road") {
+      showcaseEvent.currentSection = "road";
+    }
+    if (nextCheckpoint === freeDriveShowcaseCheckpoints.length - 1 && next?.section === "finish") {
+      queueShowcaseSectionCue("final");
+    }
+  }
+
+  function queueShowcaseSectionCue(section) {
+    if (showcaseEvent.announcedSections.has(section) || showcaseEvent.pendingSectionCue === section) return;
+    showcaseEvent.pendingSectionCue = section;
+    if (showcaseEvent.bannerSeconds === 0 && showcaseEvent.recoveryNoticeSeconds === 0) {
+      showPendingShowcaseSectionCue();
+    }
+  }
+
+  function showPendingShowcaseSectionCue() {
+    const section = showcaseEvent.pendingSectionCue;
+    if (!section || showcaseEvent.phase !== "running" || showcaseEvent.recoveryNoticeSeconds > 0) return;
+    const labels = {
+      tunnel: ["TUNNEL RUN", "LIGHTS ON · HOLD THE LINE"],
+      rally: ["RALLY STAGE", "LOOSE SURFACE"],
+      final: ["FINAL PUSH", "FINISH AHEAD"]
+    };
+    showcaseEvent.pendingSectionCue = null;
+    showcaseEvent.announcedSections.add(section);
+    showcaseEvent.lastAnnouncedSection = section;
+    showcaseEvent.bannerSeconds = 1.2;
+    showEventBanner({ value: labels[section][0], detail: labels[section][1], mode: "go" });
   }
 
   function resetShowcaseRecoveryState() {
@@ -6646,7 +6771,10 @@ export function createRacingGame({
     const challenge = freeDriveShowcaseChallenge.getState();
     const checkpointIndex = Math.max(0, Math.min(challenge.nextCheckpoint - 1, freeDriveShowcaseCheckpoints.length - 1));
     const checkpoint = freeDriveShowcaseCheckpoints[checkpointIndex];
-    if (!checkpoint || !placeWorldScenario(checkpoint.x, checkpoint.z, checkpoint.heading)) return false;
+    presentationState.suppressJumpTransitions = true;
+    const placed = checkpoint && placeWorldScenario(checkpoint.x, checkpoint.z, checkpoint.heading);
+    presentationState.suppressJumpTransitions = false;
+    if (!placed) return false;
     freeDriveShowcaseChallenge.addPenalty(showcaseRecoveryPenaltySeconds);
     showcaseEvent.playerDistance = freeDriveShowcaseCheckpointDistances[checkpointIndex] ?? 0;
     updateShowcasePlace();
@@ -7205,6 +7333,9 @@ ${shader.vertexShader}`
 
   function updateCamera(deltaSeconds) {
     boostCameraKick = Math.max(0, boostCameraKick - deltaSeconds * 1.85);
+    presentationState.jumpFovPulse = Math.max(0, presentationState.jumpFovPulse - deltaSeconds * 2.7);
+    presentationState.jumpLiftPulse = Math.max(0, presentationState.jumpLiftPulse - deltaSeconds * 2.2);
+    presentationState.landingKick = Math.max(0, presentationState.landingKick - deltaSeconds * 5.2);
     if (cameraMode === RACING_CAMERA_MODES.HOOD) {
       updateHoodCamera(deltaSeconds);
       return;
@@ -7230,11 +7361,13 @@ ${shader.vertexShader}`
       .addScaledVector(forward, -cameraConfig.followDistance)
       .addScaledVector(forward, -boostCameraKick * 0.9)
       .addScaledVector(right, -state.steering * speedRatio * 0.42)
-      .add(new THREE.Vector3(0, cameraConfig.height + Math.sin(wheelSpinAngle * 0.16) * speedRatio * 0.035, 0));
+      .add(new THREE.Vector3(0, cameraConfig.height + presentationState.jumpLiftPulse * 0.34
+        - presentationState.landingKick * 0.18 + Math.sin(wheelSpinAngle * 0.16) * speedRatio * 0.035, 0));
 
     const follow = 1 - Math.exp(-deltaSeconds * cameraConfig.followTightness);
     camera.position.lerp(desired, follow);
-    const targetFov = cameraConfig.fov + cameraConfig.speedFovBoost * speedRatio + boostCameraKick * 6;
+    const targetFov = cameraConfig.fov + cameraConfig.speedFovBoost * speedRatio + boostCameraKick * 6
+      + presentationState.jumpFovPulse * 2.4 + presentationState.landingKick * 1.2;
     const fovFollow = 1 - Math.exp(-deltaSeconds * cameraConfig.speedFovResponse);
     camera.fov += (targetFov - camera.fov) * fovFollow;
     if (camera.near !== 0.1) camera.near = 0.1;
@@ -7258,10 +7391,12 @@ ${shader.vertexShader}`
     const desired = new THREE.Vector3(state.position.x, playerVisualElevation, state.position.y)
       .addScaledVector(right, localX)
       .addScaledVector(forward, localZ)
-      .add(new THREE.Vector3(0, localY + Math.sin(wheelSpinAngle * 0.18) * speedRatio * 0.018, 0));
+      .add(new THREE.Vector3(0, localY + presentationState.jumpLiftPulse * 0.16
+        - presentationState.landingKick * 0.1 + Math.sin(wheelSpinAngle * 0.18) * speedRatio * 0.018, 0));
     camera.position.copy(desired);
 
-    const targetFov = hoodConfig.fov + speedRatio * 2.5 + boostCameraKick * 4;
+    const targetFov = hoodConfig.fov + speedRatio * 2.5 + boostCameraKick * 4
+      + presentationState.jumpFovPulse * 1.6 + presentationState.landingKick * 0.8;
     const fovFollow = 1 - Math.exp(-deltaSeconds * 8);
     camera.fov += (targetFov - camera.fov) * fovFollow;
     camera.near = 0.03;
@@ -7386,6 +7521,7 @@ ${shader.vertexShader}`
   function resetRace() {
     hideResultOverlay();
     hideEventBanner();
+    resetShowcasePresentation();
     pauseOverlay.hidden = true;
     collisionDebug.lastCollision = null;
     physicsAccumulator = 0;
@@ -7504,6 +7640,20 @@ ${shader.vertexShader}`
     return true;
   }
 
+  function resetShowcasePresentation() {
+    presentationState.environment = "road";
+    presentationState.exposure = presentationState.baselineExposure;
+    presentationState.jumpFovPulse = 0;
+    presentationState.jumpLiftPulse = 0;
+    presentationState.landingKick = 0;
+    presentationState.lastLandingImpactSpeed = 0;
+    presentationState.landingArmed = false;
+    presentationState.maximumAirborneDownwardSpeed = 0;
+    presentationState.suppressJumpTransitions = false;
+    freeDriveJumpState.wasGrounded = true;
+    if (renderer) renderer.toneMappingExposure = presentationState.baselineExposure;
+  }
+
   function revealSprintResult() {
     if (raceState.resultVisible) {
       return;
@@ -7581,6 +7731,7 @@ ${shader.vertexShader}`
     hideEventBanner();
     raceState.finished = true;
     raceState.resultVisible = true;
+    resetShowcasePresentation();
     const playerPlace = showcaseEvent.finalPlace ?? showcaseEvent.playerPlace;
     const winner = playerPlace === 1 ? "player" : "opponent";
     raceState.winner = winner;
@@ -8115,12 +8266,28 @@ ${shader.vertexShader}`
   function completeShowcaseEventScenario() {
     if (!isShowcase || showcaseEvent.phase !== "running" || freeDriveShowcaseCheckpoints.length < 2) return false;
     for (const checkpoint of freeDriveShowcaseCheckpoints.slice(1)) {
+      showcaseEvent.bannerSeconds = 0;
+      hideEventBanner();
+      if (showcaseEvent.pendingSectionCue) showPendingShowcaseSectionCue();
       placeWorldScenario(checkpoint.x, checkpoint.z, checkpoint.heading);
       updateShowcaseEvent(1.25);
     }
     updateHud();
     renderer.render(scene, camera);
     return showcaseEvent.phase === "settling";
+  }
+
+  function advanceShowcaseCheckpointScenario() {
+    if (!isShowcase || showcaseEvent.phase !== "running") return false;
+    const challenge = freeDriveShowcaseChallenge.getState();
+    const checkpoint = freeDriveShowcaseCheckpoints[challenge.nextCheckpoint];
+    if (!checkpoint) return false;
+    if (!placeWorldScenario(checkpoint.x, checkpoint.z, checkpoint.heading)) return false;
+    updateShowcaseEvent(0.05);
+    updateShowcaseAtmosphere(0.25);
+    updateHud();
+    renderer.render(scene, camera);
+    return freeDriveShowcaseChallenge.getState().nextCheckpoint > challenge.nextCheckpoint;
   }
 
   function recoverShowcaseScenario() {
