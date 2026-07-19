@@ -164,6 +164,28 @@ test("Coastal Showcase runs countdown, timed route, result, and in-place retry",
     Math.max(...globalThis.__ackGamesDebug.racing.getState().showcaseEvent.opponents.map(({ distance }) => distance))
   )).toBeGreaterThan(Math.max(...countdownStart.opponents.map(({ distance }) => distance)));
 
+  const beforeRecovery = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().showcaseChallenge.elapsedSeconds);
+  expect(await page.evaluate(() => globalThis.__ackGamesDebug.racing.recoverShowcaseScenario())).toBe(true);
+  const recovered = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState());
+  expect(recovered.showcaseEvent.phase).toBe("running");
+  expect(recovered.showcaseEvent.recoveryCount).toBe(1);
+  expect(recovered.showcaseChallenge.elapsedSeconds - beforeRecovery).toBeGreaterThanOrEqual(2.4);
+  expect(Math.hypot(
+    recovered.playerPosition.x - countdownStart.position.x,
+    recovered.playerPosition.y - countdownStart.position.y
+  )).toBeLessThan(3);
+  expect(recovered.traffic.map(({ name }) => name)).toEqual(["RAVEN", "APEX", "VOLT"]);
+  expect(recovered.traffic.every(({ labelVisible }) => labelVisible)).toBe(true);
+  await expect(page.locator("#racingRouteGuide")).toBeVisible();
+  await expect(page.locator("#racingRouteNotice")).toHaveText("RECOVERED +2.5S");
+  await expect(page.locator("#racingRouteNotice")).toBeVisible();
+
+  await page.waitForTimeout(2_200);
+  expect(await page.evaluate(() => globalThis.__ackGamesDebug.racing.rollShowcaseScenario())).toBe(true);
+  await expect.poll(() => page.evaluate(() =>
+    globalThis.__ackGamesDebug.racing.getState().showcaseEvent.recoveryCount
+  ), { timeout: 5_000 }).toBe(2);
+
   expect(await page.evaluate(() =>
     globalThis.__ackGamesDebug.racing.completeShowcaseEventScenario()
   )).toBe(true);

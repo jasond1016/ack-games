@@ -126,6 +126,7 @@ const tempQuaternion = new THREE.Quaternion();
 const showcaseCountdownSeconds = 3;
 const showcaseGoBannerSeconds = 0.8;
 const showcaseFinishHoldSeconds = 0.9;
+const showcaseRecoveryPenaltySeconds = 2.5;
 const collisionDebugColors = {
   player: 0x44ff88,
   opponent: 0x4da3ff,
@@ -191,6 +192,11 @@ export function createRacingGame({
   const eventBannerKicker = document.getElementById("racingEventBannerKicker");
   const eventBannerValue = document.getElementById("racingEventBannerValue");
   const eventBannerDetail = document.getElementById("racingEventBannerDetail");
+  const routeGuide = document.getElementById("racingRouteGuide");
+  const routeArrow = document.getElementById("racingRouteArrow");
+  const routeSection = document.getElementById("racingRouteSection");
+  const routeDistance = document.getElementById("racingRouteDistance");
+  const routeNotice = document.getElementById("racingRouteNotice");
   const startOverlay = document.getElementById("racingStartOverlay");
   const startMapValue = document.getElementById("racingStartMapValue");
   const startModeValue = document.getElementById("racingStartModeValue");
@@ -504,6 +510,7 @@ export function createRacingGame({
   let freeDriveRallyGhost = null;
   let freeDriveShowcaseCheckpoints = [];
   let freeDriveShowcaseDrivingLine = [];
+  let freeDriveShowcaseCheckpointDistances = [];
   let freeDriveShowcaseChallenge = null;
   let activeFreeDriveChallenge = null;
   let displayedFreeDriveChallenge = null;
@@ -518,7 +525,12 @@ export function createRacingGame({
     playerDistance: 0,
     playerPlace: 1,
     finalPlace: null,
-    elapsedSeconds: 0
+    elapsedSeconds: 0,
+    upsideDownSeconds: 0,
+    offRouteSeconds: 0,
+    recoveryCooldownSeconds: 0,
+    recoveryNoticeSeconds: 0,
+    recoveryCount: 0
   };
   let boostCameraKick = 0;
   const startGateLights = [];
@@ -581,6 +593,8 @@ export function createRacingGame({
     startRallyChallengeScenario: () => startRallyChallengeScenario(),
     completeRallyChallengeScenario: () => completeRallyChallengeScenario(),
     completeShowcaseEventScenario: () => completeShowcaseEventScenario(),
+    recoverShowcaseScenario: () => recoverShowcaseScenario(),
+    rollShowcaseScenario: () => rollShowcaseScenario(),
     placeTrackScenario: (progress = 0) => placeTrackScenario(progress),
     placeWorldScenario: (x, z, heading = 0) => placeWorldScenario(x, z, heading),
     listTestScenarios: () => testScenarios,
@@ -663,6 +677,8 @@ export function createRacingGame({
         collisionHoldSeconds: Number(traffic.collisionHoldSeconds.toFixed(2)),
         position: { x: Number(traffic.position.x.toFixed(1)), y: Number(traffic.position.y.toFixed(1)) },
         eventOpponent: Boolean(traffic.eventOpponent),
+        name: traffic.name,
+        labelVisible: Boolean(traffic.nameplate?.visible),
         eventDistance: Number((traffic.eventDistance ?? 0).toFixed(1)),
         finishTimeSeconds: traffic.finishTimeSeconds == null ? null : Number(traffic.finishTimeSeconds.toFixed(2))
       })),
@@ -720,6 +736,7 @@ export function createRacingGame({
         countdownSeconds: Number(showcaseEvent.countdownSeconds.toFixed(2)),
         playerDistance: Number(showcaseEvent.playerDistance.toFixed(1)),
         playerPlace: showcaseEvent.playerPlace,
+        recoveryCount: showcaseEvent.recoveryCount,
         opponents: freeDriveTraffic.map(({ eventDistance, finishTimeSeconds }) => ({
           distance: Number((eventDistance ?? 0).toFixed(1)),
           finishTimeSeconds: finishTimeSeconds == null ? null : Number(finishTimeSeconds.toFixed(2))
@@ -2567,6 +2584,21 @@ export function createRacingGame({
         sampleTrack: trackProfileAtProgress,
         elevationAt: (progress) => freeDriveElevationAtProgress(progress) + 0.06,
         rallyRoute: freeDriveRallyRoute
+      });
+      let minimumLineIndex = 0;
+      freeDriveShowcaseCheckpointDistances = freeDriveShowcaseCheckpoints.map((checkpoint) => {
+        let nearestIndex = minimumLineIndex;
+        let nearestDistance = Infinity;
+        for (let index = minimumLineIndex; index < freeDriveShowcaseDrivingLine.length; index += 1) {
+          const sample = freeDriveShowcaseDrivingLine[index];
+          const distance = Math.hypot(sample.x - checkpoint.x, sample.z - checkpoint.z);
+          if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearestIndex = index;
+          }
+        }
+        minimumLineIndex = nearestIndex;
+        return freeDriveShowcaseDrivingLine[nearestIndex]?.distance ?? 0;
       });
       freeDriveShowcaseChallenge = createFreeDriveTimeTrial({
         checkpoints: freeDriveShowcaseCheckpoints,
@@ -5301,6 +5333,7 @@ export function createRacingGame({
         position: new THREE.Vector2(),
         heading: 0,
         eventOpponent: isShowcase,
+        name: isShowcase ? ["RAVEN", "APEX", "VOLT"][index] : null,
         eventDistance: 0,
         finishTimeSeconds: null
       };
@@ -5325,9 +5358,38 @@ export function createRacingGame({
       traffic.collider = collider;
       physics.colliderTags.set(collider.handle, { type: "traffic", index });
       freeDriveTraffic.push(traffic);
+      if (isShowcase) {
+        traffic.nameplate = createOpponentNameplate(traffic.name, ["#ff647c", "#62ddff", "#ffd45a"][index]);
+        visual.add(traffic.nameplate);
+      }
       scene.add(visual);
     });
     resetFreeDriveTraffic();
+  }
+
+  function createOpponentNameplate(name, accent) {
+    const labelCanvas = document.createElement("canvas");
+    labelCanvas.width = 256;
+    labelCanvas.height = 64;
+    const context = labelCanvas.getContext("2d");
+    context.fillStyle = "rgba(4, 10, 16, .78)";
+    context.fillRect(8, 8, 240, 48);
+    context.strokeStyle = accent;
+    context.lineWidth = 4;
+    context.strokeRect(8, 8, 240, 48);
+    context.fillStyle = "#ffffff";
+    context.font = "900 30px sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(name, 128, 33);
+    const texture = new THREE.CanvasTexture(labelCanvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
+    sprite.name = `showcase-opponent-${name}`;
+    sprite.position.set(0, 3.1, 0);
+    sprite.scale.set(4, 1, 1);
+    sprite.renderOrder = 4;
+    return sprite;
   }
 
   function resetFreeDriveTraffic() {
@@ -6479,6 +6541,7 @@ export function createRacingGame({
     showcaseEvent.playerPlace = 1;
     showcaseEvent.finalPlace = null;
     showcaseEvent.elapsedSeconds = 0;
+    resetShowcaseRecoveryState();
     resetFreeDriveTraffic();
     anchorShowcaseStartPose();
     showEventBanner({ value: String(showcaseCountdownSeconds), detail: "ISLAND TOUR" });
@@ -6523,6 +6586,7 @@ export function createRacingGame({
         if (showcaseEvent.bannerSeconds === 0) hideEventBanner();
       }
       updateShowcasePlayerProgress();
+      updateShowcaseRecovery(deltaSeconds);
       const challenge = updateFreeDriveShowcaseChallenge(deltaSeconds);
       if (challenge?.phase !== "finished") return;
       showcaseEvent.playerDistance = freeDriveShowcaseDrivingLine.at(-1)?.distance ?? showcaseEvent.playerDistance;
@@ -6539,6 +6603,60 @@ export function createRacingGame({
       showcaseEvent.finishHoldSeconds = Math.max(0, showcaseEvent.finishHoldSeconds - deltaSeconds);
       if (showcaseEvent.finishHoldSeconds === 0) showShowcaseResult();
     }
+  }
+
+  function resetShowcaseRecoveryState() {
+    showcaseEvent.upsideDownSeconds = 0;
+    showcaseEvent.offRouteSeconds = 0;
+    showcaseEvent.recoveryCooldownSeconds = 0;
+    showcaseEvent.recoveryNoticeSeconds = 0;
+    showcaseEvent.recoveryCount = 0;
+  }
+
+  function updateShowcaseRecovery(deltaSeconds) {
+    if (!physics?.playerBody || showcaseEvent.phase !== "running") return;
+    showcaseEvent.recoveryCooldownSeconds = Math.max(0, showcaseEvent.recoveryCooldownSeconds - deltaSeconds);
+    showcaseEvent.recoveryNoticeSeconds = Math.max(0, showcaseEvent.recoveryNoticeSeconds - deltaSeconds);
+    if (physics.playerBody.translation().y < -12) {
+      recoverShowcasePlayer();
+      return;
+    }
+
+    const grounded = playerSurfaceState.grounded && !freeDriveJumpState.airborne;
+    const rotation = physics.playerBody.rotation();
+    tempQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+    const upright = new THREE.Vector3(0, 1, 0).applyQuaternion(tempQuaternion).y;
+    const support = upright < 0.45 ? resolveSurfaceSupport(state.position, state.heading, state.trackIndex) : null;
+    const body = physics.playerBody.translation();
+    const nearGround = support?.grounded
+      && body.y - support.height < playerVehicleSpec().spawnHeight + 1.6
+      && Math.abs(physics.playerBody.linvel().y) < 2;
+    showcaseEvent.upsideDownSeconds = upright < 0.45 && (grounded || nearGround)
+      ? showcaseEvent.upsideDownSeconds + deltaSeconds : 0;
+    const nearestDistance = freeDriveShowcaseDrivingLine.reduce((nearest, sample) =>
+      Math.min(nearest, Math.hypot(sample.x - state.position.x, sample.z - state.position.y)), Infinity);
+    showcaseEvent.offRouteSeconds = grounded && nearestDistance > 35
+      ? showcaseEvent.offRouteSeconds + deltaSeconds : 0;
+    if (showcaseEvent.recoveryCooldownSeconds <= 0
+      && (showcaseEvent.upsideDownSeconds >= 2 || showcaseEvent.offRouteSeconds >= 3)) recoverShowcasePlayer();
+  }
+
+  function recoverShowcasePlayer() {
+    if (showcaseEvent.phase !== "running" || showcaseEvent.recoveryCooldownSeconds > 0) return false;
+    const challenge = freeDriveShowcaseChallenge.getState();
+    const checkpointIndex = Math.max(0, Math.min(challenge.nextCheckpoint - 1, freeDriveShowcaseCheckpoints.length - 1));
+    const checkpoint = freeDriveShowcaseCheckpoints[checkpointIndex];
+    if (!checkpoint || !placeWorldScenario(checkpoint.x, checkpoint.z, checkpoint.heading)) return false;
+    freeDriveShowcaseChallenge.addPenalty(showcaseRecoveryPenaltySeconds);
+    showcaseEvent.playerDistance = freeDriveShowcaseCheckpointDistances[checkpointIndex] ?? 0;
+    updateShowcasePlace();
+    showcaseEvent.upsideDownSeconds = 0;
+    showcaseEvent.offRouteSeconds = 0;
+    showcaseEvent.recoveryCooldownSeconds = 2;
+    showcaseEvent.recoveryNoticeSeconds = 2.2;
+    showcaseEvent.recoveryCount += 1;
+    updateRouteGuide();
+    return true;
   }
 
   function updateShowcasePlayerProgress() {
@@ -7170,6 +7288,7 @@ ${shader.vertexShader}`
   }
 
   function updateHud() {
+    updateRouteGuide();
     const rallyChallenge = freeDriveRallyChallenge?.getState();
     const showcaseChallenge = freeDriveShowcaseChallenge?.getState();
     const visibleChallenge = activeFreeDriveChallenge ?? displayedFreeDriveChallenge;
@@ -7213,6 +7332,23 @@ ${shader.vertexShader}`
     cameraValue.textContent = cameraMode === RACING_CAMERA_MODES.CHASE
       ? "跟车"
       : "引擎盖";
+  }
+
+  function updateRouteGuide() {
+    const visible = isShowcase
+      && (showcaseEvent.phase === "countdown" || showcaseEvent.phase === "running")
+      && freeDriveShowcaseCheckpoints.length > 1;
+    routeGuide.hidden = !visible;
+    if (!visible) return;
+    const challenge = freeDriveShowcaseChallenge?.getState();
+    const index = Math.min(challenge?.nextCheckpoint ?? 1, freeDriveShowcaseCheckpoints.length - 1);
+    const checkpoint = freeDriveShowcaseCheckpoints[index];
+    const bearing = Math.atan2(checkpoint.x - state.position.x, checkpoint.z - state.position.y) - state.heading;
+    routeArrow.style.setProperty("--route-bearing", `${THREE.MathUtils.radToDeg(bearing)}deg`);
+    routeDistance.textContent = `${Math.round(Math.hypot(checkpoint.x - state.position.x, checkpoint.z - state.position.y))} M`;
+    routeSection.textContent = index === freeDriveShowcaseCheckpoints.length - 1
+      ? "FINISH" : (checkpoint.section ?? "road").toUpperCase();
+    routeNotice.hidden = showcaseEvent.recoveryNoticeSeconds <= 0;
   }
 
   function currentStatusLabel() {
@@ -7985,6 +8121,27 @@ ${shader.vertexShader}`
     updateHud();
     renderer.render(scene, camera);
     return showcaseEvent.phase === "settling";
+  }
+
+  function recoverShowcaseScenario() {
+    if (!isShowcase || showcaseEvent.phase !== "running" || !physics?.playerBody) return false;
+    const translation = physics.playerBody.translation();
+    physics.playerBody.setTranslation({ x: translation.x, y: -13, z: translation.z }, true);
+    updateShowcaseRecovery(0.016);
+    updateHud();
+    renderer.render(scene, camera);
+    return showcaseEvent.recoveryCount > 0;
+  }
+
+  function rollShowcaseScenario() {
+    if (!isShowcase || showcaseEvent.phase !== "running" || !physics?.playerBody) return false;
+    const yaw = new THREE.Quaternion().setFromAxisAngle(upAxis, state.heading);
+    const roll = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI);
+    const rotation = yaw.multiply(roll);
+    physics.playerBody.setRotation({ x: rotation.x, y: rotation.y, z: rotation.z, w: rotation.w }, true);
+    physics.playerBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    physics.playerBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    return true;
   }
 
   function placeTrackScenario(requestedProgress = 0) {

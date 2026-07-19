@@ -1849,6 +1849,31 @@ h1 {
   line-height: 1;
 }
 
+.race-route-guide {
+  position: absolute;
+  top: 92px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 150px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 218, 89, 0.34);
+  border-radius: 10px;
+  background: rgba(5, 13, 20, 0.66);
+  color: #f7fbff;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(9px);
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.race-route-arrow { width: 34px; color: #ffda59; font-size: 30px; line-height: 1; text-align: center; transform: rotate(var(--route-bearing, 0deg)); }
+.race-route-copy { display: grid; gap: 1px; }
+.race-route-copy b { font-size: 12px; letter-spacing: .16em; }
+.race-route-copy span { color: rgba(237, 245, 254, .76); font-size: 13px; font-weight: 800; }
+.race-route-notice { color: #ffda59; font-size: 11px; font-style: normal; font-weight: 900; white-space: nowrap; }
+
 .race-hud-panel-bottom-left {
   left: 18px;
   bottom: 18px;
@@ -3045,6 +3070,20 @@ h1 {
   .race-speed-panel {
     min-width: 148px;
     padding: 12px 14px;
+  }
+
+  .race-route-guide {
+    top: 78px;
+    padding: 7px 9px;
+    transform: translateX(-50%) scale(.9);
+  }
+
+  .race-route-notice {
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    padding-top: 5px;
+    transform: translateX(-50%);
   }
 
   .race-start-card {
