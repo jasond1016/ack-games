@@ -32,6 +32,16 @@ test("proving ground runs acceleration, braking, and skidpad protocols against t
   await page.evaluate(() => globalThis.__ackGamesDebug.racing.resetRace());
   expect(await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().provingGround)).toEqual({ status: "idle" });
 
+  expect(await page.evaluate(() => globalThis.__ackGamesDebug.racing.startProvingGroundTest("zero-to-200"))).toBe(true);
+  await expect.poll(() => page.evaluate(() =>
+    globalThis.__ackGamesDebug.racing.getState().provingGround.status
+  ), { timeout: 30_000 }).toBe("completed");
+  const highSpeedAcceleration = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().provingGround);
+  expect(highSpeedAcceleration.zeroTo200Seconds).toBeGreaterThan(0);
+  expect(highSpeedAcceleration.zeroTo200Seconds).toBeLessThan(25);
+  expect(Math.max(...highSpeedAcceleration.drivetrainTrace.map(({ gear }) => gear))).toBeGreaterThan(2);
+  expect(highSpeedAcceleration.roadContactRatio).toBeGreaterThan(0.95);
+
   expect(await page.evaluate(() => globalThis.__ackGamesDebug.racing.startProvingGroundTest("100-to-zero"))).toBe(true);
   await expect.poll(() => page.evaluate(() =>
     globalThis.__ackGamesDebug.racing.getState().provingGround.status

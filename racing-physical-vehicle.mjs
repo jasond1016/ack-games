@@ -4,6 +4,8 @@ import { calculateTireDynamics } from "./racing-tire-dynamics.mjs";
 export const physicalVehicleConfig = Object.freeze({
   id: "aventador",
   driveLayout: "awd",
+  topSpeedKmh: 180,
+  speedLimiterStartRatio: 0,
   mass: 1250,
   chassisHalfWidth: 1.3,
   chassisHalfHeight: 0.34,
@@ -45,8 +47,8 @@ export const physicalVehicleConfig = Object.freeze({
 });
 
 const vehicleOverrides = Object.freeze({
-  "urus-se": { mass: 2150, driveLayout: "awd", chassisHalfWidth: 1.18, chassisHalfHeight: 0.52, chassisHalfLength: 2.5, visualGroundOffset: 1.34, spawnHeight: 1.58, wheelTrack: 1.34, wheelBase: 2.18, wheelRadius: 0.5, suspensionRestLength: 0.58, suspensionTravel: 0.38, suspensionStiffness: 38, suspensionCompression: 6.2, suspensionRelaxation: 7.4, engineForcePerWheel: 5200, brakeImpulsePerWheel: 125, sideFrictionStiffness: 1.05, downforce: 12, idleRpm: 720, redlineRpm: 6800, upshiftRpm: 6250, downshiftRpm: 2200, finalDrive: 3.27, gearRatios: Object.freeze([5, 3.2, 2.14, 1.72, 1.31, 1, 0.82, 0.64]) },
-  "miura-p400": { mass: 1290, driveLayout: "rwd", chassisHalfWidth: 1.02, chassisHalfHeight: 0.33, chassisHalfLength: 2.12, visualGroundOffset: 1.02, spawnHeight: 1.26, wheelTrack: 1.18, wheelBase: 1.88, wheelRadius: 0.4, suspensionStiffness: 28, suspensionCompression: 4.7, suspensionRelaxation: 6.1, engineForcePerWheel: 6200, brakeImpulsePerWheel: 92, frictionSlip: 2.72, sideFrictionStiffness: 0.92, downforce: 5, idleRpm: 900, redlineRpm: 7700, upshiftRpm: 7200, downshiftRpm: 3000, finalDrive: 3.77, gearRatios: Object.freeze([2.52, 1.74, 1.23, 0.96, 0.79]), shiftDuration: 0.24 },
+  "urus-se": { topSpeedKmh: 312, speedLimiterStartRatio: 0.95, mass: 2150, driveLayout: "awd", chassisHalfWidth: 1.18, chassisHalfHeight: 0.52, chassisHalfLength: 2.5, visualGroundOffset: 1.34, spawnHeight: 1.58, wheelTrack: 1.34, wheelBase: 2.18, wheelRadius: 0.5, suspensionRestLength: 0.58, suspensionTravel: 0.38, suspensionStiffness: 38, suspensionCompression: 6.2, suspensionRelaxation: 7.4, engineForcePerWheel: 6000, brakeImpulsePerWheel: 125, sideFrictionStiffness: 1.05, aerodynamicDrag: 0.58, rollingDrag: 320, downforce: 12, idleRpm: 720, redlineRpm: 6800, upshiftRpm: 6250, downshiftRpm: 2200, finalDrive: 3.27, gearRatios: Object.freeze([5, 3.2, 2.14, 1.72, 1.31, 1, 0.82, 0.64]) },
+  "miura-p400": { topSpeedKmh: 280, speedLimiterStartRatio: 0.95, mass: 1290, driveLayout: "rwd", chassisHalfWidth: 1.02, chassisHalfHeight: 0.33, chassisHalfLength: 2.12, visualGroundOffset: 1.02, spawnHeight: 1.26, wheelTrack: 1.18, wheelBase: 1.88, wheelRadius: 0.4, suspensionStiffness: 28, suspensionCompression: 4.7, suspensionRelaxation: 6.1, engineForcePerWheel: 6200, brakeImpulsePerWheel: 92, frictionSlip: 2.72, sideFrictionStiffness: 0.92, aerodynamicDrag: 0.4, rollingDrag: 190, downforce: 5, idleRpm: 900, redlineRpm: 7700, upshiftRpm: 7200, downshiftRpm: 3000, finalDrive: 3.77, gearRatios: Object.freeze([2.52, 1.74, 1.23, 0.96, 0.79]), shiftDuration: 0.24 },
   "countach-lpi-800-4": { mass: 1595, driveLayout: "awd", chassisHalfWidth: 1.13, chassisHalfLength: 2.34, wheelTrack: 1.27, wheelBase: 2.04, wheelRadius: 0.44, suspensionStiffness: 36, engineForcePerWheel: 5050, brakeImpulsePerWheel: 112, downforce: 21 },
   dbr9: { mass: 1100, driveLayout: "rwd", chassisHalfWidth: 1.1, chassisHalfHeight: 0.3, chassisHalfLength: 2.28, visualGroundOffset: 1.06, spawnHeight: 1.28, wheelTrack: 1.3, wheelBase: 2.1, wheelRadius: 0.43, suspensionRestLength: 0.45, suspensionTravel: 0.26, suspensionStiffness: 48, suspensionCompression: 7.2, suspensionRelaxation: 8.4, engineForcePerWheel: 7800, brakeImpulsePerWheel: 138, frictionSlip: 3.45, sideFrictionStiffness: 1.34, aerodynamicDrag: 1.35, downforce: 42, idleRpm: 900, redlineRpm: 7200, upshiftRpm: 6800, downshiftRpm: 3600, finalDrive: 3.54, gearRatios: Object.freeze([2.64, 1.88, 1.42, 1.14, 0.96, 0.82]), shiftDuration: 0.11 },
   bolide: { mass: 1240, driveLayout: "awd", chassisHalfWidth: 1.16, chassisHalfHeight: 0.29, chassisHalfLength: 2.3, visualGroundOffset: 1.0, spawnHeight: 1.24, wheelTrack: 1.32, wheelBase: 2.12, wheelRadius: 0.44, suspensionRestLength: 0.44, suspensionTravel: 0.25, suspensionStiffness: 52, suspensionCompression: 7.6, suspensionRelaxation: 8.8, engineForcePerWheel: 6100, brakeImpulsePerWheel: 142, frictionSlip: 3.58, sideFrictionStiffness: 1.42, aerodynamicDrag: 1.4, downforce: 58, redlineRpm: 8600, upshiftRpm: 8150, downshiftRpm: 3900, finalDrive: 3.44, gearRatios: Object.freeze([2.9, 2.03, 1.52, 1.2, 0.98, 0.81, 0.68]), shiftDuration: 0.09 },
@@ -55,7 +57,7 @@ const vehicleOverrides = Object.freeze({
   "aventador-classic": { mass: 1575, driveLayout: "awd", chassisHalfWidth: 1.14, chassisHalfHeight: 0.34, chassisHalfLength: 2.32, wheelTrack: 1.28, wheelBase: 2.04, wheelRadius: 0.44, engineForcePerWheel: 4900, brakeImpulsePerWheel: 110, downforce: 19 },
   "countach-5000qv": { mass: 1490, driveLayout: "rwd", chassisHalfWidth: 1.04, chassisHalfHeight: 0.35, chassisHalfLength: 2.0, visualGroundOffset: 1.04, spawnHeight: 1.28, wheelTrack: 1.2, wheelBase: 1.86, wheelRadius: 0.42, suspensionStiffness: 30, suspensionCompression: 4.9, suspensionRelaxation: 6.2, engineForcePerWheel: 6800, brakeImpulsePerWheel: 98, frictionSlip: 2.82, sideFrictionStiffness: 0.98, downforce: 7 },
   "huracan-sto": { mass: 1339, driveLayout: "rwd", chassisHalfWidth: 1.1, chassisHalfHeight: 0.31, chassisHalfLength: 2.18, visualGroundOffset: 1.04, spawnHeight: 1.27, wheelTrack: 1.27, wheelBase: 1.96, wheelRadius: 0.43, suspensionRestLength: 0.46, suspensionTravel: 0.27, suspensionStiffness: 44, suspensionCompression: 6.8, suspensionRelaxation: 8, engineForcePerWheel: 7500, brakeImpulsePerWheel: 134, frictionSlip: 3.42, sideFrictionStiffness: 1.35, downforce: 39 },
-  veneno: { mass: 1490, driveLayout: "awd", chassisHalfWidth: 1.15, chassisHalfHeight: 0.31, chassisHalfLength: 2.42, visualGroundOffset: 1.04, spawnHeight: 1.28, wheelTrack: 1.31, wheelBase: 2.12, wheelRadius: 0.44, suspensionStiffness: 43, engineForcePerWheel: 5700, brakeImpulsePerWheel: 128, frictionSlip: 3.38, sideFrictionStiffness: 1.31, downforce: 37 }
+  veneno: { topSpeedKmh: 355, speedLimiterStartRatio: 0.95, mass: 1490, driveLayout: "awd", chassisHalfWidth: 1.15, chassisHalfHeight: 0.31, chassisHalfLength: 2.42, visualGroundOffset: 1.04, spawnHeight: 1.28, wheelTrack: 1.31, wheelBase: 2.12, wheelRadius: 0.44, suspensionStiffness: 43, engineForcePerWheel: 5700, brakeImpulsePerWheel: 128, frictionSlip: 3.38, sideFrictionStiffness: 1.31, aerodynamicDrag: 0.42, rollingDrag: 220, downforce: 37 }
 });
 
 const physicalVehicleSpecs = new Map([
@@ -162,7 +164,13 @@ export function resolvePhysicalVehicleDriveForces({
   driveScale = 1
 }) {
   const forwardSpeedRatio = Math.min(1, Math.max(0, signedSpeed) / Math.max(maxForwardSpeed, 0.001));
-  const forwardDriveScale = Math.max(0, 1 - forwardSpeedRatio * forwardSpeedRatio);
+  const limiterStartRatio = config.speedLimiterStartRatio ?? 0;
+  const limiterProgress = Math.max(0, Math.min(1,
+    (forwardSpeedRatio - limiterStartRatio) / Math.max(1 - limiterStartRatio, 0.001)
+  ));
+  const forwardDriveScale = limiterStartRatio > 0
+    ? 1 - limiterProgress * limiterProgress * (3 - 2 * limiterProgress)
+    : Math.max(0, 1 - forwardSpeedRatio * forwardSpeedRatio);
   let engineForce = throttle
     * config.engineForcePerWheel
     * driveScale

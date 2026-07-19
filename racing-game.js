@@ -709,6 +709,7 @@ export function createRacingGame({
         specId: playerVehicleSpec().id,
         mass: playerVehicleSpec().mass,
         driveLayout: playerVehicleSpec().driveLayout,
+        topSpeedKmh: playerVehicleSpec().topSpeedKmh,
         wheelRadius: playerVehicleSpec().wheelRadius,
         finalDrive: playerVehicleSpec().finalDrive,
         gearRatios: [...playerVehicleSpec().gearRatios],
@@ -8022,7 +8023,8 @@ ${shader.vertexShader}`
   }
 
   function playerMaxForwardSpeed() {
-    return physicalDrivingConfig.maxForwardSpeed * (state.boostSeconds > 0 ? boostConfig.topSpeedMultiplier : 1);
+    return playerVehicleSpec().topSpeedKmh / 3.6
+      * (state.boostSeconds > 0 ? boostConfig.topSpeedMultiplier : 1);
   }
 
   function formatLapDisplay(completedLaps) {
