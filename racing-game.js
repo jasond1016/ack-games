@@ -455,7 +455,12 @@ export function createRacingGame({
   const freeDriveJumpState = {
     airborne: false,
     wasGrounded: true,
-    launchCooldownSeconds: 0
+    launchCooldownSeconds: 0,
+    attitudeAssistSeconds: 0,
+    assistedHeading: 0,
+    assistedVelocityX: 0,
+    assistedVelocityZ: 0,
+    assistWasAirborne: false
   };
   const playerSurfaceState = {
     grounded: true,
@@ -614,7 +619,8 @@ export function createRacingGame({
     completeRallyChallengeScenario: () => completeRallyChallengeScenario(),
     completeShowcaseEventScenario: () => completeShowcaseEventScenario(),
     advanceShowcaseCheckpointScenario: () => advanceShowcaseCheckpointScenario(),
-    launchShowcaseBridgeScenario: (speedKmh = 88) => launchShowcaseBridgeScenario(speedKmh),
+    launchShowcaseBridgeScenario: (speedKmh = 88, direction = 1) =>
+      launchShowcaseBridgeScenario(speedKmh, direction),
     recoverShowcaseScenario: () => recoverShowcaseScenario(),
     rollShowcaseScenario: () => rollShowcaseScenario(),
     placeTrackScenario: (progress = 0) => placeTrackScenario(progress),
@@ -3593,6 +3599,8 @@ export function createRacingGame({
     resetPhysicalVehicleControls(physics.playerVehicle);
     freeDriveJumpState.airborne = false;
     freeDriveJumpState.launchCooldownSeconds = 0;
+    freeDriveJumpState.attitudeAssistSeconds = 0;
+    freeDriveJumpState.assistWasAirborne = false;
   }
 
   function setOpponentBodyPose(position, heading) {
@@ -6366,6 +6374,25 @@ export function createRacingGame({
       0,
       freeDriveJumpState.launchCooldownSeconds - deltaSeconds
     );
+    freeDriveJumpState.attitudeAssistSeconds = Math.max(
+      0,
+      freeDriveJumpState.attitudeAssistSeconds - deltaSeconds
+    );
+    if (freeDriveJumpState.attitudeAssistSeconds > 0 && physics?.playerBody) {
+      if (!playerSurfaceState.grounded) freeDriveJumpState.assistWasAirborne = true;
+      if (freeDriveJumpState.assistWasAirborne && playerSurfaceState.grounded) {
+        freeDriveJumpState.attitudeAssistSeconds = 0;
+      } else {
+        const assistedVelocity = physics.playerBody.linvel();
+        physics.playerBody.setRotation(rapierRotationFromYaw(freeDriveJumpState.assistedHeading), true);
+        physics.playerBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+        physics.playerBody.setLinvel({
+          x: freeDriveJumpState.assistedVelocityX,
+          y: assistedVelocity.y,
+          z: freeDriveJumpState.assistedVelocityZ
+        }, true);
+      }
+    }
     if (!isIslandWorld || freeDriveJumpState.launchCooldownSeconds > 0 || !physics?.playerBody) return;
     const position = physics.playerBody.translation();
     const velocity = physics.playerBody.linvel();
@@ -6374,10 +6401,36 @@ export function createRacingGame({
       { x: velocity.x, y: velocity.z }
     );
     if (!launch) return;
+    const landingX = launch.direction > 0
+      ? FREE_DRIVE_JUMP.gapMaxX + FREE_DRIVE_JUMP.landingRun
+      : FREE_DRIVE_JUMP.gapMinX - FREE_DRIVE_JUMP.landingRun;
+    const landingSample = freeDriveShowcaseDrivingLine.reduce((nearest, sample) => {
+      if (Math.sign(Math.sin(sample.heading)) !== launch.direction || Math.abs(sample.z) <= 8) return nearest;
+      const score = Math.abs(sample.x - landingX) + Math.abs(sample.z - position.z) * 0.5;
+      return !nearest || score < nearest.score ? { sample, score } : nearest;
+    }, null)?.sample;
+    let horizontalX = velocity.x;
+    let horizontalZ = velocity.z;
+    if (landingSample) {
+      const toLandingX = landingSample.x - position.x;
+      const toLandingZ = landingSample.z - position.z;
+      const distance = Math.max(0.001, Math.hypot(toLandingX, toLandingZ));
+      const horizontalSpeed = Math.hypot(velocity.x, velocity.z);
+      horizontalX = toLandingX / distance * horizontalSpeed;
+      horizontalZ = toLandingZ / distance * horizontalSpeed;
+    }
+    const launchHeading = Math.atan2(horizontalX, horizontalZ);
+    physics.playerBody.setRotation(rapierRotationFromYaw(launchHeading), true);
+    physics.playerBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    freeDriveJumpState.attitudeAssistSeconds = 4;
+    freeDriveJumpState.assistedHeading = launchHeading;
+    freeDriveJumpState.assistedVelocityX = horizontalX;
+    freeDriveJumpState.assistedVelocityZ = horizontalZ;
+    freeDriveJumpState.assistWasAirborne = false;
     physics.playerBody.setLinvel({
-      x: velocity.x,
+      x: horizontalX,
       y: Math.max(velocity.y, launch.verticalSpeed),
-      z: velocity.z
+      z: horizontalZ
     }, true);
     freeDriveJumpState.launchCooldownSeconds = 0.8;
   }
@@ -7711,6 +7764,8 @@ ${shader.vertexShader}`
     presentationState.suppressJumpTransitions = false;
     freeDriveJumpState.wasGrounded = true;
     freeDriveJumpState.launchCooldownSeconds = 0;
+    freeDriveJumpState.attitudeAssistSeconds = 0;
+    freeDriveJumpState.assistWasAirborne = false;
     if (renderer) renderer.toneMappingExposure = presentationState.baselineExposure;
   }
 
@@ -8368,11 +8423,24 @@ ${shader.vertexShader}`
     return showcaseEvent.recoveryCount > 0;
   }
 
-  function launchShowcaseBridgeScenario(speedKmh = 88) {
+  function launchShowcaseBridgeScenario(speedKmh = 88, requestedDirection = 1) {
     if (!isShowcase || showcaseEvent.phase !== "running" || !physics?.playerBody) return false;
-    if (!placeWorldScenario(FREE_DRIVE_JUMP.gapMinX - 2, -18, Math.PI * 0.5)) return false;
+    const direction = Number(requestedDirection) < 0 ? -1 : 1;
+    const targetX = direction > 0 ? FREE_DRIVE_JUMP.gapMinX - 2 : FREE_DRIVE_JUMP.gapMaxX + 2;
+    const routeSample = freeDriveShowcaseDrivingLine.reduce((nearest, sample) => {
+      if (Math.sign(Math.sin(sample.heading)) !== direction || Math.abs(sample.z) <= 8) return nearest;
+      return !nearest || Math.abs(sample.x - targetX) < Math.abs(nearest.x - targetX) ? sample : nearest;
+    }, null);
+    const x = routeSample?.x ?? targetX;
+    const z = routeSample?.z ?? (direction > 0 ? -18 : 18);
+    const heading = routeSample?.heading ?? (direction > 0 ? Math.PI * 0.5 : -Math.PI * 0.5);
+    if (!placeWorldScenario(x, z, heading)) return false;
     const speed = Math.max(0, Number(speedKmh) || 0) / 3.6;
-    physics.playerBody.setLinvel({ x: speed, y: 0, z: 0 }, true);
+    physics.playerBody.setLinvel({
+      x: Math.sin(heading) * speed,
+      y: 0,
+      z: Math.cos(heading) * speed
+    }, true);
     return true;
   }
 
