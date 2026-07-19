@@ -119,6 +119,61 @@ test("free-drive traffic uses its own limited blue nitro", async ({ page }) => {
   expect(state.traffic.every((traffic) => traffic.boostCharges >= 0 && traffic.boostCharges <= 3)).toBe(true);
 });
 
+test("Coastal Showcase runs countdown, timed route, result, and in-place retry", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#racingGameCard").click();
+  await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
+  await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-coastal-showcase"] .map-select-card-button').click();
+  await page.locator("#racingMapSelectRaceButton").click();
+
+  const startOverlay = page.locator("#racingStartOverlay");
+  await expect(startOverlay).toBeVisible({ timeout: 25_000 });
+  await expect(page.locator("#racingStartModeValue")).toHaveText("Festival Showcase");
+  await expect(page.locator("#racingStartOpponentValue")).toHaveText("单人计时赛");
+  await page.locator("#racingStartRaceButton").click();
+  await expect(startOverlay).toBeHidden({ timeout: 45_000 });
+
+  const eventBanner = page.locator("#racingEventBanner");
+  await expect(eventBanner).toBeVisible();
+  const countdownStart = await page.evaluate(() => {
+    const state = globalThis.__ackGamesDebug.racing.getState();
+    return { position: state.playerPosition, speedKmh: state.speedKmh };
+  });
+  await page.keyboard.down("KeyW");
+  await page.waitForTimeout(700);
+  const heldDuringCountdown = await page.evaluate(() => {
+    const state = globalThis.__ackGamesDebug.racing.getState();
+    return { position: state.playerPosition, speedKmh: state.speedKmh, boost: state.boostSeconds };
+  });
+  await page.keyboard.up("KeyW");
+  expect(heldDuringCountdown.position).toEqual(countdownStart.position);
+  expect(heldDuringCountdown.speedKmh).toBe(0);
+  expect(heldDuringCountdown.boost).toBe(0);
+  await expect.poll(() => page.evaluate(() =>
+    globalThis.__ackGamesDebug.racing.getState().showcaseEvent.phase
+  ), { timeout: 8_000 }).toBe("running");
+  await expect.poll(() => page.evaluate(() =>
+    globalThis.__ackGamesDebug.racing.getState().showcaseChallenge.elapsedSeconds
+  )).toBeGreaterThan(0);
+
+  expect(await page.evaluate(() =>
+    globalThis.__ackGamesDebug.racing.completeShowcaseEventScenario()
+  )).toBe(true);
+  await expect.poll(() => page.evaluate(() =>
+    globalThis.__ackGamesDebug.racing.getState().showcaseEvent.phase
+  ), { timeout: 5_000 }).toBe("result");
+  await expect(page.locator("#racingResultOverlay")).toBeVisible();
+  await expect(page.locator("#racingResultTitle")).toHaveText("ISLAND TOUR 完赛");
+  await expect(page.locator("#racingResultPlayerValue")).not.toHaveText("--");
+
+  await page.locator("#racingPlayAgainButton").click();
+  await expect(page.locator("#racingResultOverlay")).toBeHidden();
+  await expect.poll(() => page.evaluate(() =>
+    globalThis.__ackGamesDebug.racing.getState().showcaseEvent.phase
+  )).toBe("countdown");
+  await expect(eventBanner).toBeVisible();
+});
+
 test("jsDelivr failure is isolated to racing and can be retried", async ({ page }) => {
   await page.route("https://cdn.jsdelivr.net/**", (route) => route.abort("failed"));
   await page.goto("/");

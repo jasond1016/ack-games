@@ -121,6 +121,9 @@ const distanceMarkerTextureCache = new Map();
 const rapierReadyPromise = RAPIER.init();
 const upAxis = new THREE.Vector3(0, 1, 0);
 const tempQuaternion = new THREE.Quaternion();
+const showcaseCountdownSeconds = 3;
+const showcaseGoBannerSeconds = 0.8;
+const showcaseFinishHoldSeconds = 0.9;
 const collisionDebugColors = {
   player: 0x44ff88,
   opponent: 0x4da3ff,
@@ -182,6 +185,10 @@ export function createRacingGame({
   const speedValue = document.getElementById("racingSpeedValue");
   const boostValue = document.getElementById("racingBoostValue");
   const cameraValue = document.getElementById("racingCameraValue");
+  const eventBanner = document.getElementById("racingEventBanner");
+  const eventBannerKicker = document.getElementById("racingEventBannerKicker");
+  const eventBannerValue = document.getElementById("racingEventBannerValue");
+  const eventBannerDetail = document.getElementById("racingEventBannerDetail");
   const startOverlay = document.getElementById("racingStartOverlay");
   const startMapValue = document.getElementById("racingStartMapValue");
   const startModeValue = document.getElementById("racingStartModeValue");
@@ -242,7 +249,8 @@ export function createRacingGame({
     void requestSessionIntent({ type: "exit-to-home" });
   };
   const handlePauseResetButtonClick = () => {
-    void requestSessionIntent({ type: "replace-session", snapshot: activeSnapshot });
+    if (isShowcase) restartShowcaseEvent();
+    else void requestSessionIntent({ type: "replace-session", snapshot: activeSnapshot });
   };
   const handlePauseEditorButtonClick = () => {
     void requestSessionIntent({ type: "exit-to-editor" });
@@ -251,7 +259,8 @@ export function createRacingGame({
     void requestSessionIntent({ type: "exit-to-home" });
   };
   const handleResetButtonClick = () => {
-    void requestSessionIntent({ type: "replace-session", snapshot: activeSnapshot });
+    if (isShowcase) restartShowcaseEvent();
+    else void requestSessionIntent({ type: "replace-session", snapshot: activeSnapshot });
   };
   const input = createBrowserRacingInput({
     onDrive(code, pressed) {
@@ -268,7 +277,8 @@ export function createRacingGame({
       if (isStartOverlayVisible()) {
         beginRace();
       } else if (raceState.resultVisible) {
-        void requestSessionIntent({ type: "replace-session", snapshot: activeSnapshot });
+        if (isShowcase) restartShowcaseEvent();
+        else void requestSessionIntent({ type: "replace-session", snapshot: activeSnapshot });
       } else if (!raceState.paused) {
         activateBoost();
       }
@@ -281,7 +291,8 @@ export function createRacingGame({
     },
     onReplaceSession: () => {
       if (!isStartOverlayVisible() && !raceState.paused) {
-        void requestSessionIntent({ type: "replace-session", snapshot: activeSnapshot });
+        if (isShowcase) restartShowcaseEvent();
+        else void requestSessionIntent({ type: "replace-session", snapshot: activeSnapshot });
       }
     },
     onToggleDebug: () => setCollisionDebugEnabled(!collisionDebug.enabled),
@@ -493,6 +504,15 @@ export function createRacingGame({
   let freeDriveShowcaseChallenge = null;
   let activeFreeDriveChallenge = null;
   let displayedFreeDriveChallenge = null;
+  const showcaseEvent = {
+    phase: isShowcase ? "idle" : "unavailable",
+    countdownSeconds: 0,
+    bannerSeconds: 0,
+    finishHoldSeconds: 0,
+    startX: 0,
+    startZ: 0,
+    startHeading: 0
+  };
   let boostCameraKick = 0;
   const startGateLights = [];
   let initialized = false;
@@ -553,6 +573,7 @@ export function createRacingGame({
     placeRallyScenario: () => placeRallyScenario(),
     startRallyChallengeScenario: () => startRallyChallengeScenario(),
     completeRallyChallengeScenario: () => completeRallyChallengeScenario(),
+    completeShowcaseEventScenario: () => completeShowcaseEventScenario(),
     placeTrackScenario: (progress = 0) => placeTrackScenario(progress),
     placeWorldScenario: (x, z, heading = 0) => placeWorldScenario(x, z, heading),
     listTestScenarios: () => testScenarios,
@@ -684,6 +705,10 @@ export function createRacingGame({
       } : null,
       rallyChallenge: freeDriveRallyChallenge ? formatRallyChallengeDebugState() : null,
       showcaseChallenge: freeDriveShowcaseChallenge ? formatChallengeDebugState(freeDriveShowcaseChallenge) : null,
+      showcaseEvent: isShowcase ? Object.freeze({
+        phase: showcaseEvent.phase,
+        countdownSeconds: Number(showcaseEvent.countdownSeconds.toFixed(2))
+      }) : null,
       wheelAnimation: {
         wheelCount: car?.userData.wheelCount ?? 0,
         shaderBindings: car?.userData.wheelShaderBindings?.length ?? 0,
@@ -804,7 +829,9 @@ export function createRacingGame({
   function renderCarOptions() {
     const rival = opponentCarSelection();
     const currentCar = selectedCar();
-    startOpponentValue.textContent = isFreeDrive ? "无 · 自由探索" : rival.name;
+    startOpponentValue.textContent = isShowcase
+      ? "单人计时赛"
+      : isFreeDrive ? "无 · 自由探索" : rival.name;
     updateSelectedCarPanel(currentCar);
     carOptions.replaceChildren(
       ...racingCarCatalog.map((carConfig) => {
@@ -1159,12 +1186,16 @@ export function createRacingGame({
 
   function showStartOverlay() {
     hideResultOverlay();
+    hideEventBanner();
     pauseOverlay.hidden = true;
     hudOverlay.hidden = true;
     startOverlay.hidden = false;
     startMapValue.textContent = mapData.name;
-    startModeValue.textContent = raceModeLabel;
-    startRaceButton.textContent = isFreeDrive ? "进入自由驾驶" : raceMode === "lap" ? "开始闭环赛" : "开始冲刺赛";
+    startModeValue.textContent = isShowcase ? "Festival Showcase" : raceModeLabel;
+    startOpponentValue.textContent = isShowcase ? "单人计时赛" : formatCarLabel(opponentCarSelection());
+    startRaceButton.textContent = isShowcase
+      ? "开始 Island Tour"
+      : isFreeDrive ? "进入自由驾驶" : raceMode === "lap" ? "开始闭环赛" : "开始冲刺赛";
     startRaceButton.disabled = false;
     startEditorButton.disabled = false;
     startHomeButton.disabled = false;
@@ -2519,7 +2550,8 @@ export function createRacingGame({
       freeDriveShowcaseChallenge = createFreeDriveTimeTrial({
         checkpoints: freeDriveShowcaseCheckpoints,
         gateRadius: FREE_DRIVE_SHOWCASE.gateRadius,
-        storageKey: `ack-games:racing:coastal-showcase:v1:${selectedCarId}`
+        storageKey: `ack-games:racing:coastal-showcase:v1:${selectedCarId}`,
+        autoStart: false
       });
     }
 
@@ -5903,6 +5935,12 @@ export function createRacingGame({
   }
 
   function updateControls() {
+    if (isShowcase && ["countdown", "settling", "result"].includes(showcaseEvent.phase)) {
+      state.throttle = 0;
+      state.brake = 0;
+      state.steering *= physicalDrivingConfig.steeringReleaseResponse;
+      return;
+    }
     if (provingGroundRunner.snapshot().status === "running") {
       const controls = provingGroundRunner.controls();
       state.throttle = controls.throttle;
@@ -6046,12 +6084,15 @@ export function createRacingGame({
       state.brake = controls.brake;
       state.steering = controls.steering;
     }
-    drivePhysicalVehicle(deltaSeconds);
+    const anchorShowcase = isShowcase && showcaseEvent.phase === "countdown";
+    if (anchorShowcase) anchorShowcaseStartPose();
+    else drivePhysicalVehicle(deltaSeconds);
 
     updateOpponent(deltaSeconds);
     updateFreeDriveTraffic(deltaSeconds);
     physics.world.step(physics.eventQueue);
     drainPhysicsEvents();
+    if (anchorShowcase) anchorShowcaseStartPose();
     syncPlayerPhysicsState(state.previousTrackIndex);
     syncPhysicalVehicleState();
     syncOpponentPhysicsState();
@@ -6297,6 +6338,10 @@ export function createRacingGame({
   }
 
   function updateFreeDriveChallenges(deltaSeconds) {
+    if (isShowcase) {
+      updateShowcaseEvent(deltaSeconds);
+      return;
+    }
     if (activeFreeDriveChallenge === "showcase") {
       const challenge = updateFreeDriveShowcaseChallenge(deltaSeconds);
       if (challenge?.phase === "finished") {
@@ -6325,6 +6370,87 @@ export function createRacingGame({
       activeFreeDriveChallenge = "rally";
       displayedFreeDriveChallenge = "rally";
     }
+  }
+
+  function startShowcaseCountdown() {
+    if (!isShowcase || !freeDriveShowcaseChallenge) return false;
+    freeDriveShowcaseChallenge.reset();
+    activeFreeDriveChallenge = "showcase";
+    displayedFreeDriveChallenge = "showcase";
+    showcaseEvent.phase = "countdown";
+    showcaseEvent.countdownSeconds = showcaseCountdownSeconds;
+    showcaseEvent.bannerSeconds = 0;
+    showcaseEvent.finishHoldSeconds = 0;
+    showcaseEvent.startX = state.position.x;
+    showcaseEvent.startZ = state.position.y;
+    showcaseEvent.startHeading = state.heading;
+    anchorShowcaseStartPose();
+    showEventBanner({ value: String(showcaseCountdownSeconds), detail: "ISLAND TOUR" });
+    return true;
+  }
+
+  function anchorShowcaseStartPose() {
+    if (!physics?.playerBody) return;
+    state.position.set(showcaseEvent.startX, showcaseEvent.startZ);
+    state.previousPosition.copy(state.position);
+    state.velocity.set(0, 0);
+    state.heading = showcaseEvent.startHeading;
+    state.throttle = 0;
+    state.brake = 0;
+    state.steering = 0;
+    setPlayerBodyPose(state.position, state.heading);
+  }
+
+  function updateShowcaseEvent(deltaSeconds) {
+    if (!freeDriveShowcaseChallenge) return;
+    if (showcaseEvent.phase === "countdown") {
+      showcaseEvent.countdownSeconds = Math.max(0, showcaseEvent.countdownSeconds - deltaSeconds);
+      if (showcaseEvent.countdownSeconds > 0) {
+        eventBannerValue.textContent = String(Math.ceil(showcaseEvent.countdownSeconds));
+        return;
+      }
+      freeDriveShowcaseChallenge.start({
+        x: state.position.x,
+        z: state.position.y,
+        heading: state.heading
+      });
+      showcaseEvent.phase = "running";
+      showcaseEvent.bannerSeconds = showcaseGoBannerSeconds;
+      showEventBanner({ value: "GO!", detail: "COAST · TUNNEL · RALLY", mode: "go" });
+      return;
+    }
+
+    if (showcaseEvent.phase === "running") {
+      if (showcaseEvent.bannerSeconds > 0) {
+        showcaseEvent.bannerSeconds = Math.max(0, showcaseEvent.bannerSeconds - deltaSeconds);
+        if (showcaseEvent.bannerSeconds === 0) hideEventBanner();
+      }
+      const challenge = updateFreeDriveShowcaseChallenge(deltaSeconds);
+      if (challenge?.phase !== "finished") return;
+      showcaseEvent.phase = "settling";
+      showcaseEvent.finishHoldSeconds = showcaseFinishHoldSeconds;
+      showEventBanner({ value: "FINISH", detail: formatTime(challenge.elapsedSeconds), mode: "finish" });
+      return;
+    }
+
+    if (showcaseEvent.phase === "settling") {
+      showcaseEvent.finishHoldSeconds = Math.max(0, showcaseEvent.finishHoldSeconds - deltaSeconds);
+      if (showcaseEvent.finishHoldSeconds === 0) showShowcaseResult();
+    }
+  }
+
+  function showEventBanner({ value, detail, mode = "countdown" }) {
+    eventBannerKicker.textContent = "COASTAL FESTIVAL";
+    eventBannerValue.textContent = value;
+    eventBannerDetail.textContent = detail;
+    eventBanner.classList.toggle("is-go", mode === "go");
+    eventBanner.classList.toggle("is-finish", mode === "finish");
+    eventBanner.hidden = false;
+  }
+
+  function hideEventBanner() {
+    eventBanner.hidden = true;
+    eventBanner.classList.remove("is-go", "is-finish");
   }
 
   function updateFreeDriveRallyGhost(challengeState) {
@@ -6921,7 +7047,11 @@ ${shader.vertexShader}`
     const rallyChallenge = freeDriveRallyChallenge?.getState();
     const showcaseChallenge = freeDriveShowcaseChallenge?.getState();
     const visibleChallenge = activeFreeDriveChallenge ?? displayedFreeDriveChallenge;
-    if (isFreeDrive && visibleChallenge === "showcase" && showcaseChallenge?.phase === "running") {
+    if (isShowcase && showcaseEvent.phase === "countdown") {
+      progressLabel.textContent = "ISLAND TOUR";
+      progressValue.textContent = "STARTING";
+      placeValue.textContent = `${Math.ceil(showcaseEvent.countdownSeconds)} · READY`;
+    } else if (isFreeDrive && visibleChallenge === "showcase" && showcaseChallenge?.phase === "running") {
       progressLabel.textContent = "ISLAND TOUR";
       progressValue.textContent = `${showcaseChallenge.elapsedSeconds.toFixed(2)} S`;
       placeValue.textContent = `GATE ${Math.min(showcaseChallenge.nextCheckpoint, showcaseChallenge.checkpointCount - 1)} / ${showcaseChallenge.checkpointCount - 1}`;
@@ -6993,6 +7123,7 @@ ${shader.vertexShader}`
 
   function resetRace() {
     hideResultOverlay();
+    hideEventBanner();
     pauseOverlay.hidden = true;
     collisionDebug.lastCollision = null;
     physicsAccumulator = 0;
@@ -7099,7 +7230,16 @@ ${shader.vertexShader}`
       }
     }
 
+    if (isShowcase) startShowcaseCountdown();
     updateHud();
+  }
+
+  function restartShowcaseEvent() {
+    if (!isShowcase) return false;
+    lockedResult = null;
+    sessionControls?.transition("running");
+    resetRace();
+    return true;
   }
 
   function revealSprintResult() {
@@ -7172,15 +7312,60 @@ ${shader.vertexShader}`
     void finishCinematic.start({ carConfig: selectedCar(), result: lockedResult });
   }
 
+  function showShowcaseResult() {
+    if (showcaseEvent.phase === "result") return;
+    const challenge = freeDriveShowcaseChallenge.getState();
+    showcaseEvent.phase = "result";
+    hideEventBanner();
+    raceState.finished = true;
+    raceState.resultVisible = true;
+    raceState.winner = "player";
+    resultCard.classList.add("is-win");
+    resultCard.classList.remove("is-loss");
+    lockedResult = createRacingResult({
+      snapshot: activeSnapshot,
+      winner: "player",
+      playerPlace: 1,
+      elapsedSeconds: challenge.elapsedSeconds,
+      details: {
+        mode: "coastal-showcase",
+        checkpointCount: challenge.checkpointCount,
+        newBest: challenge.newBest,
+        bestTimeSeconds: challenge.bestTimeSeconds
+      }
+    });
+    sessionControls?.transition("cinematic", { result: lockedResult });
+    resultTag.textContent = challenge.newBest ? "NEW FESTIVAL RECORD" : "FESTIVAL SHOWCASE";
+    resultTitle.textContent = "ISLAND TOUR 完赛";
+    finishPlaceNumber.textContent = "1";
+    finishPlaceSuffix.textContent = "ST";
+    finishTrack.textContent = `${mapData.name} · ISLAND TOUR`;
+    resultSummary.textContent = challenge.newBest
+      ? "海岸公路、隧道和拉力赛段全部完成，新的最快纪录已经保存。"
+      : "海岸公路、隧道和拉力赛段全部完成。再跑一次，挑战你的最佳成绩。";
+    resultPlayerLabel.textContent = "本次成绩";
+    resultPlayerValue.textContent = formatTime(challenge.elapsedSeconds);
+    resultOpponentLabel.textContent = "个人最佳";
+    resultOpponentValue.textContent = formatTime(challenge.bestTimeSeconds);
+    playAgainButton.textContent = "再次挑战";
+    hudOverlay.hidden = true;
+    resultOverlay.hidden = false;
+    void finishCinematic.start({ carConfig: selectedCar(), result: lockedResult });
+  }
+
   function hideResultOverlay() {
     finishCinematic.stop();
     resultOverlay.hidden = true;
     hudOverlay.hidden = false;
     resultCard.classList.remove("is-win", "is-loss");
+    playAgainButton.textContent = "再跑一场";
     raceState.resultVisible = false;
   }
 
   function activateBoost() {
+    if (isShowcase && showcaseEvent.phase !== "running") {
+      return false;
+    }
     if (raceState.finished || state.stoppedByImpactSeconds > 0) {
       return false;
     }
@@ -7660,6 +7845,17 @@ ${shader.vertexShader}`
     updateHud();
     renderer.render(scene, camera);
     return freeDriveRallyChallenge.getState().phase === "finished";
+  }
+
+  function completeShowcaseEventScenario() {
+    if (!isShowcase || showcaseEvent.phase !== "running" || freeDriveShowcaseCheckpoints.length < 2) return false;
+    for (const checkpoint of freeDriveShowcaseCheckpoints.slice(1)) {
+      placeWorldScenario(checkpoint.x, checkpoint.z, checkpoint.heading);
+      updateShowcaseEvent(1.25);
+    }
+    updateHud();
+    renderer.render(scene, camera);
+    return showcaseEvent.phase === "settling";
   }
 
   function placeTrackScenario(requestedProgress = 0) {

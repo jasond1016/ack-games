@@ -1732,6 +1732,82 @@ h1 {
   pointer-events: none;
 }
 
+.race-event-banner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 3;
+  min-width: min(76vw, 430px);
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  padding: 18px 34px 20px;
+  overflow: hidden;
+  border-top: 1px solid rgba(255, 218, 91, 0.72);
+  border-bottom: 1px solid rgba(255, 218, 91, 0.5);
+  background:
+    linear-gradient(90deg, transparent, rgba(4, 12, 18, 0.9) 16%, rgba(4, 12, 18, 0.9) 84%, transparent),
+    repeating-linear-gradient(115deg, transparent 0 22px, rgba(255, 214, 74, 0.05) 22px 24px);
+  color: #fff9e7;
+  text-align: center;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.72);
+  pointer-events: none;
+  transform: translate(-50%, -50%) skewX(-4deg);
+  animation: race-event-banner-in 260ms cubic-bezier(.2, .8, .2, 1) both;
+}
+
+.race-event-banner::before {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 25%, rgba(255, 226, 116, 0.16), transparent 66%);
+  content: "";
+  transform: translateX(-100%);
+  animation: race-event-banner-sweep 900ms ease-out both;
+}
+
+.race-event-banner-kicker,
+.race-event-banner-detail {
+  position: relative;
+  font-weight: 900;
+  letter-spacing: 0.24em;
+  transform: skewX(4deg);
+}
+
+.race-event-banner-kicker {
+  color: #ffda59;
+  font-size: 11px;
+}
+
+.race-event-banner-value {
+  position: relative;
+  font-family: Impact, Haettenschweiler, sans-serif;
+  font-size: clamp(68px, 14vw, 116px);
+  font-style: italic;
+  line-height: 0.88;
+  letter-spacing: -0.08em;
+  transform: skewX(4deg);
+}
+
+.race-event-banner-detail {
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 12px;
+}
+
+.race-event-banner.is-go .race-event-banner-value,
+.race-event-banner.is-finish .race-event-banner-value {
+  color: #ffda59;
+  letter-spacing: -0.04em;
+}
+
+@keyframes race-event-banner-in {
+  from { opacity: 0; transform: translate(-50%, -42%) skewX(-4deg) scale(.92); }
+  to { opacity: 1; transform: translate(-50%, -50%) skewX(-4deg) scale(1); }
+}
+
+@keyframes race-event-banner-sweep {
+  to { transform: translateX(100%); }
+}
+
 .race-hud-panel {
   position: absolute;
   min-width: 118px;
