@@ -1,3 +1,5 @@
+import { createRacingMapLibraryCore } from "./racing-map-library-core.mjs";
+import { COASTAL_CHALLENGE_PRESET_MAPS } from "./racing-coastal-challenges.mjs";
 import {
   TRACK_MAX_WIDTH,
   TRACK_MIN_WIDTH,
@@ -8,7 +10,6 @@ import {
   inspectRacingTrack,
   normalizeLoopStartProgress,
 } from "./racing-track.mjs";
-import { createRacingMapLibraryCore } from "./racing-map-library-core.mjs";
 
 const USER_MAPS_STORAGE_KEY = "ack-games:racing-map-library:v1";
 const SELECTED_MAP_ID_STORAGE_KEY = "ack-games:racing-selected-map-id:v1";
@@ -165,7 +166,8 @@ const presetMaps = [
         ]
       }
     }
-  }
+  },
+  ...COASTAL_CHALLENGE_PRESET_MAPS
 ].map((entry) => ({
   ...entry,
   map: normalizeRacingMap(entry.map)
