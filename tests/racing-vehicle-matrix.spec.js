@@ -81,6 +81,11 @@ test("builds a real-Rapier vehicle dynamics comparison matrix", async ({ page },
 });
 
 async function startProvingGround(page, carId) {
+  await page.addInitScript(() => {
+    localStorage.setItem("ack-games:racing-challenge-unlocks:v1", JSON.stringify({
+      unlockedCarIds: ["bolide", "veneno", "centodieci", "dbr9"]
+    }));
+  });
   await page.goto("/?quality=low");
   await page.locator("#racingGameCard").click();
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
@@ -93,6 +98,11 @@ async function startProvingGround(page, carId) {
 }
 
 async function startShowcase(page, carId) {
+  await page.addInitScript(() => {
+    localStorage.setItem("ack-games:racing-challenge-unlocks:v1", JSON.stringify({
+      unlockedCarIds: ["bolide", "veneno", "centodieci", "dbr9"]
+    }));
+  });
   await page.goto("/?quality=low");
   await page.locator("#racingGameCard").click();
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });

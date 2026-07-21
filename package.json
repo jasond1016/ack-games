@@ -17,6 +17,7 @@
     "test:e2e:perf": "playwright test tests/racing-performance.spec.js",
     "test:e2e:proving": "playwright test tests/racing-proving-ground.spec.js",
     "test:e2e:matrix": "node ./scripts/run-racing-vehicle-matrix.mjs",
+    "test:e2e:surface-matrix": "node ./scripts/run-racing-surface-matrix.mjs",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:debug": "playwright test --debug",
     "setup:e2e": "playwright install chromium"

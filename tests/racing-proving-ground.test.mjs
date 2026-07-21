@@ -117,6 +117,15 @@ test("fixed-steer protocol measures loss of curvature gain as speed settles", ()
   assert.equal(result.steadyRadiusMeters, 150);
 });
 
+test("gravel contact still counts toward proving roadContactRatio", () => {
+  const runner = createProvingGroundTestRunner();
+  runner.start("zero-to-100", { x: 0, z: 0, speedKmh: 0 });
+  runner.update({ x: 20, z: 0, speedKmh: 60, surfaceId: "gravel" }, 2);
+  const result = runner.update({ x: 55, z: 0, speedKmh: 101, surfaceId: "gravel" }, 2);
+  assert.equal(result.zeroTo100Seconds, 4);
+  assert.equal(result.roadContactRatio, 1);
+});
+
 test("unknown proving-ground protocols are rejected", () => {
   assert.equal(createProvingGroundTestRunner().start("unknown"), false);
 });

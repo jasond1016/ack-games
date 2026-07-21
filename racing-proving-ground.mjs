@@ -1,3 +1,5 @@
+import { isProvingTrackContactSurface } from "./racing-physical-surfaces.mjs";
+
 const TARGET_SPEED_KMH = 100;
 const HIGH_SPEED_TARGET_KMH = 200;
 const STOP_SPEED_KMH = 1;
@@ -84,7 +86,7 @@ export function createProvingGroundTestRunner() {
     run.maximumTireSlip = Math.max(run.maximumTireSlip, Math.max(0, finiteOr(observation.maximumTireSlip, 0)));
     run.absActiveSeconds += observation.absActive ? delta : 0;
     run.tractionControlActiveSeconds += observation.tractionControlActive ? delta : 0;
-    run.roadContactSeconds += observation.surfaceId === "road" ? delta : 0;
+    run.roadContactSeconds += isProvingTrackContactSurface(observation.surfaceId) ? delta : 0;
     run.sampledSeconds += delta;
     run.latestShiftCount = Math.max(run.latestShiftCount, finiteOr(observation.shiftCount, run.latestShiftCount));
     if (run.testId === "zero-to-100" || run.testId === "zero-to-200") {

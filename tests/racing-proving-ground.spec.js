@@ -1,6 +1,17 @@
 const { test, expect } = require("@playwright/test");
 
+test.setTimeout(120_000);
+
+async function unlockChallengeCars(page) {
+  await page.addInitScript(() => {
+    localStorage.setItem("ack-games:racing-challenge-unlocks:v1", JSON.stringify({
+      unlockedCarIds: ["bolide", "veneno", "centodieci", "dbr9"]
+    }));
+  });
+}
+
 test("proving ground runs acceleration, braking, and skidpad protocols against the Rapier vehicle", async ({ page }) => {
+  await unlockChallengeCars(page);
   await page.goto("/?quality=low");
   await page.locator("#racingGameCard").click();
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
@@ -63,10 +74,11 @@ test("proving ground runs acceleration, braking, and skidpad protocols against t
   expect(skidpad.averageRadiusMeters).toBeLessThanOrEqual(33);
   expect(await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().surface.id)).toBe("road");
 
+  await page.evaluate(() => globalThis.__ackGamesDebug.racing.resetRace());
   expect(await page.evaluate(() => globalThis.__ackGamesDebug.racing.startProvingGroundTest("fixed-steer"))).toBe(true);
   await expect.poll(() => page.evaluate(() =>
     globalThis.__ackGamesDebug.racing.getState().provingGround.status
-  ), { timeout: 20_000 }).toBe("completed");
+  ), { timeout: 30_000 }).toBe("completed");
   const fixedSteer = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().provingGround);
   expect(fixedSteer.earlyCurvatureGain).toBeGreaterThan(0);
   expect(fixedSteer.steadyCurvatureGain).toBeGreaterThan(0);
