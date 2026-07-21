@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PROTOTYPE v2 — Racing pre-start UI</title>
+  <!--
+    Question (rev): Pre-start UI for limited-literacy players that is NOT kiddy —
+    visual-heavy, light text, mouse/keyboard/Xbox; loosely Motorfest-inspired (festival / coastal / premium car fantasy), not a clone.
+    Throwaway. ?variant=A|B|C
+  -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@500;700&family=Syne:wght@700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --pad: clamp(14px, 2.4vw, 32px);
+      --focus: #ffc43a;
+      --ink: #0c1016;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      font-family: "DM Sans", system-ui, sans-serif;
+      background: #07090d;
+      color: #f4f1ea;
+      overflow: hidden;
+      user-select: none;
+    }
+    button { font: inherit; cursor: pointer; color: inherit; }
+    .screen { position: fixed; inset: 0; display: none; }
+    .screen.is-active { display: grid; }
+    .proto-note {
+      position: fixed; top: 10px; left: 50%; translate: -50% 0; z-index: 40;
+      padding: 6px 12px; border-radius: 999px; background: #000c; color: #ffd;
+      font-size: 11px; letter-spacing: 0.04em; pointer-events: none;
+    }
+    .proto-switcher {
+      position: fixed; z-index: 50; bottom: 14px; left: 50%; translate: -50%;
+      display: flex; align-items: center; gap: 12px; padding: 7px 9px;
+      border-radius: 999px; background: #090807e8; color: white;
+      box-shadow: 0 8px 30px #0007;
+    }
+    .proto-switcher button {
+      width: 34px; height: 34px; border: 0; border-radius: 50%;
+      background: #f5c84b; color: #211; font-size: 20px;
+    }
+    .proto-switcher strong { min-width: 200px; text-align: center; font-size: 12px; }
+    .glyph {
+      display: inline-grid; place-items: center; min-width: 1.35em; height: 1.35em;
+      padding: 0 0.28em; border-radius: 0.3em; background: #f4f1ea; color: #111;
+      font-weight: 800; font-size: 0.78em; line-height: 1;
+    }
+    .glyph.a { background: #3ddc84; }
+    .glyph.b { background: #e23b3b; color: #fff; }
+    .hint-bar {
+      display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center;
+      justify-content: center; font-size: 12px; opacity: 0.85; font-weight: 700;
+    }
+    .hint-bar span { display: inline-flex; align-items: center; gap: 6px; }
+
+    /* shared car silhouette */
+    .car-sil {
+      width: min(72%, 520px); aspect-ratio: 16 / 7;
+      background:
+        linear-gradient(110deg, transparent 0 8%, #1118 8% 12%, transparent 12%),
+        linear-gradient(180deg, #dfe7ef 0%, #8a96a4 38%, #2a323c 72%, #12161c 100%);
+      clip-path: polygon(6% 62%, 14% 38%, 28% 28%, 48% 22%, 70% 28%, 84% 42%, 94% 58%, 96% 72%, 88% 78%, 78% 70%, 22% 70%, 12% 78%, 4% 72%);
+      filter: drop-shadow(0 28px 40px #000a);
+      position: relative;
+    }
+    .car-sil::after {
+      content: ""; position: absolute; inset: 42% 18% 28% 22%;
+      background: linear-gradient(180deg, #6ec8ff88, #1a3a5088);
+      clip-path: polygon(0 40%, 20% 0, 80% 0, 100% 40%, 100% 100%, 0 100%);
+    }
+
+    /* ===== A Festival Billboard ===== */
+    #variantA {
+      grid-template-rows: 1fr auto;
+      font-family: "Syne", "DM Sans", sans-serif;
+      background:
+        radial-gradient(ellipse 90% 60% at 70% 20%, #ff6b2c55 0%, transparent 55%),
+        radial-gradient(ellipse 70% 50% at 15% 80%, #1a6bff44 0%, transparent 50%),
+        linear-gradient(160deg, #1a0e18 0%, #0c1830 45%, #061018 100%);
+    }
+    #variantA .billboard {
+      position: relative; display: grid; place-items: center;
+      padding: calc(var(--pad) + 24px) var(--pad) var(--pad);
+      min-height: 0;
+    }
+    #variantA .skyline {
+      position: absolute; inset: 0;
+      background:
+        linear-gradient(180deg, transparent 55%, #061018ee 100%),
+        repeating-linear-gradient(90deg, transparent 0 40px, #ffffff06 40px 41px);
+      opacity: 0.7; pointer-events: none;
+    }
+    #variantA .plate {
+      position: relative; width: min(960px, 100%);
+      border: 1px solid #ffffff22;
+      background: linear-gradient(145deg, #ffffff12, #ffffff05);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 30px 80px #0008;
+      display: grid; grid-template-rows: auto 1fr auto;
+      overflow: hidden;
+    }
+    #variantA .plate-top {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 14px 18px; border-bottom: 1px solid #ffffff18;
+      font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
+      color: #ffc43a; font-weight: 800;
+    }
+    #variantA .plate-stage {
+      min-height: 240px; display: grid; place-items: center;
+      padding: 28px 20px 10px;
+      background:
+        radial-gradient(ellipse at 50% 80%, #ff6b2c33, transparent 55%),
+        linear-gradient(180deg, #122038 0%, #0a1424 100%);
+    }
+    #variantA .plate-name {
+      font-family: "Bebas Neue", sans-serif;
+      font-size: clamp(42px, 8vw, 72px); letter-spacing: 0.06em;
+      text-align: center; line-height: 0.95; padding: 8px 16px 18px;
+      text-shadow: 0 6px 30px #000a;
+    }
+    #variantA .dock {
+      display: grid; grid-template-columns: auto 1fr auto;
+      gap: 12px; align-items: center;
+      padding: 14px var(--pad) 70px;
+      background: #05070ccc; border-top: 1px solid #ffffff14;
+    }
+    #variantA .dock-nav {
+      display: flex; gap: 8px;
+    }
+    #variantA .dock-nav button, #variantA .dock-go {
+      height: 48px; border: 0; border-radius: 4px; font-weight: 800;
+    }
+    #variantA .dock-nav button {
+      width: 48px; background: #ffffff14; font-size: 22px;
+    }
+    #variantA .dock-nav button:focus-visible,
+    #variantA .step-chip:focus-visible,
+    #variantA .dock-go:focus-visible {
+      outline: 2px solid var(--focus); outline-offset: 2px;
+    }
+    #variantA .steps {
+      display: flex; justify-content: center; gap: 8px; flex-wrap: wrap;
+    }
+    #variantA .step-chip {
+      height: 48px; min-width: 72px; padding: 0 14px; border: 1px solid #ffffff28;
+      border-radius: 4px; background: #ffffff0d;
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 800;
+    }
+    #variantA .step-chip.is-active {
+      background: #ffc43a; color: #1a1200; border-color: #ffc43a;
+    }
+    #variantA .step-chip .ico {
+      width: 18px; height: 18px; border-radius: 2px; background: currentColor; opacity: 0.85;
+      mask-size: contain; mask-repeat: no-repeat; mask-position: center;
+    }
+    #variantA .dock-go {
+      min-width: 120px; padding: 0 18px; background: #3ddc84; color: #042;
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      letter-spacing: 0.14em;
+    }
+
+    /* ===== B Horizon Strip ===== */
+    #variantB {
+      grid-template-rows: 1fr auto;
+      font-family: "Bebas Neue", "DM Sans", sans-serif;
+      background:
+        linear-gradient(180deg, #4a90c2 0%, #f0b27a 42%, #c45c26 70%, #1a100c 70%, #0c0a0a 100%);
+    }
+    #variantB .horizon {
+      position: relative; display: grid; align-content: end;
+      padding: var(--pad); min-height: 0;
+    }
+    #variantB .horizon-car {
+      justify-self: center; margin-bottom: 8vh;
+      filter: drop-shadow(0 20px 30px #0007);
+    }
+    #variantB .horizon-title {
+      position: absolute; left: var(--pad); top: calc(var(--pad) + 20px);
+      font-size: clamp(48px, 10vw, 96px); line-height: 0.85; letter-spacing: 0.04em;
+      color: #fff8; mix-blend-mode: soft-light;
+    }
+    #variantB .strip {
+      display: grid; grid-template-columns: auto 1fr auto;
+      gap: 10px; align-items: stretch;
+      padding: 12px var(--pad) 70px;
+      background: #0a0808f0; border-top: 3px solid #ffc43a;
+    }
+    #variantB .strip-rail {
+      display: flex; gap: 8px; overflow-x: auto; padding: 4px 0;
+      scroll-snap-type: x mandatory;
+    }
+    #variantB .strip-card {
+      flex: 0 0 auto; width: 120px; height: 88px; border: 2px solid #ffffff22;
+      border-radius: 2px; background: #1a1614; scroll-snap-align: center;
+      display: grid; align-content: end; padding: 8px;
+      font-size: 18px; letter-spacing: 0.06em; position: relative;
+    }
+    #variantB .strip-card .swatch {
+      position: absolute; inset: 0; opacity: 0.55;
+    }
+    #variantB .strip-card.is-focused {
+      border-color: var(--focus);
+      box-shadow: 0 0 0 2px #ffc43a55;
+    }
+    #variantB .strip-card span { position: relative; z-index: 1; }
+    #variantB .strip-side {
+      display: flex; flex-direction: column; gap: 8px; justify-content: center;
+    }
+    #variantB .strip-side button {
+      width: 44px; height: 44px; border: 0; background: #ffffff18; font-size: 20px;
+    }
+    #variantB .go-wide {
+      height: 100%; min-width: 88px; border: 0; background: #3ddc84; color: #042;
+      font-size: 28px; letter-spacing: 0.08em;
+      display: grid; place-items: center;
+    }
+    #variantB .go-wide.is-focused { outline: 3px solid var(--focus); outline-offset: 2px; }
+    #variantB .cats {
+      position: absolute; right: var(--pad); top: calc(var(--pad) + 20px);
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    #variantB .cat {
+      width: 44px; height: 44px; border: 1px solid #ffffff55; background: #0006;
+      font-family: "DM Sans", sans-serif; font-size: 10px; font-weight: 800;
+      letter-spacing: 0.08em;
+    }
+    #variantB .cat.is-active { background: #ffc43a; color: #1a1200; border-color: #ffc43a; }
+
+    /* ===== C Gallery Wall ===== */
+    #variantC {
+      grid-template-columns: 1.2fr 0.8fr;
+      font-family: "DM Sans", sans-serif;
+      background: #10131a;
+    }
+    #variantC .gallery {
+      position: relative; display: grid; place-items: center;
+      background:
+        radial-gradient(ellipse at 40% 30%, #2a3548 0%, transparent 55%),
+        linear-gradient(180deg, #161b24, #0c0f14);
+      border-right: 1px solid #ffffff12;
+      padding: var(--pad);
+    }
+    #variantC .gallery-frame {
+      width: min(100%, 640px);
+      border: 1px solid #ffffff18;
+      background: #0a0c10;
+      box-shadow: 0 40px 80px #000a;
+      padding: 20px;
+      display: grid; gap: 16px;
+    }
+    #variantC .gallery-stage {
+      aspect-ratio: 16 / 9; display: grid; place-items: center;
+      background:
+        linear-gradient(180deg, transparent 60%, #000a),
+        repeating-conic-gradient(from 0deg at 50% 100%, #1a2030 0 10deg, #121722 0 20deg);
+      overflow: hidden;
+    }
+    #variantC .gallery-meta {
+      display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+    }
+    #variantC .gallery-meta strong {
+      font-family: "Syne", sans-serif; font-size: clamp(22px, 3.5vw, 34px); font-weight: 800;
+    }
+    #variantC .gallery-meta span {
+      font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #9aa3b2;
+    }
+    #variantC .side {
+      display: grid; grid-template-rows: auto 1fr auto; gap: 14px;
+      padding: var(--pad); padding-bottom: 70px; min-width: 0;
+      background: #0a0c10;
+    }
+    #variantC .side h2 {
+      margin: 0; font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase;
+      color: #8b93a3; font-weight: 800;
+    }
+    #variantC .thumbs {
+      display: grid; gap: 10px; align-content: start; overflow: auto;
+    }
+    #variantC .thumb {
+      display: grid; grid-template-columns: 72px 1fr; gap: 12px; align-items: center;
+      text-align: left; border: 1px solid #ffffff14; background: #141821;
+      padding: 8px; min-height: 64px;
+    }
+    #variantC .thumb.is-focused {
+      border-color: var(--focus);
+      box-shadow: inset 3px 0 0 var(--focus);
+    }
+    #variantC .thumb .mark {
+      height: 48px; background: linear-gradient(135deg, #445, #223);
+    }
+    #variantC .thumb .mark.map { background: linear-gradient(135deg, #2a6a8a, #0e3040); }
+    #variantC .thumb .mark.mode { background: linear-gradient(135deg, #8a5a2a, #3a2010); }
+    #variantC .thumb .label {
+      font-family: "Syne", sans-serif; font-weight: 800; font-size: 15px;
+    }
+    #variantC .side-actions {
+      display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px;
+    }
+    #variantC .side-actions button {
+      height: 48px; border: 1px solid #ffffff22; background: #ffffff10; font-weight: 800;
+    }
+    #variantC .side-actions .go {
+      background: #3ddc84; color: #042; border-color: #3ddc84; min-width: 88px;
+      letter-spacing: 0.12em;
+    }
+    #variantC .tabs {
+      display: flex; gap: 6px; margin-bottom: 4px;
+    }
+    #variantC .tab {
+      flex: 1; height: 36px; border: 1px solid #ffffff18; background: transparent;
+      font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 800;
+    }
+    #variantC .tab.is-active { background: #ffffff14; border-color: #ffc43a; color: #ffc43a; }
+
+    @media (max-width: 800px) {
+      #variantC { grid-template-columns: 1fr; }
+      #variantC .gallery { min-height: 40vh; border-right: 0; border-bottom: 1px solid #ffffff12; }
+    }
+  </style>
+</head>
+<body>
+  <div class="proto-note">PROTOTYPE v2 · 开赛前 UI · 非低幼 · Motorfest 气质参考</div>
+
+  <!-- A Festival Billboard -->
+  <section id="variantA" class="screen" data-name="Festival Billboard" aria-label="方案 A 节日广告牌">
+    <div class="billboard">
+      <div class="skyline" aria-hidden="true"></div>
+      <div class="plate">
+        <div class="plate-top"><span id="aStepTag">VEHICLE</span><span>SHOWCASE</span></div>
+        <div class="plate-stage"><div class="car-sil" id="aArt" aria-hidden="true"></div></div>
+        <div class="plate-name" id="aName">MIURA</div>
+      </div>
+    </div>
+    <div class="dock">
+      <div class="dock-nav">
+        <button type="button" data-dir="-1" aria-label="上一个">‹</button>
+        <button type="button" data-dir="1" aria-label="下一个">›</button>
+      </div>
+      <div class="steps" role="tablist">
+        <button class="step-chip is-active" type="button" data-step="car">CAR</button>
+        <button class="step-chip" type="button" data-step="map">MAP</button>
+        <button class="step-chip" type="button" data-step="mode">RUN</button>
+      </div>
+      <button class="dock-go" type="button" id="aGo"><span class="glyph a">A</span> GO</button>
+    </div>
+  </section>
+
+  <!-- B Horizon Strip -->
+  <section id="variantB" class="screen" data-name="Horizon Strip" aria-label="方案 B 地平线胶片条">
+    <div class="horizon">
+      <div class="horizon-title" id="bBig">MIURA</div>
+      <div class="cats" role="tablist">
+        <button class="cat is-active" type="button" data-step="car">CAR</button>
+        <button class="cat" type="button" data-step="map">MAP</button>
+        <button class="cat" type="button" data-step="mode">RUN</button>
+      </div>
+      <div class="car-sil horizon-car" aria-hidden="true"></div>
+    </div>
+    <div class="strip">
+      <div class="strip-side">
+        <button type="button" data-dir="-1" aria-label="上一个">‹</button>
+        <button type="button" data-dir="1" aria-label="下一个">›</button>
+      </div>
+      <div class="strip-rail" id="bRail" aria-label="选项胶片"></div>
+      <button class="go-wide" type="button" id="bGo">GO</button>
+    </div>
+  </section>
+
+  <!-- C Gallery Wall -->
+  <section id="variantC" class="screen" data-name="Gallery Wall" aria-label="方案 C 展厅墙">
+    <div class="gallery">
+      <div class="gallery-frame">
+        <div class="gallery-stage"><div class="car-sil" aria-hidden="true"></div></div>
+        <div class="gallery-meta">
+          <strong id="cName">Miura</strong>
+          <span id="cTag">VEHICLE</span>
+        </div>
+      </div>
+    </div>
+    <aside class="side">
+      <div>
+        <h2>Select</h2>
+        <div class="tabs" role="tablist">
+          <button class="tab is-active" type="button" data-step="car">Car</button>
+          <button class="tab" type="button" data-step="map">Map</button>
+          <button class="tab" type="button" data-step="mode">Run</button>
+        </div>
+      </div>
+      <div class="thumbs" id="cThumbs"></div>
+      <div class="side-actions">
+        <button type="button" data-dir="-1" aria-label="上一个">‹</button>
+        <button type="button" data-dir="1" aria-label="下一个">›</button>
+        <button class="go" type="button" id="cGo"><span class="glyph a">A</span></button>
+      </div>
+    </aside>
+  </section>
+
+  <div class="proto-switcher" aria-label="原型版本切换">
+    <button type="button" id="protoPrev" aria-label="上一方案">‹</button>
+    <strong id="protoLabel">A — Festival Billboard</strong>
+    <button type="button" id="protoNext" aria-label="下一方案">›</button>
+  </div>
+
+  <script>
+    const CARS = [
+      { id: "miura", name: "MIURA", short: "Miura", tone: "#c45c26" },
+      { id: "veneno", name: "VENENO", short: "Veneno", tone: "#6ec8ff" },
+      { id: "urus", name: "URUS", short: "Urus", tone: "#b8a06a" }
+    ];
+    const MAPS = [
+      { id: "coastal", name: "COASTAL", short: "Coastal", tone: "#2a8aaa" },
+      { id: "f1", name: "CIRCUIT", short: "Circuit", tone: "#4a6a4a" },
+      { id: "island", name: "ISLAND", short: "Island", tone: "#8a6a2a" }
+    ];
+    const MODES = [
+      { id: "tour", name: "TOUR", short: "Tour", tone: "#ff6b2c" },
+      { id: "cruise", name: "CRUISE", short: "Cruise", tone: "#3ddc84" }
+    ];
+
+    const state = {
+      variant: "A",
+      step: "car",
+      carIndex: 0,
+      mapIndex: 0,
+      modeIndex: 0,
+      bFocusGo: false
+    };
+
+    const VARIANTS = ["A", "B", "C"];
+    const NAMES = {
+      A: "Festival Billboard",
+      B: "Horizon Strip",
+      C: "Gallery Wall"
+    };
+    const STEPS = ["car", "map", "mode"];
+    const STEP_TAG = { car: "VEHICLE", map: "LOCATION", mode: "SESSION" };
+
+    function listFor(step = state.step) {
+      if (step === "map") return MAPS;
+      if (step === "mode") return MODES;
+      return CARS;
+    }
+    function indexKey(step = state.step) {
+      if (step === "map") return "mapIndex";
+      if (step === "mode") return "modeIndex";
+      return "carIndex";
+    }
+    function currentItem() {
+      return listFor()[state[indexKey()]];
+    }
+
+    function readVariant() {
+      const key = new URLSearchParams(location.search).get("variant")?.toUpperCase();
+      return VARIANTS.includes(key) ? key : "A";
+    }
+
+    function setVariant(next, { push = true } = {}) {
+      state.variant = next;
+      document.querySelectorAll(".screen").forEach((el) => {
+        el.classList.toggle("is-active", el.id === `variant${next}`);
+      });
+      document.getElementById("protoLabel").textContent = `${next} — ${NAMES[next]}`;
+      if (push) {
+        const url = new URL(location.href);
+        url.searchParams.set("variant", next);
+        history.replaceState(null, "", url);
+      }
+      render();
+      console.log("[prototype v2 state]", structuredClone(state));
+    }
+
+    function cycleVariant(delta) {
+      const i = VARIANTS.indexOf(state.variant);
+      setVariant(VARIANTS[(i + delta + VARIANTS.length) % VARIANTS.length]);
+    }
+
+    function nudge(delta) {
+      const key = indexKey();
+      const list = listFor();
+      state[key] = (state[key] + delta + list.length) % list.length;
+      render();
+      console.log("[prototype v2 state]", structuredClone(state));
+    }
+
+    function setStep(step) {
+      state.step = step;
+      state.bFocusGo = false;
+      render();
+      console.log("[prototype v2 state]", structuredClone(state));
+    }
+
+    function flashGo() {
+      document.getElementById(`variant${state.variant}`).animate(
+        [{ filter: "brightness(1)" }, { filter: "brightness(1.25)" }, { filter: "brightness(1)" }],
+        { duration: 260 }
+      );
+      console.log("[prototype v2 GO]", {
+        car: CARS[state.carIndex],
+        map: MAPS[state.mapIndex],
+        mode: MODES[state.modeIndex],
+        variant: state.variant
+      });
+    }
+
+    function paintCarTone(el, tone) {
+      if (!el) return;
+      el.style.background = `
+        linear-gradient(110deg, transparent 0 8%, #1116 8% 12%, transparent 12%),
+        linear-gradient(180deg, ${tone}cc 0%, ${tone} 40%, #1a1e24 78%, #0a0c10 100%)`;
+    }
+
+    function renderA() {
+      const item = currentItem();
+      document.getElementById("aStepTag").textContent = STEP_TAG[state.step];
+      document.getElementById("aName").textContent = item.name;
+      paintCarTone(document.querySelector("#variantA .car-sil"), item.tone);
+      document.querySelectorAll("#variantA .step-chip").forEach((btn) => {
+        btn.classList.toggle("is-active", btn.dataset.step === state.step);
+      });
+    }
+
+    function renderB() {
+      const item = currentItem();
+      document.getElementById("bBig").textContent = item.name;
+      paintCarTone(document.querySelector("#variantB .car-sil"), item.tone);
+      document.querySelectorAll("#variantB .cat").forEach((btn) => {
+        btn.classList.toggle("is-active", btn.dataset.step === state.step);
+      });
+      const rail = document.getElementById("bRail");
+      const list = listFor();
+      const idx = state[indexKey()];
+      rail.innerHTML = list.map((entry, i) => `
+        <button class="strip-card ${i === idx && !state.bFocusGo ? "is-focused" : ""}" type="button" data-index="${i}">
+          <div class="swatch" style="background:linear-gradient(135deg,${entry.tone},${entry.tone}44)"></div>
+          <span>${entry.short}</span>
+        </button>
+      `).join("");
+      rail.querySelectorAll(".strip-card").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          state[indexKey()] = Number(btn.dataset.index);
+          state.bFocusGo = false;
+          render();
+        });
+      });
+      document.getElementById("bGo").classList.toggle("is-focused", state.bFocusGo);
+    }
+
+    function renderC() {
+      const item = currentItem();
+      document.getElementById("cName").textContent = item.short;
+      document.getElementById("cTag").textContent = STEP_TAG[state.step];
+      paintCarTone(document.querySelector("#variantC .car-sil"), item.tone);
+      document.querySelectorAll("#variantC .tab").forEach((btn) => {
+        btn.classList.toggle("is-active", btn.dataset.step === state.step);
+      });
+      const list = listFor();
+      const idx = state[indexKey()];
+      const kind = state.step === "map" ? "map" : state.step === "mode" ? "mode" : "";
+      const thumbs = document.getElementById("cThumbs");
+      thumbs.innerHTML = list.map((entry, i) => `
+        <button class="thumb ${i === idx ? "is-focused" : ""}" type="button" data-index="${i}">
+          <div class="mark ${kind}" style="background:linear-gradient(135deg,${entry.tone},${entry.tone}66)"></div>
+          <div class="label">${entry.short}</div>
+        </button>
+      `).join("");
+      thumbs.querySelectorAll(".thumb").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          state[indexKey()] = Number(btn.dataset.index);
+          render();
+        });
+      });
+    }
+
+    function render() {
+      if (state.variant === "A") renderA();
+      if (state.variant === "B") renderB();
+      if (state.variant === "C") renderC();
+    }
+
+    document.querySelectorAll("#variantA .step-chip").forEach((btn) => {
+      btn.addEventListener("click", () => setStep(btn.dataset.step));
+    });
+    document.querySelectorAll("#variantA [data-dir]").forEach((btn) => {
+      btn.addEventListener("click", () => nudge(Number(btn.dataset.dir)));
+    });
+    document.getElementById("aGo").addEventListener("click", flashGo);
+
+    document.querySelectorAll("#variantB .cat").forEach((btn) => {
+      btn.addEventListener("click", () => setStep(btn.dataset.step));
+    });
+    document.querySelectorAll("#variantB [data-dir]").forEach((btn) => {
+      btn.addEventListener("click", () => nudge(Number(btn.dataset.dir)));
+    });
+    document.getElementById("bGo").addEventListener("click", () => {
+      state.bFocusGo = true;
+      flashGo();
+      renderB();
+    });
+
+    document.querySelectorAll("#variantC .tab").forEach((btn) => {
+      btn.addEventListener("click", () => setStep(btn.dataset.step));
+    });
+    document.querySelectorAll("#variantC [data-dir]").forEach((btn) => {
+      btn.addEventListener("click", () => nudge(Number(btn.dataset.dir)));
+    });
+    document.getElementById("cGo").addEventListener("click", flashGo);
+
+    document.getElementById("protoPrev").addEventListener("click", () => cycleVariant(-1));
+    document.getElementById("protoNext").addEventListener("click", () => cycleVariant(1));
+
+    window.addEventListener("keydown", (event) => {
+      const tag = event.target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || event.target?.isContentEditable) return;
+      if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        cycleVariant(event.key === "ArrowLeft" ? -1 : 1);
+        return;
+      }
+      if (event.key === "ArrowLeft") { event.preventDefault(); nudge(-1); }
+      if (event.key === "ArrowRight") { event.preventDefault(); nudge(1); }
+      if (event.key === "ArrowUp" || event.key === "[") {
+        event.preventDefault();
+        const i = STEPS.indexOf(state.step);
+        setStep(STEPS[(i - 1 + STEPS.length) % STEPS.length]);
+      }
+      if (event.key === "ArrowDown" || event.key === "]") {
+        event.preventDefault();
+        const i = STEPS.indexOf(state.step);
+        if (state.variant === "B" && i === STEPS.length - 1) {
+          state.bFocusGo = true;
+          renderB();
+        } else setStep(STEPS[Math.min(STEPS.length - 1, i + 1)]);
+      }
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); flashGo(); }
+    });
+
+    let prevButtons = [];
+    function pollPad() {
+      const pad = navigator.getGamepads?.()[0];
+      if (pad) {
+        const pressed = (i) => pad.buttons[i]?.pressed;
+        const edge = (i) => pressed(i) && !prevButtons[i];
+        if (edge(14)) nudge(-1);
+        if (edge(15)) nudge(1);
+        if (edge(12)) {
+          const i = STEPS.indexOf(state.step);
+          setStep(STEPS[(i - 1 + STEPS.length) % STEPS.length]);
+        }
+        if (edge(13)) {
+          const i = STEPS.indexOf(state.step);
+          setStep(STEPS[Math.min(STEPS.length - 1, i + 1)]);
+        }
+        if (edge(4) || edge(5)) {
+          const i = STEPS.indexOf(state.step);
+          setStep(STEPS[(i + (edge(5) ? 1 : -1) + STEPS.length) % STEPS.length]);
+        }
+        if (edge(0)) flashGo();
+        prevButtons = pad.buttons.map((b) => b.pressed);
+      }
+      requestAnimationFrame(pollPad);
+    }
+    requestAnimationFrame(pollPad);
+
+    setVariant(readVariant(), { push: false });
+  </script>
+</body>
+</html>

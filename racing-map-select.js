@@ -3,8 +3,17 @@ import {
   racingMapLibrary
 } from "./racing-map.js";
 import { getTrackShapeLabel } from "./racing-track.mjs";
+import { createGamepadFocusNav } from "./racing-focus-nav.mjs";
+import { createBrowserRacingClock } from "./racing-runtime-adapters.mjs";
 
-export function createRacingMapSelect({ onHome = () => {}, onRace = () => {}, onEdit = () => {} } = {}) {
+export function createRacingMapSelect({
+  onHome = () => {},
+  onRace = () => {},
+  onEdit = () => {},
+  clock = createBrowserRacingClock(),
+  focusNav = createGamepadFocusNav()
+} = {}) {
+  const view = document.getElementById("racingMapSelectView");
   const homeButton = document.getElementById("racingMapSelectHomeButton");
   const raceButton = document.getElementById("racingMapSelectRaceButton");
   const editButton = document.getElementById("racingMapSelectEditButton");
@@ -17,20 +26,44 @@ export function createRacingMapSelect({ onHome = () => {}, onRace = () => {}, on
 
   let active = false;
   let listening = false;
+  let gamepadFrameId = 0;
 
   function start() {
     active = true;
     render();
     addListeners();
+    focusNav.reset();
+    raceButton.focus({ preventScroll: true });
+    gamepadFrameId = clock.requestFrame(pollGamepadNav);
   }
 
   function stop() {
     active = false;
     removeListeners();
+    if (gamepadFrameId) {
+      clock.cancelFrame(gamepadFrameId);
+      gamepadFrameId = 0;
+    }
   }
 
   function destroy() {
     stop();
+  }
+
+  // Xbox D-pad / left stick moves focus between HOME, the map cards, and
+  // GO/EDIT; A activates whatever is focused (native click handlers below
+  // stay the single source of truth); B goes back to the game hub.
+  function pollGamepadNav() {
+    if (!active) {
+      return;
+    }
+
+    focusNav.poll({
+      root: view,
+      enabled: active,
+      onCancel: handleHomeClick
+    });
+    gamepadFrameId = clock.requestFrame(pollGamepadNav);
   }
 
   function addListeners() {
@@ -91,6 +124,7 @@ export function createRacingMapSelect({ onHome = () => {}, onRace = () => {}, on
 
     nameValue.textContent = selected.map.name;
     metaValue.textContent = formatMapMeta(selected);
+    metaValue.classList.remove("is-error");
 
     presetMaps.replaceChildren(...presetEntries.map((entry) => buildMapCard(entry, selected.mapId)));
     userMaps.replaceChildren(...userEntries.map((entry) => buildMapCard(entry, selected.mapId)));
@@ -107,7 +141,11 @@ export function createRacingMapSelect({ onHome = () => {}, onRace = () => {}, on
     selectButton.type = "button";
     selectButton.className = "map-select-card-button";
     selectButton.addEventListener("click", () => {
-      try { racingMapLibrary.select(entry.mapId); render(); } catch (error) { showLibraryError(error); }
+      try {
+        racingMapLibrary.select(entry.mapId);
+        render();
+        focusMapCard(entry.mapId);
+      } catch (error) { showLibraryError(error); }
     });
 
     const header = document.createElement("div");
@@ -134,7 +172,11 @@ export function createRacingMapSelect({ onHome = () => {}, onRace = () => {}, on
       deleteButton.textContent = "删除";
       deleteButton.addEventListener("click", (event) => {
         event.stopPropagation();
-        try { racingMapLibrary.deleteUserMap(entry.mapId); render(); } catch (error) { showLibraryError(error); }
+        try {
+          racingMapLibrary.deleteUserMap(entry.mapId);
+          render();
+          newButton.focus({ preventScroll: true });
+        } catch (error) { showLibraryError(error); }
       });
       header.append(deleteButton);
     }
@@ -155,6 +197,11 @@ export function createRacingMapSelect({ onHome = () => {}, onRace = () => {}, on
       return `自由驾驶 · ${getTrackSurfaceLabel(entry.map.track.surface)}`;
     }
     return `${getTrackShapeLabel(entry.map.track.shape)} · ${getTrackSurfaceLabel(entry.map.track.surface)}`;
+  }
+
+  function focusMapCard(mapId) {
+    const card = view.querySelector(`.map-select-card[data-map-id="${mapId}"] .map-select-card-button`);
+    card?.focus({ preventScroll: true });
   }
 
   function showLibraryError(error) {
