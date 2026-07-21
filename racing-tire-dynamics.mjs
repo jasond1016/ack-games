@@ -9,6 +9,9 @@ const surfaceGrip = Object.freeze({
   ground: 0.62
 });
 
+/** Scales ABS-available brake impulse. >1 shortens stopping without changing drive/lateral grip tables. */
+export const BRAKE_FRICTION_AUTHORITY = 1.4;
+
 export function tireSurfaceGrip(surfaceId) {
   return surfaceGrip[surfaceId] ?? 0.88;
 }
@@ -59,7 +62,7 @@ export function calculateTireDynamics({
       : 1;
     const tractionControlActive = grounded && driven && requestedEngineForce > 0 && engineScale < 1;
     const previousPressure = clamp01(previousWheelState?.[index]?.brakeScale ?? 1);
-    const availableBrakeImpulse = normalLoad * grip * step;
+    const availableBrakeImpulse = normalLoad * grip * step * BRAKE_FRICTION_AUTHORITY;
     const targetBrakeScale = grounded && requestedBrakeImpulse > 0
       ? clamp01(availableBrakeImpulse / requestedBrakeImpulse)
       : 1;
@@ -68,29 +71,33 @@ export function calculateTireDynamics({
     const controlledBrakeImpulse = requestedBrakeImpulse * brakeScale;
     const brakeDemandRatio = controlledBrakeImpulse / Math.max(1e-6, availableBrakeImpulse);
     const brakeSlip = requestedBrakeImpulse > 0 ? Math.max(0, brakeDemandRatio - 1) : 0;
-    const rawLongitudinalSlip = driveSlip + brakeSlip;
-    const longitudinalSlip = clamp01(rawLongitudinalSlip * contactScale);
+    const rawLongitudinalSlip = (driveSlip + brakeSlip) * contactScale;
+    const longitudinalSlip = clamp01(rawLongitudinalSlip);
     // ABS remains active while pressure is limited, not only during pressure release.
     const absActive = grounded && requestedBrakeImpulse > 0 && (targetBrakeScale < 1 || brakeScale < 1);
-    const lateralSlip = clamp01((
+    const lateralSlipRaw = (
       lateralRatio * 1.35
       + (front ? steeringLoad * 0.28 : steeringLoad * 0.12)
       + (1 - grip) * Math.abs(steering) * 0.16
-    ) * contactScale);
+    ) * contactScale;
+    const lateralSlip = clamp01(lateralSlipRaw);
+    const combinedSlipRaw = Math.hypot(rawLongitudinalSlip, lateralSlipRaw);
     return Object.freeze({
       index,
       driven,
       normalLoad,
       longitudinalSlip,
       lateralSlip,
-      combinedSlip: clamp01(Math.hypot(longitudinalSlip, lateralSlip)),
+      combinedSlip: clamp01(combinedSlipRaw),
+      combinedSlipRaw,
       tractionControlActive,
       engineScale,
       absActive,
       brakeScale
     });
   });
-  const maximumSlip = Math.max(...wheels.map(({ combinedSlip }) => combinedSlip));
+  // Report unclamped peak slip so car-to-car separation is measurable past the old 1.0 ceiling.
+  const maximumSlip = Math.max(0, ...wheels.map(({ combinedSlipRaw }) => combinedSlipRaw));
   const tractionControlActive = wheels.some((wheel) => wheel.tractionControlActive);
   const absActive = wheels.some((wheel) => wheel.absActive);
   return Object.freeze({

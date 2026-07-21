@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { calculateTireDynamics, tireSurfaceGrip } from "../racing-tire-dynamics.mjs";
+import { calculateTireDynamics, BRAKE_FRICTION_AUTHORITY, tireSurfaceGrip } from "../racing-tire-dynamics.mjs";
 
 test("泥土和草地抓地力低于柏油路", () => {
   assert.ok(tireSurfaceGrip("rally-dirt") < tireSurfaceGrip("road"));
   assert.ok(tireSurfaceGrip("ground") < tireSurfaceGrip("rally-dirt"));
+  assert.ok(tireSurfaceGrip("gravel") < tireSurfaceGrip("road"));
+  assert.ok(tireSurfaceGrip("gravel") > tireSurfaceGrip("ground"));
 });
 
 test("低抓地全油门触发 TCS 并削减驱动力", () => {
@@ -127,7 +129,7 @@ test("ABS pressure converges toward each wheel's available brake impulse without
     lightWheelPressures.push(wheels[0].brakeScale);
   }
 
-  const expectedPressure = 2400 * tireSurfaceGrip("road") / 60 / 100;
+  const expectedPressure = 2400 * tireSurfaceGrip("road") * BRAKE_FRICTION_AUTHORITY / 60 / 100;
   assert.ok(Math.abs(wheels[0].brakeScale - expectedPressure) < 1e-9);
   assert.ok(wheels[0].brakeScale < wheels[1].brakeScale);
   assert.ok(lightWheelPressures.slice(-30).every((pressure) =>
