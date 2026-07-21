@@ -12,10 +12,39 @@ import {
 } from "./racing-car-config.js";
 import {
   RACING_CAMERA_MODES,
+  RACING_COASTAL_PLAY_MODES,
   loadActiveRacingStartConfig,
+  normalizeCoastalPlayMode,
   saveActiveRacingStartConfig
 } from "./racing-start-config.js";
+import {
+  normalizeRacingDifficulty,
+  resolveOpponentDifficultyProfile,
+  resolveShowcaseSectionPaceScale,
+  resolveTrafficCruiseSpeed
+} from "./racing-opponent-difficulty.mjs";
 import { RACING_ACTIVITIES, TRACK_SURFACES, racingMapLibrary } from "./racing-map.js";
+import {
+  COASTAL_CHALLENGE_POINTS,
+  createChallengeRaceSnapshotFields,
+  findActiveChallengePoint,
+  isChallengeCarUnlocked,
+  loadChallengeUnlockState,
+  resolveChallengePointPose,
+  unlockChallengeCar
+} from "./racing-coastal-challenges.mjs";
+import { resolveHudGaugeReading } from "./racing-hud-gauge.mjs";
+import {
+  COASTAL_DAY_CYCLE_SECONDS,
+  createDayCycleController,
+  normalizeDayCyclePhaseId
+} from "./racing-day-cycle.mjs";
+import {
+  TRAFFIC_SPAWN_PROGRESS,
+  TRAFFIC_VEHICLE_CATALOG,
+  createTrafficCarSpec,
+  resolveTrafficCatalogCruiseSpeedMps
+} from "./racing-traffic-vehicles.mjs";
 import {
   createRacingTrackRuntimeAdapter,
   inspectRacingTrack
@@ -35,8 +64,14 @@ import {
   createSeededRandom
 } from "./racing-session.mjs";
 import { createBrowserRacingClock, createBrowserRacingInput } from "./racing-runtime-adapters.mjs";
+import { createGamepadFocusNav } from "./racing-focus-nav.mjs";
 import { createResourceLeaseCache } from "./racing-resource-leases.mjs";
-import { createRacingAudioController } from "./racing-audio.mjs";
+import {
+  createRacingAudioController,
+  listNitroAudioPresets,
+  loadStoredNitroAudioPresetId,
+  saveStoredNitroAudioPresetId
+} from "./racing-audio.mjs";
 import { createRacingHapticsController } from "./racing-haptics.mjs";
 import {
   partitionSurfaceTrianglesBySlope,
@@ -86,7 +121,10 @@ import {
   createRailColliderGeometry,
   isPhysicalVehicleSurface,
   physicalFallbackGroundHeight,
-  physicalRoadSupportHalfWidth
+  physicalRoadSupportHalfWidth,
+  resolveDrivingSurfaceId,
+  surfaceRollingDragScale,
+  surfaceTopSpeedScale
 } from "./racing-physical-surfaces.mjs";
 import {
   FREE_DRIVE_JUMP,
@@ -100,6 +138,12 @@ import {
   isFreeDriveJumpGapSegment,
   resolveFreeDriveJumpLaunch
 } from "./racing-jump-rules.mjs";
+import {
+  AIR_YAW_AUTHORITY,
+  GROUND_YAW_RATE_REFERENCE,
+  resolveAirYawRate,
+  stepAirAttitudeAssist
+} from "./racing-air-yaw.mjs";
 
 const dracoDecoderPath = "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/libs/draco/";
 const carSurfaceExclusionPatterns = [
@@ -194,9 +238,14 @@ export function createRacingGame({
   const progressLabel = document.getElementById("racingProgressLabel");
   const progressValue = document.getElementById("racingProgressValue");
   const placeValue = document.getElementById("racingPlaceValue");
+  const gaugePanel = document.getElementById("racingGaugePanel");
   const speedValue = document.getElementById("racingSpeedValue");
+  const rpmValue = document.getElementById("racingRpmValue");
+  const rpmFill = document.getElementById("racingRpmFill");
+  const gearValue = document.getElementById("racingGearValue");
   const boostValue = document.getElementById("racingBoostValue");
   const cameraValue = document.getElementById("racingCameraValue");
+  let frozenHudGaugeReading = null;
   const eventBanner = document.getElementById("racingEventBanner");
   const eventBannerKicker = document.getElementById("racingEventBannerKicker");
   const eventBannerValue = document.getElementById("racingEventBannerValue");
@@ -210,6 +259,15 @@ export function createRacingGame({
   const startMapValue = document.getElementById("racingStartMapValue");
   const startModeValue = document.getElementById("racingStartModeValue");
   const startOpponentValue = document.getElementById("racingStartOpponentValue");
+  const coastalModeRow = document.getElementById("racingCoastalModeRow");
+  const coastalModeIslandTourButton = document.getElementById("racingCoastalModeIslandTourButton");
+  const coastalModeFreeCruiseButton = document.getElementById("racingCoastalModeFreeCruiseButton");
+  const difficultyRow = document.getElementById("racingDifficultyRow");
+  const difficultyButtons = [
+    document.getElementById("racingDifficultyEasyButton"),
+    document.getElementById("racingDifficultyStandardButton"),
+    document.getElementById("racingDifficultyHardButton")
+  ].filter(Boolean);
   const startStatus = document.getElementById("racingStartStatus");
   const selectedCarPanel = document.getElementById("racingSelectedCarPanel");
   const selectedCarPreviewCanvas = document.getElementById("racingSelectedCarPreview");
@@ -222,6 +280,18 @@ export function createRacingGame({
   const startEditorButton = document.getElementById("racingStartEditorButton");
   const startHomeButton = document.getElementById("racingStartHomeButton");
   const pauseOverlay = document.getElementById("racingPauseOverlay");
+  const nitroAudioPresetButtons = [
+    document.getElementById("racingNitroAudioPresetCurrentButton"),
+    document.getElementById("racingNitroAudioPresetJetWhooshButton"),
+    document.getElementById("racingNitroAudioPresetDeepRumbleButton"),
+    document.getElementById("racingNitroAudioPresetCleanElectricButton")
+  ].filter(Boolean);
+  const dayCycleRow = document.getElementById("racingDayCycleRow");
+  const dayCycleButtons = [
+    document.getElementById("racingDayCycleAutoButton"),
+    document.getElementById("racingDayCycleDayButton"),
+    document.getElementById("racingDayCycleNightButton")
+  ].filter(Boolean);
   const resumeButton = document.getElementById("racingResumeButton");
   const pauseResetButton = document.getElementById("racingPauseResetButton");
   const pauseEditorButton = document.getElementById("racingPauseEditorButton");
@@ -242,10 +312,29 @@ export function createRacingGame({
   const resultOpponentValue = document.getElementById("racingResultOpponentValue");
   const finishCinematic = createRacingFinishCinematic({ overlay: resultOverlay, canvas: finishCanvas });
   const playAgainButton = document.getElementById("racingPlayAgainButton");
+  const challengePrompt = document.getElementById("racingChallengePrompt");
+  const challengePromptKicker = document.getElementById("racingChallengePromptKicker");
+  const challengePromptTitle = document.getElementById("racingChallengePromptTitle");
+  const challengePromptDetail = document.getElementById("racingChallengePromptDetail");
+  const challengeConfirmButton = document.getElementById("racingChallengeConfirmButton");
+  const challengeCancelButton = document.getElementById("racingChallengeCancelButton");
   const racingAudio = createRacingAudioController();
   const racingHaptics = createRacingHapticsController();
+  const startOverlayFocusNav = createGamepadFocusNav();
+  let startOverlayGamepadFrameId = 0;
+  let nitroAudioPresetId = loadStoredNitroAudioPresetId();
   let selectedCarId = getRacingCarById(startConfig.playerCarId).id;
+  if (!isChallengeCarUnlocked(selectedCarId)) {
+    selectedCarId = getRacingCarById("aventador").id;
+  }
   let cameraMode = startConfig.cameraMode;
+  let coastalPlayMode = normalizeCoastalPlayMode(startConfig.coastalPlayMode);
+  let racingDifficulty = normalizeRacingDifficulty(startConfig.difficulty);
+  const activeChallenge = initialSnapshot?.challenge ?? null;
+  let challengeUnlockState = loadChallengeUnlockState();
+  let coastalChallengeRuntime = [];
+  let activeChallengePromptId = null;
+  const challengeDisplayCars = [];
   let session = null;
   let sessionControls = null;
   let activeSnapshot = initialSnapshot;
@@ -265,6 +354,12 @@ export function createRacingGame({
   const handleStartHomeButtonClick = () => {
     void requestSessionIntent({ type: "exit-to-home" });
   };
+  const handleCoastalModeIslandTourButtonClick = () => {
+    setCoastalPlayMode(RACING_COASTAL_PLAY_MODES.ISLAND_TOUR);
+  };
+  const handleCoastalModeFreeCruiseButtonClick = () => {
+    setCoastalPlayMode(RACING_COASTAL_PLAY_MODES.FREE_CRUISE);
+  };
   const handlePauseResetButtonClick = () => {
     if (isShowcase) restartShowcaseEvent();
     else void requestSessionIntent({ type: "replace-session", snapshot: activeSnapshot });
@@ -276,6 +371,10 @@ export function createRacingGame({
     void requestSessionIntent({ type: "exit-to-home" });
   };
   const handleResetButtonClick = () => {
+    if (activeChallenge?.returnTo) {
+      returnToCoastalFreeCruise();
+      return;
+    }
     if (isShowcase) restartShowcaseEvent();
     else void requestSessionIntent({ type: "replace-session", snapshot: activeSnapshot });
   };
@@ -287,14 +386,21 @@ export function createRacingGame({
       else keyState.delete(code);
     },
     onPause: () => {
+      if (activeChallengePromptId && !challengePrompt?.hidden) {
+        handleChallengeCancelButtonClick();
+        return;
+      }
       if (!isStartOverlayVisible()) setPaused(!raceState.paused);
     },
     onBoost: () => {
       void racingAudio.resume();
       if (isStartOverlayVisible()) {
         beginRace();
+      } else if (activeChallengePromptId && !challengePrompt?.hidden) {
+        handleChallengeConfirmButtonClick();
       } else if (raceState.resultVisible) {
-        if (isShowcase) restartShowcaseEvent();
+        if (activeChallenge?.returnTo) returnToCoastalFreeCruise();
+        else if (isShowcase) restartShowcaseEvent();
         else void requestSessionIntent({ type: "replace-session", snapshot: activeSnapshot });
       } else if (!raceState.paused) {
         activateBoost();
@@ -374,8 +480,12 @@ export function createRacingGame({
     engineForceMultiplier: 2.15
   };
   const opponentBoostConfig = {
-    charges: 3,
-    activationTimesSeconds: [2, 10, 18]
+    get charges() {
+      return resolveOpponentDifficultyProfile(racingDifficulty).boostCharges;
+    },
+    get activationTimesSeconds() {
+      return resolveOpponentDifficultyProfile(racingDifficulty).boostActivationTimesSeconds;
+    }
   };
 
   const railConfig = {
@@ -566,6 +676,12 @@ export function createRacingGame({
     maximumAirborneDownwardSpeed: 0,
     suppressJumpTransitions: false
   };
+  const dayCycle = createDayCycleController({
+    cycleSeconds: COASTAL_DAY_CYCLE_SECONDS,
+    enabled: isShowcase
+  });
+  let sceneLights = null;
+  let playerHeadlight = null;
   const startGateLights = [];
   let initialized = false;
   let active = false;
@@ -608,6 +724,7 @@ export function createRacingGame({
   };
   const racingTelemetry = createRacingTelemetry();
   const provingGroundRunner = createProvingGroundTestRunner();
+  let provingSurfaceOverride = null;
   const testScenarios = Object.freeze([
     Object.freeze({ id: "asphalt", label: "Asphalt handling" }),
     Object.freeze({ id: "rally", label: "Rally grip" }),
@@ -641,12 +758,33 @@ export function createRacingGame({
     listProvingGroundTests: () => PROVING_GROUND_TESTS,
     startProvingGroundTest,
     cancelProvingGroundTest: () => provingGroundRunner.cancel(),
+    setProvingSurfaceOverride: (surfaceId = null) => {
+      provingSurfaceOverride = surfaceId == null || surfaceId === ""
+        ? null
+        : String(surfaceId);
+      return provingSurfaceOverride;
+    },
+    getProvingSurfaceOverride: () => provingSurfaceOverride,
+    setPlayerPlanarSpeed: (speedMps = 0) => setPlayerPlanarSpeed(speedMps),
     getShowcaseDrivingLine: () => freeDriveShowcaseDrivingLine.map(
       ({ x, z, heading, section, distance }) => ({ x, z, heading, section, distance })
     ),
     setShowcaseMatrixControls: (controls = null) => setShowcaseMatrixControls(controls),
     toggleOpponent,
     toggleCollisionDebug: () => setCollisionDebugEnabled(!collisionDebug.enabled),
+    listNitroAudioPresets: () => listNitroAudioPresets(),
+    getNitroAudioPreset: () => nitroAudioPresetId,
+    setNitroAudioPreset: (presetId) => setNitroAudioPreset(presetId),
+    setDayCycleFreeze: (phaseId = null) => setDayCycleFreeze(phaseId),
+    getDayCycle: () => dayCycle.snapshot(),
+    listTraffic: () => freeDriveTraffic.map((traffic) => ({
+      typeId: traffic.typeId ?? null,
+      trafficId: traffic.trafficId ?? null,
+      label: traffic.label ?? null,
+      cruiseSpeedKmh: Math.round((traffic.cruiseSpeed ?? 0) * 3.6),
+      eventOpponent: Boolean(traffic.eventOpponent),
+      progress: Number(traffic.progress.toFixed(3))
+    })),
     getState: () => ({
       quality: qualityPreset.id,
       render: renderer ? {
@@ -663,17 +801,38 @@ export function createRacingGame({
       boostCharges: state.boostCharges,
       playerBoostUnlimited: boostConfig.unlimited,
       airborne: freeDriveJumpState.airborne,
+      airYaw: {
+        authority: AIR_YAW_AUTHORITY,
+        groundYawRateReference: GROUND_YAW_RATE_REFERENCE,
+        attitudeAssistSeconds: Number(freeDriveJumpState.attitudeAssistSeconds.toFixed(2)),
+        targetYawRate: Number(resolveAirYawRate({
+          airborne: freeDriveJumpState.airborne || !playerSurfaceState.grounded,
+          steering: state.steering,
+          authority: AIR_YAW_AUTHORITY,
+          groundYawRateMax: GROUND_YAW_RATE_REFERENCE
+        }).toFixed(4))
+      },
       surface: {
         grounded: playerSurfaceState.grounded,
-        id: playerSurfaceState.surfaceId,
+        id: effectiveDrivingSurfaceId(),
+        contactId: playerSurfaceState.surfaceId,
         height: Number(playerSurfaceState.height.toFixed(2)),
         contacts: playerSurfaceState.contacts.length,
         pitchDegrees: Number(THREE.MathUtils.radToDeg(playerSurfaceState.pitch).toFixed(1)),
-        rollDegrees: Number(THREE.MathUtils.radToDeg(playerSurfaceState.roll).toFixed(1))
+        rollDegrees: Number(THREE.MathUtils.radToDeg(playerSurfaceState.roll).toFixed(1)),
+        provingOverride: provingSurfaceOverride
       },
-      physicsHeight: physics?.playerBody
-        ? Number(physics.playerBody.translation().y.toFixed(2))
-        : null,
+      physicsHeight: (() => {
+        try {
+          return physics?.playerBody
+            ? Number(physics.playerBody.translation().y.toFixed(2))
+            : null;
+        } catch {
+          return Number.isFinite(playerSurfaceState.height)
+            ? Number(playerSurfaceState.height.toFixed(2))
+            : null;
+        }
+      })(),
       worldColliders: {
         roadMesh: Boolean(roadCollisionMeshData),
         tunnelPieces: staticWorldColliderSpecs.filter((spec) => spec.tag === "tunnel-wall" || spec.tag === "tunnel-roof").length,
@@ -691,6 +850,32 @@ export function createRacingGame({
         errors: surfaceValidationReport.errors.slice(0, 6)
       },
       speedKmh: Math.round(state.velocity.length() * 3.6),
+      engineRpm: Math.round(physics?.playerVehicle?.drivetrain?.engineRpm ?? playerVehicleSpec().idleRpm ?? 0),
+      gear: physics?.playerVehicle?.drivetrain?.gear ?? 0,
+      gauge: (() => {
+        const gaugeFrozen = Boolean(
+          raceState.paused
+          || !active
+          || hudOverlay?.hidden
+          || isStartOverlayVisible()
+          || raceState.resultVisible
+        );
+        const reading = frozenHudGaugeReading ?? resolveHudGaugeReading({
+          speedKmh: state.velocity.length() * 3.6,
+          drivetrain: physics?.playerVehicle?.drivetrain ?? null,
+          vehicleSpec: playerVehicleSpec()
+        });
+        return Object.freeze({
+          visible: Boolean(hudOverlay && !hudOverlay.hidden),
+          frozen: gaugeFrozen,
+          speedKmh: reading.speedKmh,
+          engineRpm: reading.engineRpm,
+          gear: reading.gear,
+          gearLabel: reading.gearLabel,
+          rpmFillRatio: Number(reading.rpmFillRatio.toFixed(3)),
+          params: reading.params
+        });
+      })(),
       playerMaxForwardSpeed: playerMaxForwardSpeed(),
       status: currentStatusLabel(),
       paused: raceState.paused,
@@ -710,8 +895,12 @@ export function createRacingGame({
       traffic: freeDriveTraffic.map((traffic) => ({
         progress: Number(traffic.progress.toFixed(3)),
         speedKmh: Math.round(traffic.currentSpeed * 3.6),
+        cruiseSpeedKmh: Math.round((traffic.cruiseSpeed ?? 0) * 3.6),
         direction: traffic.direction,
         airborne: traffic.airborne,
+        typeId: traffic.typeId ?? null,
+        trafficId: traffic.trafficId ?? null,
+        label: traffic.label ?? null,
         boostSeconds: Number(traffic.boostSeconds.toFixed(2)),
         boostCharges: traffic.boostCharges,
         boostVisible: (traffic.visual.userData.boostFlames || []).some((flame) => flame.visible),
@@ -727,6 +916,39 @@ export function createRacingGame({
       playerCar: formatCarLabel(selectedCar()),
       opponentCar: formatCarLabel(opponentCarSelection()),
       cameraMode,
+      startConfig: Object.freeze({
+        playerCarId: selectedCarId,
+        cameraMode,
+        coastalPlayMode,
+        difficulty: racingDifficulty,
+        forcedOpponentCarId: startConfig.forcedOpponentCarId ?? activeChallenge?.rewardCarId ?? null
+      }),
+      challenges: Object.freeze({
+        unlockStorageKey: "ack-games:racing-challenge-unlocks:v1",
+        unlockedCarIds: Object.freeze([...challengeUnlockState.unlockedCarIds]),
+        rewardCarIds: Object.freeze(COASTAL_CHALLENGE_POINTS.map((point) => point.rewardCarId)),
+        points: Object.freeze(coastalChallengeRuntime.map((point) => Object.freeze({
+          id: point.id,
+          rewardCarId: point.rewardCarId,
+          mapId: point.mapId,
+          x: Number(point.x.toFixed(2)),
+          z: Number(point.z.toFixed(2)),
+          triggerRadius: point.triggerRadius,
+          unlocked: isChallengeCarUnlocked(point.rewardCarId, challengeUnlockState)
+        }))),
+        activePromptId: activeChallengePromptId,
+        activeChallenge: activeChallenge
+          ? Object.freeze({
+            pointId: activeChallenge.pointId,
+            rewardCarId: activeChallenge.rewardCarId,
+            mapId: activeChallenge.mapId
+          })
+          : null
+      }),
+      difficulty: Object.freeze({
+        id: racingDifficulty,
+        profile: resolveOpponentDifficultyProfile(racingDifficulty)
+      }),
       vehiclePhysics: {
         mode: "physical",
         specId: playerVehicleSpec().id,
@@ -795,6 +1017,22 @@ export function createRacingGame({
         landingKick: Number(presentationState.landingKick.toFixed(3)),
         lastLandingImpactSpeed: Number(presentationState.lastLandingImpactSpeed.toFixed(2))
       }),
+      dayCycle: (() => {
+        const snapshot = dayCycle.snapshot();
+        return Object.freeze({
+          enabled: snapshot.enabled,
+          cycleSeconds: snapshot.cycleSeconds,
+          progress: Number(snapshot.progress.toFixed(4)),
+          phase: snapshot.phase,
+          timeOfDay: snapshot.phase,
+          frozen: snapshot.frozenPhase,
+          frozenPhase: snapshot.frozenPhase,
+          exposureScale: Number(snapshot.lighting.exposureScale.toFixed(3)),
+          environmentIntensity: Number(snapshot.lighting.environmentIntensity.toFixed(3)),
+          sunIntensity: Number(snapshot.lighting.sunIntensity.toFixed(3)),
+          headlightBoost: Number(snapshot.lighting.headlightBoost.toFixed(3))
+        });
+      })(),
       wheelAnimation: {
         wheelCount: car?.userData.wheelCount ?? 0,
         shaderBindings: car?.userData.wheelShaderBindings?.length ?? 0,
@@ -814,6 +1052,7 @@ export function createRacingGame({
         brake: Number((gamepadDrive.brake ?? 0).toFixed(3))
       },
       audio: racingAudio.getState(),
+      nitroAudioPreset: nitroAudioPresetId,
       haptics: racingHaptics.getState(),
       randomSeed: activeSnapshot?.randomSeed ?? null,
       visualScale,
@@ -833,6 +1072,11 @@ export function createRacingGame({
         color: `#${flame.material.color.getHexString()}`,
         exhaustPosition: flame.userData.exhaustPosition
       })),
+      brakeLights: Object.freeze({
+        active: Boolean(car?.userData.brakeLightsActive),
+        count: car?.userData.brakeLights?.length ?? 0,
+        intensity: Number((car?.userData.brakeLightMaterials?.[0]?.emissiveIntensity ?? 0).toFixed(2))
+      }),
       opponentFlameStates: (opponentCar?.userData.boostFlames || []).map((flame) => ({
         visible: flame.visible,
         opacity: Number((flame.material.opacity || 0).toFixed(2)),
@@ -863,6 +1107,7 @@ export function createRacingGame({
     setPaused(false);
     removeListeners();
     disposeCarOptionPreviews();
+    stopOverlayGamepadNavLoop();
     startOverlay.hidden = true;
     pauseOverlay.hidden = true;
     resultOverlay.hidden = true;
@@ -885,15 +1130,26 @@ export function createRacingGame({
 
   function destroy() {
     stop();
+    racingAudio.setMusic({ playing: false, ducked: false });
     racingAudio.destroy();
     startRaceButton.removeEventListener("click", handleStartRaceButtonClick);
     startEditorButton.removeEventListener("click", handleStartEditorButtonClick);
     startHomeButton.removeEventListener("click", handleStartHomeButtonClick);
+    coastalModeIslandTourButton.removeEventListener("click", handleCoastalModeIslandTourButtonClick);
+    coastalModeFreeCruiseButton.removeEventListener("click", handleCoastalModeFreeCruiseButtonClick);
+    for (const button of difficultyButtons) {
+      button.removeEventListener("click", handleDifficultyButtonClick);
+    }
+    for (const button of nitroAudioPresetButtons) {
+      button.removeEventListener("click", handleNitroAudioPresetButtonClick);
+    }
     resumeButton.removeEventListener("click", handleResumeButtonClick);
     pauseResetButton.removeEventListener("click", handlePauseResetButtonClick);
     pauseEditorButton.removeEventListener("click", handlePauseEditorButtonClick);
     pauseHomeButton.removeEventListener("click", handlePauseHomeButtonClick);
     playAgainButton.removeEventListener("click", handleResetButtonClick);
+    challengeConfirmButton?.removeEventListener("click", handleChallengeConfirmButtonClick);
+    challengeCancelButton?.removeEventListener("click", handleChallengeCancelButtonClick);
     finishCinematic.destroy();
     removeCollisionDebugHud();
     if (globalThis.__ackGamesDebug?.racing === debugApi) {
@@ -905,11 +1161,93 @@ export function createRacingGame({
     return getRacingCarById(selectedCarId);
   }
 
+  function isCoastalFreeCruise() {
+    return isShowcase && coastalPlayMode === RACING_COASTAL_PLAY_MODES.FREE_CRUISE;
+  }
+
+  function setCoastalPlayMode(nextMode) {
+    coastalPlayMode = normalizeCoastalPlayMode(nextMode);
+    renderCoastalModeOptions();
+    renderDifficultyOptions();
+  }
+
+  function setRacingDifficulty(nextDifficulty) {
+    racingDifficulty = normalizeRacingDifficulty(nextDifficulty);
+    renderDifficultyOptions();
+    setStartStatus(`DIFF · ${racingDifficulty.toUpperCase()}`);
+  }
+
+  function renderDifficultyOptions() {
+    if (!difficultyRow) return;
+    const showDifficulty = isShowcase && !isCoastalFreeCruise();
+    difficultyRow.hidden = !showDifficulty;
+    for (const button of difficultyButtons) {
+      const isSelected = button.dataset.difficulty === racingDifficulty;
+      button.classList.toggle("is-selected", isSelected);
+      button.setAttribute("aria-pressed", String(isSelected));
+    }
+  }
+
+  function handleDifficultyButtonClick(event) {
+    const next = event.currentTarget?.dataset.difficulty;
+    if (next) setRacingDifficulty(next);
+  }
+
+  function setNitroAudioPreset(presetId) {
+    nitroAudioPresetId = saveStoredNitroAudioPresetId(presetId);
+    renderNitroAudioPresetOptions();
+    return nitroAudioPresetId;
+  }
+
+  function renderNitroAudioPresetOptions() {
+    for (const button of nitroAudioPresetButtons) {
+      const isSelected = button.dataset.presetId === nitroAudioPresetId;
+      button.classList.toggle("is-selected", isSelected);
+      button.setAttribute("aria-pressed", String(isSelected));
+    }
+  }
+
+  function handleNitroAudioPresetButtonClick(event) {
+    const presetId = event.currentTarget?.dataset.presetId;
+    if (presetId) setNitroAudioPreset(presetId);
+  }
+
+  function renderCoastalModeOptions() {
+    if (!isShowcase) {
+      coastalModeRow.hidden = true;
+      startRaceButton.textContent = "GO";
+      const startCats = startOverlay.querySelectorAll(".race-start-cat");
+      if (startCats.length >= 2) {
+        startCats[0].classList.add("is-active");
+        startCats[1].classList.remove("is-active");
+      }
+      renderDifficultyOptions();
+      return;
+    }
+
+    coastalModeRow.hidden = false;
+    const isFreeCruiseSelected = coastalPlayMode === RACING_COASTAL_PLAY_MODES.FREE_CRUISE;
+    coastalModeIslandTourButton.classList.toggle("is-selected", !isFreeCruiseSelected);
+    coastalModeIslandTourButton.setAttribute("aria-pressed", String(!isFreeCruiseSelected));
+    coastalModeFreeCruiseButton.classList.toggle("is-selected", isFreeCruiseSelected);
+    coastalModeFreeCruiseButton.setAttribute("aria-pressed", String(isFreeCruiseSelected));
+    startModeValue.textContent = isFreeCruiseSelected ? "Free Cruise" : "Festival Showcase";
+    startRaceButton.textContent = "GO";
+    const startCats = startOverlay.querySelectorAll(".race-start-cat");
+    if (startCats.length >= 2) {
+      startCats[0].classList.add("is-active");
+      startCats[1].classList.add("is-active");
+    }
+    renderDifficultyOptions();
+  }
+
   function playerVehicleSpec() {
     return physics?.playerVehicle?.config ?? getPhysicalVehicleSpec(selectedCarId);
   }
 
   function opponentCarSelection() {
+    const forcedId = activeChallenge?.rewardCarId || startConfig.forcedOpponentCarId;
+    if (forcedId) return getRacingCarById(forcedId);
     return getRacingCarById(getDefaultOpponentRacingCarId(selectedCarId));
   }
 
@@ -933,17 +1271,20 @@ export function createRacingGame({
       ...racingCarCatalog.map((carConfig) => {
         const button = document.createElement("button");
         const isSelected = carConfig.id === selectedCarId;
+        const locked = !isChallengeCarUnlocked(carConfig.id, challengeUnlockState);
         button.type = "button";
-        button.className = `race-car-option${isSelected ? " is-selected" : ""}`;
+        button.className = `race-car-option${isSelected ? " is-selected" : ""}${locked ? " is-locked" : ""}`;
         button.dataset.carId = carConfig.id;
+        button.disabled = locked;
         button.style.setProperty("--car-accent", carConfig.accentColor);
         button.setAttribute("aria-pressed", String(isSelected));
+        button.setAttribute("aria-disabled", String(locked));
         button.innerHTML = `
           <span class="race-car-hero" aria-hidden="true">
             <img class="race-car-thumbnail" alt="" data-car-id="${carConfig.id}">
             <span class="race-car-option-top">
-              <span class="race-car-badge">${carConfig.tag}</span>
-              <span class="race-car-picked">${isSelected ? "当前选择" : "可选择"}</span>
+              <span class="race-car-badge">${locked ? "挑战解锁" : carConfig.tag}</span>
+              <span class="race-car-picked">${isSelected ? "ON" : ""}</span>
             </span>
           </span>
           <span class="race-car-copy">
@@ -952,9 +1293,11 @@ export function createRacingGame({
           </span>
         `;
         button.addEventListener("click", () => {
+          if (locked) return;
           selectedCarId = carConfig.id;
           renderCarOptions();
-          setStartStatus(`已选择 ${formatCarLabel(selectedCar())}。Xbox 360 手柄按 A 开赛。`);
+          setStartStatus(`Xbox · A · ${formatCarLabel(selectedCar())}`);
+          carOptions.querySelector(`[data-car-id="${carConfig.id}"]`)?.focus({ preventScroll: true });
         });
         const thumbnail = button.querySelector(".race-car-thumbnail");
         if (thumbnail instanceof HTMLImageElement) {
@@ -1289,20 +1632,54 @@ export function createRacingGame({
     startMapValue.textContent = mapData.name;
     startModeValue.textContent = isShowcase ? "Festival Showcase" : raceModeLabel;
     startOpponentValue.textContent = isShowcase ? "3 位 Festival 对手" : formatCarLabel(opponentCarSelection());
-    startRaceButton.textContent = isShowcase
-      ? "开始 Island Tour"
-      : isFreeDrive ? "进入自由驾驶" : raceMode === "lap" ? "开始闭环赛" : "开始冲刺赛";
+    startRaceButton.textContent = "GO";
     startRaceButton.disabled = false;
     startEditorButton.disabled = false;
     startHomeButton.disabled = false;
+    renderCoastalModeOptions();
     renderCarOptions();
-    setStartStatus(`已选择 ${formatCarLabel(selectedCar())}。Xbox 360 手柄按 A 开赛。`);
+    setStartStatus(`Xbox · A 开赛 · ${formatCarLabel(selectedCar())}`);
+    startRaceButton.focus({ preventScroll: true });
+    startOverlayGamepadNavLoop();
   }
 
   function hideStartOverlay() {
     startOverlay.hidden = true;
     hudOverlay.hidden = false;
     disposeCarOptionPreviews();
+    stopOverlayGamepadNavLoop();
+  }
+
+  // The main race `loop()` (and its `input.pollGamepad()` call) only starts
+  // once `beginRace()` succeeds, so the overlay needs its own tiny polling
+  // loop to read the Xbox pad while it is up. D-pad / left stick move focus
+  // between HOME, CAR options, TOUR/CRUISE, DIFF, EDIT and GO; A activates
+  // whatever is focused (native click handlers stay the single source of
+  // truth); B returns to the game hub, mirroring the map select screen.
+  function startOverlayGamepadNavLoop() {
+    if (startOverlayGamepadFrameId) return;
+    startOverlayGamepadFrameId = clock.requestFrame(tickStartOverlayGamepadNav);
+  }
+
+  function stopOverlayGamepadNavLoop() {
+    if (startOverlayGamepadFrameId) {
+      clock.cancelFrame(startOverlayGamepadFrameId);
+      startOverlayGamepadFrameId = 0;
+    }
+    startOverlayFocusNav.reset();
+  }
+
+  function tickStartOverlayGamepadNav() {
+    if (!isStartOverlayVisible()) {
+      startOverlayGamepadFrameId = 0;
+      return;
+    }
+
+    startOverlayFocusNav.poll({
+      root: startOverlay,
+      onCancel: () => startHomeButton.click()
+    });
+    startOverlayGamepadFrameId = clock.requestFrame(tickStartOverlayGamepadNav);
   }
 
   function isStartOverlayVisible() {
@@ -1380,7 +1757,12 @@ export function createRacingGame({
     raceStarting = true;
     setStartButtonsDisabled(true);
     setStartStatus(`正在加载 ${selectedCar().name} 与对手车辆...`);
-    const savedStartConfig = saveActiveRacingStartConfig({ playerCarId: selectedCarId, cameraMode });
+    const savedStartConfig = saveActiveRacingStartConfig({
+      playerCarId: selectedCarId,
+      cameraMode,
+      coastalPlayMode,
+      difficulty: racingDifficulty
+    });
     activeSnapshot ??= createRacingSnapshot({ map: mapData, startConfig: savedStartConfig, environmentProfile });
     random = createSeededRandom(activeSnapshot.randomSeed);
     session = createRacingSession({
@@ -1492,6 +1874,7 @@ export function createRacingGame({
       scene.add(car);
       scene.add(opponentCar);
       if (isFreeDrive && !isProvingGround) await initializeFreeDriveTraffic();
+      if (isCoastalFreeCruise()) await setupCoastalChallengePoints();
       if (initializationToken !== runtimeToken) {
         disposeRuntimeResources();
         return;
@@ -1553,6 +1936,9 @@ export function createRacingGame({
       disposePhysicsState(physics);
       physics = null;
     }
+    sceneLights = null;
+    playerHeadlight = null;
+    dayCycle.reset();
     updateCollisionDebugVisibility();
   }
 
@@ -1656,6 +2042,14 @@ export function createRacingGame({
     const horizonFill = new THREE.DirectionalLight(isFreeDrive ? 0xa9d5ff : 0x8bbbe2, isFreeDrive ? 0.42 : 0.28);
     horizonFill.position.set(68, 24, -52);
     scene.add(horizonFill);
+
+    sceneLights = { hemisphere, sun, fill: horizonFill };
+    if (isShowcase) {
+      playerHeadlight = new THREE.SpotLight(0xfff2d8, 0, 48, Math.PI / 7, 0.45, 1.15);
+      playerHeadlight.castShadow = false;
+      scene.add(playerHeadlight);
+      scene.add(playerHeadlight.target);
+    }
   }
 
   async function applySceneEnvironment() {
@@ -3267,6 +3661,151 @@ export function createRacingGame({
     }
   }
 
+  async function setupCoastalChallengePoints() {
+    coastalChallengeRuntime = [];
+    for (const point of COASTAL_CHALLENGE_POINTS) {
+      const pose = resolveChallengePointPose(point, (progress) => trackProfileAtProgress(progress));
+      if (!pose) continue;
+      const runtime = {
+        ...point,
+        x: pose.x,
+        z: pose.z,
+        heading: pose.heading
+      };
+      coastalChallengeRuntime.push(runtime);
+      const marker = createChallengeMarker(runtime);
+      scene.add(marker);
+      try {
+        const displayCar = await createCar(getRacingCarById(point.rewardCarId), 0xffffff);
+        displayCar.position.set(pose.x, 0.05, pose.z);
+        displayCar.rotation.y = pose.heading;
+        displayCar.traverse((node) => {
+          if (node.isMesh) {
+            node.castShadow = false;
+            node.receiveShadow = true;
+          }
+        });
+        scene.add(displayCar);
+        challengeDisplayCars.push(displayCar);
+      } catch (error) {
+        console.warn("Failed to load challenge display car", point.rewardCarId, error);
+      }
+    }
+  }
+
+  function createChallengeMarker(point) {
+    const group = new THREE.Group();
+    group.name = `coastal-challenge-${point.id}`;
+    group.position.set(point.x, 0, point.z);
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(2.2, 3.4, 28),
+      new THREE.MeshBasicMaterial({ color: 0xffc43a, transparent: true, opacity: 0.78, side: THREE.DoubleSide })
+    );
+    ring.rotation.x = -Math.PI * 0.5;
+    ring.position.y = 0.08;
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.12, 0.16, 3.2, 8),
+      new THREE.MeshStandardMaterial({ color: 0x1a1614, emissive: 0xffc43a, emissiveIntensity: 0.35 })
+    );
+    pole.position.y = 1.6;
+    group.add(ring, pole);
+    return group;
+  }
+
+  function updateCoastalChallengePrompt() {
+    if (!challengePrompt || !isCoastalFreeCruise() || raceState.paused || raceState.resultVisible) {
+      hideChallengePrompt();
+      return;
+    }
+    const active = findActiveChallengePoint(
+      coastalChallengeRuntime,
+      state.position.x,
+      state.position.y
+    );
+    if (!active) {
+      hideChallengePrompt();
+      return;
+    }
+    if (activeChallengePromptId === active.id) return;
+    activeChallengePromptId = active.id;
+    const unlocked = isChallengeCarUnlocked(active.rewardCarId, challengeUnlockState);
+    const car = getRacingCarById(active.rewardCarId);
+    challengePromptKicker.textContent = unlocked ? "REMATCH" : "CHALLENGE";
+    challengePromptTitle.textContent = car.name;
+    challengePromptDetail.textContent = unlocked
+      ? "已解锁 · 可再战（不再发车）"
+      : "赢了解锁这辆车";
+    challengePrompt.hidden = false;
+  }
+
+  function hideChallengePrompt() {
+    activeChallengePromptId = null;
+    if (challengePrompt) challengePrompt.hidden = true;
+  }
+
+  function handleChallengeConfirmButtonClick() {
+    const point = coastalChallengeRuntime.find((entry) => entry.id === activeChallengePromptId);
+    if (!point) return;
+    launchCoastalChallenge(point);
+  }
+
+  function handleChallengeCancelButtonClick() {
+    hideChallengePrompt();
+  }
+
+  function launchCoastalChallenge(point) {
+    const presetEntry = findChallengeMapEntry(point.mapId);
+    if (!presetEntry) {
+      setStartStatus(`找不到挑战地图 ${point.mapId}`, true);
+      return;
+    }
+    const returnStartConfig = saveActiveRacingStartConfig({
+      playerCarId: selectedCarId,
+      cameraMode,
+      coastalPlayMode: RACING_COASTAL_PLAY_MODES.FREE_CRUISE,
+      difficulty: racingDifficulty
+    });
+    const challengeFields = createChallengeRaceSnapshotFields(point, {
+      playerCarId: selectedCarId,
+      cameraMode,
+      difficulty: racingDifficulty,
+      coastalPlayMode: RACING_COASTAL_PLAY_MODES.FREE_CRUISE,
+      returnMap: mapData,
+      returnEnvironmentProfile: environmentProfile,
+      returnStartConfig
+    });
+    const raceSnapshot = createRacingSnapshot({
+      map: presetEntry.map,
+      startConfig: challengeFields.launchStartConfig,
+      environmentProfile: null,
+      challenge: challengeFields
+    });
+    hideChallengePrompt();
+    void requestSessionIntent({ type: "replace-session", snapshot: raceSnapshot });
+  }
+
+  function findChallengeMapEntry(mapId) {
+    return racingMapLibrary.snapshot().presets.find((entry) => entry.mapId === mapId) ?? null;
+  }
+
+  function returnToCoastalFreeCruise() {
+    const returnTo = activeChallenge?.returnTo;
+    if (!returnTo?.map) {
+      void requestSessionIntent({ type: "exit-to-home" });
+      return;
+    }
+    const cruiseSnapshot = createRacingSnapshot({
+      map: returnTo.map,
+      startConfig: {
+        ...returnTo.startConfig,
+        coastalPlayMode: RACING_COASTAL_PLAY_MODES.FREE_CRUISE,
+        forcedOpponentCarId: null
+      },
+      environmentProfile: returnTo.environmentProfile
+    });
+    void requestSessionIntent({ type: "replace-session", snapshot: cruiseSnapshot });
+  }
+
   function createRallyCheckpointGate(checkpoint, color, index) {
     const gate = new THREE.Group();
     gate.name = `rally-checkpoint-${index}`;
@@ -3967,9 +4506,9 @@ export function createRacingGame({
           roadCollisionMeshData.vertices,
           roadCollisionMeshData.indices,
           RAPIER.TriMeshFlags.FIX_INTERNAL_EDGES
-        ).setFriction(1.15)
+        ).setFriction(isGravelSurface ? 0.82 : 1.15)
       );
-      physics.colliderTags.set(roadCollider.handle, "road");
+      physics.colliderTags.set(roadCollider.handle, isGravelSurface ? "gravel" : "road");
     }
 
     for (const spec of staticWorldMeshColliderSpecs) {
@@ -4139,8 +4678,11 @@ export function createRacingGame({
       : physics.playerBody.translation().y - playerVehicleSpec().visualGroundOffset;
     playerSurfaceState.pitch = euler.x;
     playerSurfaceState.roll = euler.z;
-    playerSurfaceState.surfaceId = [...surfaceCounts.entries()]
-      .sort((left, right) => right[1] - left[1])[0]?.[0] ?? "air";
+    playerSurfaceState.surfaceId = resolveDrivingSurfaceId(
+      [...surfaceCounts.entries()]
+        .sort((left, right) => right[1] - left[1])[0]?.[0] ?? "air",
+      trackSurface
+    );
     playerSurfaceState.contacts = contacts;
     freeDriveJumpState.airborne = contacts.length === 0;
     if (isShowcase && showcaseEvent.phase === "running" && !presentationState.suppressJumpTransitions) {
@@ -4961,7 +5503,7 @@ export function createRacingGame({
       const bridge = isIslandWorld && isFreeDriveBridgeCorridor(position);
       return {
         height: 0.06 + freeDriveElevationAtProgress(projection.progress),
-        surfaceId: bridge ? "bridge" : "road"
+        surfaceId: bridge ? "bridge" : resolveDrivingSurfaceId("road", trackSurface)
       };
     }
 
@@ -5959,6 +6501,7 @@ export function createRacingGame({
       group.userData.boostGroup = boostGroup;
       group.userData.wheelShaderBindings = wheelVisuals.bindings;
       group.userData.wheelCount = wheelVisuals.logicalWheelCount;
+      attachBrakeLights(group, size, box);
       visualRoot.add(boostGroup);
       group.add(visualRoot);
       return group;
@@ -5969,39 +6512,64 @@ export function createRacingGame({
 
   async function initializeFreeDriveTraffic() {
     if (!physics?.world || freeDriveTraffic.length > 0) return;
-    const trafficCount = 3;
+    const useCivilianTraffic = isCoastalFreeCruise();
+    const civilianCatalog = useCivilianTraffic ? TRAFFIC_VEHICLE_CATALOG : null;
+    const trafficCount = civilianCatalog?.length ?? 3;
     const palette = [0x2f5e8d, 0xd8d6ce, 0x9b2533, 0x33383c, 0xc18b2e, 0x58705a];
-    const specs = Array.from({ length: trafficCount }, (_, index) =>
-      racingCarCatalog[(index + 1) % racingCarCatalog.length]
-    );
-    const trafficSpecs = specs.map((spec) => ({
-      ...spec,
-      id: `traffic-lod:${spec.id}`,
-      modelUrl: spec.previewModelUrl ?? spec.modelUrl
-    }));
+    const trafficSpecs = civilianCatalog
+      ? civilianCatalog.map((entry) => createTrafficCarSpec(entry))
+      : Array.from({ length: trafficCount }, (_, index) => {
+          const spec = racingCarCatalog[(index + 1) % racingCarCatalog.length];
+          return {
+            ...spec,
+            id: `traffic-lod:${spec.id}`,
+            modelUrl: spec.previewModelUrl ?? spec.modelUrl
+          };
+        });
     const visuals = await Promise.all(
-      trafficSpecs.map((spec, index) => createCar(spec, palette[index % palette.length]))
+      trafficSpecs.map((spec, index) => createCar(
+        spec,
+        civilianCatalog?.[index]?.tint ?? palette[index % palette.length]
+      ))
     );
     visuals.forEach((visual, index) => {
-      const direction = index % 3 === 2 ? -1 : 1;
+      const catalogEntry = civilianCatalog?.[index] ?? null;
+      const direction = index % 2 === 0 ? 1 : -1;
+      const halfWidth = catalogEntry?.collider?.halfWidth ?? physicsConfig.carHalfWidth;
+      const halfHeight = catalogEntry?.collider?.halfHeight ?? physicsConfig.carHalfHeight;
+      const halfLength = catalogEntry?.collider?.halfLength ?? physicsConfig.carHalfLength;
       const traffic = {
         index,
         visual,
         body: null,
         collider: null,
-        initialProgress: wrapProgress(0.13 + index / trafficCount),
+        typeId: catalogEntry?.typeId ?? null,
+        trafficId: catalogEntry?.id ?? trafficSpecs[index].id,
+        label: catalogEntry?.label ?? null,
+        initialProgress: wrapProgress(
+          catalogEntry
+            ? TRAFFIC_SPAWN_PROGRESS[index] ?? (0.13 + index / trafficCount)
+            : 0.13 + index / trafficCount
+        ),
         progress: 0,
         direction,
         laneOffset: direction > 0 ? -3.15 : 3.15,
-        cruiseSpeed: physicalDrivingConfig.maxForwardSpeed * (
-          trafficCount > 1 ? 0.55 + (index / (trafficCount - 1)) * 0.45 : 1
-        ),
+        cruiseSpeed: catalogEntry
+          ? resolveTrafficCatalogCruiseSpeedMps(catalogEntry)
+          : resolveTrafficCruiseSpeed({
+              maxForwardSpeed: physicalDrivingConfig.maxForwardSpeed,
+              index,
+              trafficCount,
+              difficulty: racingDifficulty
+            }),
         currentSpeed: 0,
         boostSeconds: 0,
-        boostCharges: opponentBoostConfig.charges,
-        boostActivationTimesSeconds: opponentBoostConfig.activationTimesSeconds.map(
-          (activationTime) => activationTime + index * 0.65
-        ),
+        boostCharges: catalogEntry ? 0 : opponentBoostConfig.charges,
+        boostActivationTimesSeconds: catalogEntry
+          ? Object.freeze([])
+          : opponentBoostConfig.activationTimesSeconds.map(
+              (activationTime) => activationTime + index * 0.65
+            ),
         collisionHoldSeconds: 0,
         contactCooldownSeconds: 0,
         wheelSpin: 0,
@@ -6011,8 +6579,8 @@ export function createRacingGame({
         airborne: false,
         position: new THREE.Vector2(),
         heading: 0,
-        eventOpponent: isShowcase,
-        name: isShowcase ? ["RAVEN", "APEX", "VOLT"][index] : null,
+        eventOpponent: isShowcase && !useCivilianTraffic,
+        name: isShowcase && !useCivilianTraffic ? ["RAVEN", "APEX", "VOLT"][index] : null,
         eventDistance: 0,
         finishTimeSeconds: null
       };
@@ -6023,11 +6591,7 @@ export function createRacingGame({
           .setCanSleep(false)
       );
       const collider = physics.world.createCollider(
-        RAPIER.ColliderDesc.cuboid(
-          physicsConfig.carHalfWidth,
-          physicsConfig.carHalfHeight,
-          physicsConfig.carHalfLength
-        )
+        RAPIER.ColliderDesc.cuboid(halfWidth, halfHeight, halfLength)
           .setFriction(0.18)
           .setRestitution(0.02)
           .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
@@ -6037,7 +6601,7 @@ export function createRacingGame({
       traffic.collider = collider;
       physics.colliderTags.set(collider.handle, { type: "traffic", index });
       freeDriveTraffic.push(traffic);
-      if (isShowcase) {
+      if (traffic.eventOpponent && traffic.name) {
         traffic.nameplate = createOpponentNameplate(traffic.name, ["#ff647c", "#62ddff", "#ffd45a"][index]);
         visual.add(traffic.nameplate);
       }
@@ -6233,7 +6797,10 @@ export function createRacingGame({
     for (const traffic of freeDriveTraffic) {
       if (advancing && traffic.finishTimeSeconds == null) {
         const sample = sampleFreeDriveShowcaseDrivingLine(freeDriveShowcaseDrivingLine, traffic.eventDistance);
-        let targetSpeed = traffic.cruiseSpeed * (sample?.section === "rally" ? 0.62 : 0.82);
+        let targetSpeed = traffic.cruiseSpeed * resolveShowcaseSectionPaceScale(
+          sample?.section,
+          racingDifficulty
+        );
         const lookAhead = sampleFreeDriveShowcaseDrivingLine(freeDriveShowcaseDrivingLine, traffic.eventDistance + 14);
         const headingChange = sample && lookAhead
           ? Math.abs(shortestAngleDelta(sample.heading, lookAhead.heading))
@@ -6244,7 +6811,8 @@ export function createRacingGame({
           .reduce((gap, other) => Math.min(gap, other.eventDistance - traffic.eventDistance), Infinity);
         if (ahead < 16) targetSpeed *= clamp((ahead - 6) / 10, 0, 1);
         const playerAhead = showcaseEvent.playerDistance - traffic.eventDistance;
-        if (traffic.eventDistance >= 0 && playerAhead > 0 && playerAhead < 12) {
+        const leadCapMeters = resolveOpponentDifficultyProfile(racingDifficulty).playerLeadSpeedCapMeters;
+        if (leadCapMeters > 0 && traffic.eventDistance >= 0 && playerAhead > 0 && playerAhead < leadCapMeters) {
           targetSpeed = Math.min(targetSpeed, state.velocity.length());
         }
         traffic.currentSpeed = moveToward(traffic.currentSpeed, targetSpeed, deltaSeconds * 7);
@@ -6672,11 +7240,13 @@ export function createRacingGame({
     visualRoot.add(boostGroup);
     group.add(visualRoot);
     const fallbackSize = new THREE.Box3().setFromObject(visualRoot).getSize(new THREE.Vector3());
+    const fallbackBox = new THREE.Box3().setFromObject(visualRoot);
     group.userData.cameraMetrics = {
       width: fallbackSize.x,
       height: fallbackSize.y,
       length: fallbackSize.z
     };
+    attachBrakeLights(group, fallbackSize, fallbackBox);
     return group;
   }
 
@@ -6707,6 +7277,7 @@ export function createRacingGame({
 
       updateCarTransform(deltaSeconds);
       updateBoostEffect(timestamp);
+      updateBrakeLights();
       updateStartGateLights();
       updateDrivingDust(deltaSeconds);
       updateFreeDriveWater(deltaSeconds);
@@ -6719,6 +7290,7 @@ export function createRacingGame({
 
     updateRacingAudio();
     updateRacingHaptics();
+    updateCoastalChallengePrompt();
     updateHud();
     const renderStartedAt = clock.now();
     renderer.render(scene, camera);
@@ -6764,6 +7336,7 @@ export function createRacingGame({
       document.activeElement.blur();
     }
 
+    updateRacingAudio();
     updateHud();
     updateCollisionDebugHud();
     return raceState.paused;
@@ -6783,11 +7356,19 @@ export function createRacingGame({
       state.steering = controls.steering;
       return;
     }
-    if (showcaseMatrixControls && isShowcase && showcaseEvent.phase === "running") {
+    if (showcaseMatrixControls && (
+      (isShowcase && showcaseEvent.phase === "running")
+      || isProvingGround
+    )) {
       state.throttle = showcaseMatrixControls.throttle;
       state.brake = showcaseMatrixControls.brake;
       state.steering = showcaseMatrixControls.steering;
       return;
+    }
+    if (activeChallengePromptId && !challengePrompt?.hidden) {
+      // Keep coasting gently while the confirm prompt is up.
+      state.throttle *= 0.92;
+      state.brake = Math.max(state.brake, 0.08);
     }
     const throttlePressed = keyState.has("KeyW") || keyState.has("ArrowUp");
     const brakePressed = keyState.has("KeyS") || keyState.has("ArrowDown");
@@ -6811,7 +7392,7 @@ export function createRacingGame({
       showcaseMatrixControls = null;
       return true;
     }
-    if (!isShowcase || !controls || typeof controls !== "object") return false;
+    if ((!isShowcase && !isProvingGround) || !controls || typeof controls !== "object") return false;
     showcaseMatrixControls = Object.freeze({
       throttle: clamp(Number(controls.throttle) || 0, 0, 1),
       brake: clamp(Number(controls.brake) || 0, 0, 1),
@@ -6824,17 +7405,23 @@ export function createRacingGame({
     const drivetrain = physics?.playerVehicle?.drivetrain;
     const tireDynamics = physics?.playerVehicle?.tireDynamics;
     const vehicleSpec = playerVehicleSpec();
+    const raceAudioLive = active && !raceState.resultVisible && !isStartOverlayVisible();
     racingAudio.update({
       signedSpeed: physics?.playerVehicle?.speed ?? state.velocity.length(),
       throttle: state.throttle,
       boostActive: state.boostSeconds > 0,
-      enabled: active && !raceState.paused && !raceState.resultVisible,
+      enabled: raceAudioLive && !raceState.paused,
       maxForwardSpeed: playerMaxForwardSpeed(),
       engineRpm: drivetrain?.engineRpm,
       idleRpm: vehicleSpec.idleRpm,
       maximumRpm: vehicleSpec.redlineRpm,
       tireSlip: tireDynamics?.squeal ?? 0,
-      environment: isShowcase ? presentationState.environment : "road"
+      environment: isShowcase ? presentationState.environment : "road",
+      nitroAudioPreset: nitroAudioPresetId
+    });
+    racingAudio.setMusic({
+      playing: raceAudioLive,
+      ducked: raceState.paused
     });
   }
 
@@ -6847,11 +7434,89 @@ export function createRacingGame({
       && state.trackProgress <= freeDriveTunnelConfig.endProgress;
     presentationState.environment = showcaseEvent.phase !== "running"
       ? "road" : onRally ? "rally" : inTunnel ? "tunnel" : "road";
+
+    const dayState = dayCycle.advance(deltaSeconds, { paused: raceState.paused || !active });
+    applyCoastalDayCycleLighting(dayState.lighting);
+
     const targetExposure = presentationState.baselineExposure
+      * dayState.lighting.exposureScale
       * (presentationState.environment === "tunnel" ? 0.82 : 1);
     const follow = 1 - Math.exp(-deltaSeconds * 3.4);
     presentationState.exposure += (targetExposure - presentationState.exposure) * follow;
     renderer.toneMappingExposure = presentationState.exposure;
+  }
+
+  function applyCoastalDayCycleLighting(lighting) {
+    if (!sceneLights || !lighting) return;
+    const { hemisphere, sun, fill } = sceneLights;
+    hemisphere.intensity = lighting.hemisphereIntensity;
+    hemisphere.color.setHex(lighting.hemisphereSky);
+    hemisphere.groundColor.setHex(lighting.hemisphereGround);
+    sun.intensity = lighting.sunIntensity;
+    sun.color.setHex(lighting.sunColor);
+    const radius = isFreeDrive ? 240 : 90;
+    const elevation = lighting.sunElevation;
+    const azimuth = lighting.sunAzimuth;
+    sun.position.set(
+      Math.cos(azimuth) * radius,
+      Math.max(8, (elevation + 0.35) * (isFreeDrive ? 220 : 70)),
+      Math.sin(azimuth) * radius
+    );
+    fill.intensity = lighting.fillIntensity;
+    fill.color.setHex(lighting.fillColor);
+    if (scene) {
+      if ("environmentIntensity" in scene) scene.environmentIntensity = lighting.environmentIntensity;
+      if ("backgroundIntensity" in scene) scene.backgroundIntensity = lighting.backgroundIntensity;
+    }
+    if (playerHeadlight && car) {
+      const boost = lighting.headlightBoost;
+      playerHeadlight.intensity = boost * 2.8;
+      playerHeadlight.visible = boost > 0.05;
+      const forwardX = Math.sin(state.heading);
+      const forwardZ = Math.cos(state.heading);
+      playerHeadlight.position.set(
+        state.position.x + forwardX * 1.1,
+        (physics?.playerBody?.translation()?.y ?? 1.1) + 0.55,
+        state.position.y + forwardZ * 1.1
+      );
+      playerHeadlight.target.position.set(
+        state.position.x + forwardX * 18,
+        playerHeadlight.position.y - 0.4,
+        state.position.y + forwardZ * 18
+      );
+      playerHeadlight.target.updateMatrixWorld();
+    }
+  }
+
+  function setDayCycleFreeze(phaseId) {
+    if (!isShowcase) return null;
+    const next = dayCycle.setFrozenPhase(phaseId === "auto" ? null : phaseId);
+    renderDayCycleOptions();
+    const snapshot = dayCycle.snapshot();
+    applyCoastalDayCycleLighting(snapshot.lighting);
+    if (renderer) {
+      presentationState.exposure = presentationState.baselineExposure * snapshot.lighting.exposureScale;
+      renderer.toneMappingExposure = presentationState.exposure;
+    }
+    return snapshot.frozenPhase;
+  }
+
+  function renderDayCycleOptions() {
+    if (dayCycleRow) dayCycleRow.hidden = !isShowcase;
+    const frozen = dayCycle.getFrozenPhase();
+    for (const button of dayCycleButtons) {
+      const id = button.dataset.dayCycle;
+      const pressed = id === "auto" ? frozen == null : id === frozen;
+      button.setAttribute("aria-pressed", pressed ? "true" : "false");
+      button.classList.toggle("is-selected", pressed);
+    }
+  }
+
+  function handleDayCycleButtonClick(event) {
+    const button = event.currentTarget;
+    const id = button?.dataset?.dayCycle;
+    if (!id) return;
+    setDayCycleFreeze(id === "auto" ? null : normalizeDayCyclePhaseId(id));
   }
 
   function updateRacingHaptics() {
@@ -6888,6 +7553,56 @@ export function createRacingGame({
       const trafficActive = isFreeDrive && traffic.boostSeconds > 0 && traffic.currentSpeed > 2;
       updateCarBoostEffect(traffic.visual, trafficActive, timestamp + 137 + traffic.index * 97);
     }
+  }
+
+  function attachBrakeLights(group, size, box) {
+    if (!group?.userData?.visualRoot) return null;
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x3a1010,
+      emissive: 0xff1a12,
+      emissiveIntensity: 0.08,
+      roughness: 0.38,
+      metalness: 0.12
+    });
+    const geometry = new THREE.BoxGeometry(
+      Math.max(0.18, size.x * 0.12),
+      Math.max(0.08, size.y * 0.06),
+      0.05
+    );
+    const left = new THREE.Mesh(geometry, material);
+    const right = new THREE.Mesh(geometry, material.clone());
+    const rearZ = (Number.isFinite(box?.min?.z) ? box.min.z : -size.z * 0.5) - 0.01;
+    const y = Math.max(0.28, (Number.isFinite(box?.min?.y) ? box.min.y : 0) + size.y * 0.42);
+    const x = Math.max(0.35, size.x * 0.28);
+    left.position.set(-x, y, rearZ);
+    right.position.set(x, y, rearZ);
+    group.userData.visualRoot.add(left, right);
+    group.userData.brakeLights = [left, right];
+    group.userData.brakeLightMaterials = [left.material, right.material];
+    group.userData.brakeLightsActive = false;
+    return group.userData.brakeLights;
+  }
+
+  function setCarBrakeLightsActive(targetCar, active) {
+    const materials = targetCar?.userData?.brakeLightMaterials;
+    if (!materials?.length) return false;
+    const next = Boolean(active);
+    targetCar.userData.brakeLightsActive = next;
+    for (const material of materials) {
+      material.emissiveIntensity = next ? 2.55 : 0.08;
+      material.color.setHex(next ? 0xff2a1a : 0x3a1010);
+      material.emissive.setHex(next ? 0xff1a12 : 0x4a0808);
+    }
+    return next;
+  }
+
+  function updateBrakeLights() {
+    const playerBraking = !raceState.paused
+      && active
+      && !isStartOverlayVisible()
+      && state.brake > 0.12
+      && !(raceState.finished && raceConfig.mode === "sprint" && !raceState.resultVisible);
+    setCarBrakeLightsActive(car, playerBraking);
   }
 
   function updateCarBoostEffect(targetCar, active, timestamp) {
@@ -6988,9 +7703,21 @@ export function createRacingGame({
       if (freeDriveJumpState.assistWasAirborne && playerSurfaceState.grounded) {
         freeDriveJumpState.attitudeAssistSeconds = 0;
       } else {
+        const assistStep = stepAirAttitudeAssist({
+          assistedHeading: freeDriveJumpState.assistedHeading,
+          assistedVelocityX: freeDriveJumpState.assistedVelocityX,
+          assistedVelocityZ: freeDriveJumpState.assistedVelocityZ,
+          steering: state.steering,
+          deltaSeconds,
+          authority: AIR_YAW_AUTHORITY,
+          groundYawRateMax: GROUND_YAW_RATE_REFERENCE
+        });
+        freeDriveJumpState.assistedHeading = assistStep.assistedHeading;
+        freeDriveJumpState.assistedVelocityX = assistStep.assistedVelocityX;
+        freeDriveJumpState.assistedVelocityZ = assistStep.assistedVelocityZ;
         const assistedVelocity = physics.playerBody.linvel();
         physics.playerBody.setRotation(rapierRotationFromYaw(freeDriveJumpState.assistedHeading), true);
-        physics.playerBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+        physics.playerBody.setAngvel({ x: 0, y: assistStep.yawRate, z: 0 }, true);
         physics.playerBody.setLinvel({
           x: freeDriveJumpState.assistedVelocityX,
           y: assistedVelocity.y,
@@ -7056,10 +7783,31 @@ export function createRacingGame({
         const tag = physics.colliderTags.get(collider.handle);
         return isPhysicalVehicleSurface(tag);
       },
-      surfaceId: playerSurfaceState.surfaceId,
-      grounded: playerSurfaceState.grounded
+      surfaceId: effectiveDrivingSurfaceId(),
+      grounded: playerSurfaceState.grounded,
+      rollingDragScale: surfaceRollingDragScale(effectiveDrivingSurfaceId())
     });
+    applyAirborneYawControl(deltaSeconds);
     syncPhysicalVehicleState();
+  }
+
+  function applyAirborneYawControl(deltaSeconds) {
+    if (!physics?.playerBody) return;
+    // Bridge launch assist owns pose while active; skip double application.
+    if (freeDriveJumpState.attitudeAssistSeconds > 0) return;
+    const airborne = freeDriveJumpState.airborne || !playerSurfaceState.grounded;
+    if (!airborne) return;
+    const yawRate = resolveAirYawRate({
+      airborne: true,
+      steering: state.steering,
+      authority: AIR_YAW_AUTHORITY,
+      groundYawRateMax: GROUND_YAW_RATE_REFERENCE
+    });
+    const angvel = physics.playerBody.angvel();
+    // Yaw-only authority: damp residual yaw toward target; leave pitch/roll rates alone.
+    const yawBlend = Math.min(1, Math.max(0, Number(deltaSeconds) * 12));
+    const nextYaw = angvel.y + (yawRate - angvel.y) * yawBlend;
+    physics.playerBody.setAngvel({ x: angvel.x, y: nextYaw, z: angvel.z }, true);
   }
 
   function updateOpponent(deltaSeconds) {
@@ -7406,15 +8154,12 @@ export function createRacingGame({
 
   function announceShowcaseSectionProgress(nextCheckpoint) {
     const enteredCheckpoint = freeDriveShowcaseCheckpoints[Math.max(0, nextCheckpoint - 1)];
-    const next = freeDriveShowcaseCheckpoints[nextCheckpoint];
     if (enteredCheckpoint?.section === "tunnel" || enteredCheckpoint?.section === "rally") {
       showcaseEvent.currentSection = enteredCheckpoint.section;
     } else if (enteredCheckpoint?.section === "road") {
       showcaseEvent.currentSection = "road";
     }
-    if (nextCheckpoint === freeDriveShowcaseCheckpoints.length - 1 && next?.section === "finish") {
-      queueShowcaseSectionCue("final");
-    }
+    // #10: do not queue central FINAL PUSH / FINISH AHEAD banner near the finish.
   }
 
   function queueShowcaseSectionCue(section) {
@@ -7430,9 +8175,12 @@ export function createRacingGame({
     if (!section || showcaseEvent.phase !== "running" || showcaseEvent.recoveryNoticeSeconds > 0) return;
     const labels = {
       tunnel: ["TUNNEL RUN", "LIGHTS ON · HOLD THE LINE"],
-      rally: ["RALLY STAGE", "LOOSE SURFACE"],
-      final: ["FINAL PUSH", "FINISH AHEAD"]
+      rally: ["RALLY STAGE", "LOOSE SURFACE"]
     };
+    if (!labels[section]) {
+      showcaseEvent.pendingSectionCue = null;
+      return;
+    }
     showcaseEvent.pendingSectionCue = null;
     showcaseEvent.announcedSections.add(section);
     showcaseEvent.lastAnnouncedSection = section;
@@ -8157,7 +8905,12 @@ ${shader.vertexShader}`
     cameraMode = cameraMode === RACING_CAMERA_MODES.CHASE
       ? RACING_CAMERA_MODES.HOOD
       : RACING_CAMERA_MODES.CHASE;
-    saveActiveRacingStartConfig({ playerCarId: selectedCarId, cameraMode });
+    saveActiveRacingStartConfig({
+      playerCarId: selectedCarId,
+      cameraMode,
+      coastalPlayMode,
+      difficulty: racingDifficulty
+    });
     if (camera) {
       camera.fov = cameraMode === RACING_CAMERA_MODES.HOOD
         ? fallbackHoodCameraConfig.fov
@@ -8205,7 +8958,29 @@ ${shader.vertexShader}`
         : formatDistanceHud(sprintRemainingDistance(state));
       placeValue.textContent = isFreeDrive ? "FREE" : `${raceState.playerPlace} / ${raceState.opponentEnabled ? 2 : 1}`;
     }
-    speedValue.textContent = `${Math.round(state.velocity.length() * 3.6)}`;
+    const gaugeFrozen = raceState.paused
+      || !active
+      || hudOverlay?.hidden
+      || isStartOverlayVisible()
+      || raceState.resultVisible;
+    const gaugeReading = resolveHudGaugeReading({
+      speedKmh: state.velocity.length() * 3.6,
+      drivetrain: physics?.playerVehicle?.drivetrain ?? null,
+      vehicleSpec: playerVehicleSpec(),
+      frozen: gaugeFrozen,
+      previous: frozenHudGaugeReading
+    });
+    if (!gaugeFrozen) {
+      frozenHudGaugeReading = gaugeReading;
+    }
+    if (gaugePanel) {
+      gaugePanel.hidden = Boolean(hudOverlay?.hidden);
+      gaugePanel.classList.toggle("is-frozen", gaugeFrozen);
+    }
+    speedValue.textContent = `${gaugeReading.speedKmh}`;
+    if (rpmValue) rpmValue.textContent = `${gaugeReading.engineRpm}`;
+    if (rpmFill) rpmFill.style.width = `${Math.round(gaugeReading.rpmFillRatio * 100)}%`;
+    if (gearValue) gearValue.textContent = gaugeReading.gearLabel;
     boostValue.textContent = state.boostSeconds > 0
       ? `${state.boostSeconds.toFixed(1)}S`
       : boostConfig.unlimited ? "∞" : `x${state.boostCharges}`;
@@ -8379,7 +9154,7 @@ ${shader.vertexShader}`
       }
     }
 
-    if (isShowcase) startShowcaseCountdown();
+    if (isShowcase && !isCoastalFreeCruise()) startShowcaseCountdown();
     updateHud();
   }
 
@@ -8405,7 +9180,12 @@ ${shader.vertexShader}`
     freeDriveJumpState.launchCooldownSeconds = 0;
     freeDriveJumpState.attitudeAssistSeconds = 0;
     freeDriveJumpState.assistWasAirborne = false;
+    dayCycle.reset();
     if (renderer) renderer.toneMappingExposure = presentationState.baselineExposure;
+    if (isShowcase) {
+      const lighting = dayCycle.snapshot().lighting;
+      applyCoastalDayCycleLighting(lighting);
+    }
   }
 
   function revealSprintResult() {
@@ -8424,6 +9204,9 @@ ${shader.vertexShader}`
     resultCard.classList.toggle("is-win", winner === "player");
     resultCard.classList.toggle("is-loss", winner !== "player");
     const playerPlace = winner === "player" ? 1 : 2;
+    if (activeChallenge?.rewardCarId && winner === "player") {
+      challengeUnlockState = unlockChallengeCar(activeChallenge.rewardCarId);
+    }
     lockedResult ??= createRacingResult({
       snapshot: activeSnapshot,
       winner,
@@ -8432,7 +9215,9 @@ ${shader.vertexShader}`
       details: {
         mode: raceConfig.mode,
         playerFinishTimeSeconds: state.finishTimeSeconds,
-        opponentFinishTimeSeconds: opponentState.finishTimeSeconds
+        opponentFinishTimeSeconds: opponentState.finishTimeSeconds,
+        challengePointId: activeChallenge?.pointId ?? null,
+        unlockedCarId: activeChallenge && winner === "player" ? activeChallenge.rewardCarId : null
       }
     });
     sessionControls?.transition("cinematic", { result: lockedResult });
@@ -8442,6 +9227,21 @@ ${shader.vertexShader}`
     finishPlaceSuffix.textContent = playerPlace === 1 ? "ST" : "ND";
     finishTrack.textContent = `${mapData.name} · ${raceConfig.mode === "lap" ? "闭环赛" : "冲刺赛"}`;
 
+    if (activeChallenge?.rewardCarId) {
+      const reward = getRacingCarById(activeChallenge.rewardCarId);
+      resultSummary.textContent = winner === "player"
+        ? `挑战胜利 · 已解锁 ${reward.name}`
+        : `挑战失败 · ${reward.name} 仍未解锁，可回巡游再战`;
+      resultPlayerLabel.textContent = "你的成绩";
+      resultOpponentLabel.textContent = "对手";
+      resultPlayerValue.textContent = formatTime(state.finishTimeSeconds ?? raceState.elapsedSeconds);
+      resultOpponentValue.textContent = formatTime(opponentState.finishTimeSeconds ?? raceState.elapsedSeconds);
+      playAgainButton.textContent = "返回巡游";
+      hudOverlay.hidden = true;
+      resultOverlay.hidden = false;
+      void finishCinematic.start({ carConfig: selectedCar(), result: lockedResult });
+      return;
+    }
     if (raceConfig.mode === "lap") {
       resultSummary.textContent = !raceState.opponentEnabled
         ? `你完成了 ${raceConfig.totalLaps} 圈。`
@@ -8532,7 +9332,7 @@ ${shader.vertexShader}`
   }
 
   function activateBoost() {
-    if (isShowcase && showcaseEvent.phase !== "running") {
+    if (isShowcase && !isCoastalFreeCruise() && showcaseEvent.phase !== "running") {
       return false;
     }
     if (raceState.finished || state.stoppedByImpactSeconds > 0) {
@@ -8777,7 +9577,13 @@ ${shader.vertexShader}`
 
   function playerMaxForwardSpeed() {
     return playerVehicleSpec().topSpeedKmh / 3.6
-      * (state.boostSeconds > 0 ? boostConfig.topSpeedMultiplier : 1);
+      * (state.boostSeconds > 0 ? boostConfig.topSpeedMultiplier : 1)
+      * surfaceTopSpeedScale(effectiveDrivingSurfaceId());
+  }
+
+  function effectiveDrivingSurfaceId() {
+    if (provingSurfaceOverride) return provingSurfaceOverride;
+    return resolveDrivingSurfaceId(playerSurfaceState.surfaceId, trackSurface);
   }
 
   function formatLapDisplay(completedLaps) {
@@ -8979,7 +9785,7 @@ ${shader.vertexShader}`
       drivetrainScale: drivetrain?.driveScale ?? 0,
       tcsEngineScale: tireDynamics?.engineScale ?? 1,
       engineForcePerWheel: vehicle?.engineForce ?? 0,
-      surfaceId: playerSurfaceState.surfaceId
+      surfaceId: effectiveDrivingSurfaceId()
     };
   }
 
@@ -9131,15 +9937,43 @@ ${shader.vertexShader}`
     return true;
   }
 
+  function setPlayerPlanarSpeed(speedMps = 0) {
+    if (!physics?.playerBody) return false;
+    const speed = Math.max(0, Number(speedMps));
+    if (!Number.isFinite(speed)) return false;
+    const heading = state.heading;
+    const velocityX = Math.sin(heading) * speed;
+    const velocityZ = Math.cos(heading) * speed;
+    state.velocity.set(velocityX, velocityZ);
+    physics.playerBody.setLinvel({ x: velocityX, y: 0, z: velocityZ }, true);
+    physics.playerBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    return true;
+  }
+
   registerDebugApi();
   startRaceButton.addEventListener("click", handleStartRaceButtonClick);
   startEditorButton.addEventListener("click", handleStartEditorButtonClick);
   startHomeButton.addEventListener("click", handleStartHomeButtonClick);
+  coastalModeIslandTourButton.addEventListener("click", handleCoastalModeIslandTourButtonClick);
+  coastalModeFreeCruiseButton.addEventListener("click", handleCoastalModeFreeCruiseButtonClick);
+  for (const button of difficultyButtons) {
+    button.addEventListener("click", handleDifficultyButtonClick);
+  }
+  for (const button of nitroAudioPresetButtons) {
+    button.addEventListener("click", handleNitroAudioPresetButtonClick);
+  }
+  for (const button of dayCycleButtons) {
+    button.addEventListener("click", handleDayCycleButtonClick);
+  }
+  renderNitroAudioPresetOptions();
+  renderDayCycleOptions();
   resumeButton.addEventListener("click", handleResumeButtonClick);
   pauseResetButton.addEventListener("click", handlePauseResetButtonClick);
   pauseEditorButton.addEventListener("click", handlePauseEditorButtonClick);
   pauseHomeButton.addEventListener("click", handlePauseHomeButtonClick);
   playAgainButton.addEventListener("click", handleResetButtonClick);
+  challengeConfirmButton?.addEventListener("click", handleChallengeConfirmButtonClick);
+  challengeCancelButton?.addEventListener("click", handleChallengeCancelButtonClick);
 
   return { start, stop, reset: resetRace, destroy };
 }

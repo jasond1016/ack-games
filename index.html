@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>ACK Games</title>
     <link rel="icon" href="data:,">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
     <script type="importmap">
       {
@@ -238,41 +241,49 @@
         <canvas id="vacuumCanvas" class="game-canvas vacuum-canvas" width="640" height="760" aria-label="吸尘器接管道游戏画面"></canvas>
       </section>
 
-      <section id="racingMapSelectView" class="game-view racing-map-select-view" aria-label="赛车地图选择" hidden>
-        <header class="topbar">
-          <button id="racingMapSelectHomeButton" class="icon-button" type="button" aria-label="返回首页" title="返回首页">
-            ‹
-          </button>
-          <h1>地图选择</h1>
-          <div class="topbar-actions">
-            <button id="racingMapSelectRaceButton" class="primary-button" type="button">开始比赛</button>
-            <button id="racingMapSelectEditButton" class="secondary-button" type="button">编辑地图</button>
+      <section id="racingMapSelectView" class="game-view racing-map-select-view map-select-horizon-strip" aria-label="赛车地图选择" hidden>
+        <div class="map-select-horizon">
+          <div class="map-select-horizon-sky" aria-hidden="true"></div>
+          <div class="map-select-horizon-meta">
+            <button id="racingMapSelectHomeButton" class="map-select-home-button" type="button" aria-label="返回首页" title="返回首页">‹ HOME</button>
+            <div class="map-select-summary" aria-label="当前地图摘要">
+              <div>
+                <span>MAP</span>
+                <strong id="racingMapSelectName">F1 练习场</strong>
+              </div>
+              <div>
+                <span>TYPE</span>
+                <strong id="racingMapSelectMeta">闭环赛道 · 柏油路面</strong>
+              </div>
+            </div>
           </div>
-        </header>
+          <h1 class="map-select-horizon-title">选地图</h1>
+          <p class="map-select-copy">开始比赛始终使用当前选中地图。编辑预设地图时会自动复制成用户地图后再进入编辑器。</p>
+        </div>
 
-        <div class="map-select-layout">
-          <section class="map-select-hero">
-            <p class="map-select-tag">当前选中地图</p>
-            <h2 id="racingMapSelectName" class="map-select-name">F1 练习场</h2>
-            <p id="racingMapSelectMeta" class="map-select-meta">闭环赛道 · 柏油路面</p>
-            <p class="map-select-copy">开始比赛始终使用当前选中地图。编辑预设地图时会自动复制成用户地图后再进入编辑器。</p>
-          </section>
+        <div class="map-select-strip">
+          <div class="map-select-strip-groups">
+            <section class="map-select-group" aria-labelledby="racingPresetMapsHeading">
+              <div class="map-select-group-header">
+                <h2 id="racingPresetMapsHeading">PRESET</h2>
+              </div>
+              <div id="racingPresetMaps" class="map-select-grid"></div>
+            </section>
 
-          <section class="map-select-group" aria-labelledby="racingPresetMapsHeading">
-            <div class="map-select-group-header">
-              <h2 id="racingPresetMapsHeading">预设地图</h2>
-            </div>
-            <div id="racingPresetMaps" class="map-select-grid"></div>
-          </section>
+            <section class="map-select-group" aria-labelledby="racingUserMapsHeading">
+              <div class="map-select-group-header">
+                <h2 id="racingUserMapsHeading">USER</h2>
+                <button id="racingMapSelectNewButton" class="map-select-side-button" type="button">新建地图</button>
+              </div>
+              <div id="racingUserMaps" class="map-select-grid"></div>
+              <p id="racingUserMapsEmpty" class="map-select-empty" hidden>还没有用户地图，先新建一张。</p>
+            </section>
+          </div>
 
-          <section class="map-select-group" aria-labelledby="racingUserMapsHeading">
-            <div class="map-select-group-header">
-              <h2 id="racingUserMapsHeading">用户地图</h2>
-              <button id="racingMapSelectNewButton" class="secondary-button" type="button">新建地图</button>
-            </div>
-            <div id="racingUserMaps" class="map-select-grid"></div>
-            <p id="racingUserMapsEmpty" class="map-select-empty" hidden>还没有用户地图，先新建一张。</p>
-          </section>
+          <div class="map-select-strip-actions">
+            <button id="racingMapSelectRaceButton" class="map-select-go" type="button">GO</button>
+            <button id="racingMapSelectEditButton" class="map-select-side-button" type="button">EDIT</button>
+          </div>
         </div>
       </section>
 
@@ -302,14 +313,27 @@
               <em id="racingRouteNotice" class="race-route-notice" hidden>RECOVERED +2.5S</em>
             </div>
 
-            <div class="race-hud-panel race-hud-panel-bottom-left race-boost-panel">
-              <span class="race-hud-label">BOOST</span>
-              <strong id="racingBoostValue" class="race-hud-value">∞</strong>
+            <div id="racingGaugePanel" class="race-hud-panel race-hud-panel-bottom-left race-gauge-panel" aria-label="驾驶仪表">
+              <div class="race-gauge-speed">
+                <span class="race-speed-unit">KM/H</span>
+                <strong id="racingSpeedValue" class="race-speed-value">0</strong>
+              </div>
+              <div class="race-gauge-rpm">
+                <span class="race-hud-label">RPM</span>
+                <div class="race-gauge-rpm-track" aria-hidden="true">
+                  <div id="racingRpmFill" class="race-gauge-rpm-fill"></div>
+                </div>
+                <strong id="racingRpmValue" class="race-gauge-rpm-value">0</strong>
+              </div>
+              <div class="race-gauge-gear">
+                <span class="race-hud-label">GEAR</span>
+                <strong id="racingGearValue" class="race-gauge-gear-value">1</strong>
+              </div>
             </div>
 
-            <div class="race-hud-panel race-hud-panel-bottom-right race-speed-panel">
-              <span class="race-speed-unit">KM/H</span>
-              <strong id="racingSpeedValue" class="race-speed-value">0</strong>
+            <div class="race-hud-panel race-hud-panel-bottom-right race-boost-panel">
+              <span class="race-hud-label">BOOST</span>
+              <strong id="racingBoostValue" class="race-hud-value">∞</strong>
             </div>
           </section>
 
@@ -319,55 +343,94 @@
             <span id="racingEventBannerDetail" class="race-event-banner-detail">ISLAND TOUR</span>
           </section>
 
-          <section id="racingStartOverlay" class="race-start-overlay" aria-label="开赛配置" hidden>
-            <div class="race-start-card">
-              <p class="race-start-tag">开赛配置</p>
-              <h2 class="race-start-title">选择参赛车</h2>
-              <p class="race-start-copy">当前阶段只切换玩家参赛车，对手会自动改用另一辆现有赛车。</p>
-              <div class="race-start-summary">
-                <div>
-                  <span>地图</span>
-                  <strong id="racingStartMapValue">F1 练习场</strong>
+          <section id="racingStartOverlay" class="race-start-overlay race-start-horizon-strip" aria-label="开赛配置" hidden>
+            <div class="race-start-horizon">
+              <div class="race-start-horizon-sky" aria-hidden="true"></div>
+              <div class="race-start-horizon-meta">
+                <div class="race-start-summary" aria-label="开赛摘要">
+                  <div>
+                    <span>MAP</span>
+                    <strong id="racingStartMapValue">F1 练习场</strong>
+                  </div>
+                  <div>
+                    <span>RUN</span>
+                    <strong id="racingStartModeValue">闭环赛</strong>
+                  </div>
+                  <div>
+                    <span>RIVAL</span>
+                    <strong id="racingStartOpponentValue">DBR9</strong>
+                  </div>
                 </div>
-                <div>
-                  <span>赛制</span>
-                  <strong id="racingStartModeValue">闭环赛</strong>
-                </div>
-                <div>
-                  <span>对手车辆</span>
-                  <strong id="racingStartOpponentValue">DBR9</strong>
+                <div class="race-start-cats" aria-hidden="true">
+                  <span class="race-start-cat is-active">CAR</span>
+                  <span class="race-start-cat">RUN</span>
                 </div>
               </div>
-              <div class="race-start-layout">
-                <section id="racingSelectedCarPanel" class="race-car-feature" aria-label="当前选中赛车预览">
-                  <div class="race-car-feature-stage" aria-hidden="true">
-                    <canvas
-                      id="racingSelectedCarPreview"
-                      class="race-car-feature-canvas"
-                      width="960"
-                      height="540"
-                    ></canvas>
-                    <div class="race-car-feature-top">
-                      <span id="racingSelectedCarBadge" class="race-car-badge">中置超跑</span>
-                      <span class="race-car-feature-hint">拖动旋转</span>
-                    </div>
+              <strong id="racingSelectedCarName" class="race-start-horizon-title">Aventador LP720-4 50th</strong>
+              <section id="racingSelectedCarPanel" class="race-car-feature" aria-label="当前选中赛车预览">
+                <div class="race-car-feature-stage" aria-hidden="true">
+                  <canvas
+                    id="racingSelectedCarPreview"
+                    class="race-car-feature-canvas"
+                    width="960"
+                    height="540"
+                  ></canvas>
+                  <div class="race-car-feature-top">
+                    <span id="racingSelectedCarBadge" class="race-car-badge">中置超跑</span>
+                    <span class="race-car-feature-hint">DRAG</span>
                   </div>
-                  <div class="race-car-feature-copy">
-                    <span id="racingSelectedCarMake" class="race-car-feature-make">Lamborghini</span>
-                    <strong id="racingSelectedCarName" class="race-car-feature-name">Aventador LP720-4 50th</strong>
-                    <p id="racingSelectedCarSummary" class="race-car-feature-summary">
-                      线条低矮的公路超跑，作为当前默认参赛车提供。
-                    </p>
-                  </div>
-                </section>
+                </div>
+                <div class="race-car-feature-copy">
+                  <span id="racingSelectedCarMake" class="race-car-feature-make">Lamborghini</span>
+                  <p id="racingSelectedCarSummary" class="race-car-feature-summary visually-hidden">
+                    线条低矮的公路超跑，作为当前默认参赛车提供。
+                  </p>
+                </div>
+              </section>
+            </div>
+            <div class="race-start-strip">
+              <div id="racingCoastalModeRow" class="race-coastal-mode-row" aria-label="巡游模式" hidden>
+                <div class="race-coastal-mode-options" role="group" aria-label="选择 Coastal Showcase 巡游模式">
+                  <button
+                    id="racingCoastalModeIslandTourButton"
+                    class="race-coastal-mode-button is-selected"
+                    type="button"
+                    aria-pressed="true"
+                  ><span class="race-coastal-mode-swatch" aria-hidden="true"></span><span>TOUR</span></button>
+                  <button
+                    id="racingCoastalModeFreeCruiseButton"
+                    class="race-coastal-mode-button"
+                    type="button"
+                    aria-pressed="false"
+                  ><span class="race-coastal-mode-swatch race-coastal-mode-swatch-cruise" aria-hidden="true"></span><span>CRUISE</span></button>
+                </div>
+              </div>
+              <div id="racingDifficultyRow" class="race-difficulty-row" aria-label="难度" hidden>
+                <div class="race-difficulty-options" role="group" aria-label="选择对手难度">
+                  <button id="racingDifficultyEasyButton" class="race-difficulty-button" type="button" data-difficulty="easy" aria-pressed="false">EASY</button>
+                  <button id="racingDifficultyStandardButton" class="race-difficulty-button is-selected" type="button" data-difficulty="standard" aria-pressed="true">STD</button>
+                  <button id="racingDifficultyHardButton" class="race-difficulty-button" type="button" data-difficulty="hard" aria-pressed="false">HARD</button>
+                </div>
+              </div>
+              <div class="race-start-strip-body">
                 <div id="racingCarOptions" class="race-car-grid" aria-label="可选赛车列表"></div>
+                <div class="race-start-strip-actions">
+                  <button id="racingStartRaceButton" class="race-start-go" type="button">GO</button>
+                  <button id="racingStartEditorButton" class="race-start-side-button" type="button">EDIT</button>
+                  <button id="racingStartHomeButton" class="race-start-side-button" type="button">HOME</button>
+                </div>
               </div>
-              <p id="racingStartStatus" class="race-start-status">已准备开赛。Xbox 360 手柄按 A 开赛。</p>
-              <div class="race-start-actions">
-                <button id="racingStartRaceButton" class="primary-button" type="button">开始比赛</button>
-                <button id="racingStartEditorButton" class="secondary-button" type="button">编辑地图</button>
-                <button id="racingStartHomeButton" class="secondary-button" type="button">返回首页</button>
-              </div>
+              <p id="racingStartStatus" class="race-start-status">Xbox · A 开赛 · 方向键选车</p>
+            </div>
+          </section>
+
+          <section id="racingChallengePrompt" class="race-challenge-prompt" aria-label="挑战确认" hidden>
+            <p id="racingChallengePromptKicker" class="race-challenge-prompt-kicker">CHALLENGE</p>
+            <strong id="racingChallengePromptTitle" class="race-challenge-prompt-title">挑战</strong>
+            <p id="racingChallengePromptDetail" class="race-challenge-prompt-detail">靠近后确认开战</p>
+            <div class="race-challenge-prompt-actions">
+              <button id="racingChallengeConfirmButton" class="race-challenge-confirm" type="button">开战</button>
+              <button id="racingChallengeCancelButton" class="race-challenge-cancel" type="button">取消</button>
             </div>
           </section>
 
@@ -376,6 +439,49 @@
               <p class="race-pause-tag">比赛暂停</p>
               <h2 class="race-pause-title">暂停菜单</h2>
               <p class="race-pause-copy">按 Start 或 ESC 可直接继续比赛。</p>
+              <div id="racingNitroAudioPresetRow" class="race-nitro-preset-row" aria-label="氮气音效">
+                <span class="race-nitro-preset-label">氮气音效试听</span>
+                <div class="race-nitro-preset-options" role="group" aria-label="选择氮气音效预设">
+                  <button
+                    id="racingNitroAudioPresetCurrentButton"
+                    class="race-nitro-preset-button"
+                    type="button"
+                    data-preset-id="current"
+                    aria-pressed="false"
+                  >A · 经典</button>
+                  <button
+                    id="racingNitroAudioPresetJetWhooshButton"
+                    class="race-nitro-preset-button"
+                    type="button"
+                    data-preset-id="jet-whoosh"
+                    aria-pressed="false"
+                  >B · 喷气呼啸</button>
+                  <button
+                    id="racingNitroAudioPresetDeepRumbleButton"
+                    class="race-nitro-preset-button"
+                    type="button"
+                    data-preset-id="deep-rumble"
+                    aria-pressed="false"
+                  >C · 深沉轰鸣</button>
+                  <button
+                    id="racingNitroAudioPresetCleanElectricButton"
+                    class="race-nitro-preset-button"
+                    type="button"
+                    data-preset-id="clean-electric"
+                    aria-pressed="false"
+                  >D · 纯净电流</button>
+                </div>
+                <p class="race-nitro-preset-hint">切换后立即生效，下次按氮气键即用新音色，选择会自动保存为默认。</p>
+              </div>
+              <div id="racingDayCycleRow" class="race-nitro-preset-row" aria-label="昼夜" hidden>
+                <span class="race-nitro-preset-label">昼夜</span>
+                <div class="race-day-cycle-options" role="group" aria-label="冻结时段">
+                  <button id="racingDayCycleAutoButton" class="race-nitro-preset-button" type="button" data-day-cycle="auto" aria-pressed="true">自动</button>
+                  <button id="racingDayCycleDayButton" class="race-nitro-preset-button" type="button" data-day-cycle="day" aria-pressed="false">日</button>
+                  <button id="racingDayCycleNightButton" class="race-nitro-preset-button" type="button" data-day-cycle="night" aria-pressed="false">夜</button>
+                </div>
+                <p class="race-nitro-preset-hint">Coastal 自动缓变；可冻在日/夜。约 4 分钟一循环。</p>
+              </div>
               <div class="race-pause-actions">
                 <button id="racingResumeButton" class="primary-button" type="button">继续比赛</button>
                 <button id="racingPauseResetButton" class="secondary-button" type="button">重开比赛</button>

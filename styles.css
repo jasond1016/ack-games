@@ -235,7 +235,8 @@ body {
   font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", Arial, sans-serif;
 }
 
-body[data-active-view="racing"] {
+body[data-active-view="racing"],
+body[data-active-view="racing-select"] {
   padding: 10px;
   background:
     radial-gradient(circle at top, rgba(118, 163, 212, 0.12), transparent 44%),
@@ -1907,15 +1908,77 @@ h1 {
   font-size: clamp(28px, 4.6vw, 40px);
 }
 
-.race-speed-panel {
-  min-width: 194px;
+.race-boost-panel {
   justify-items: end;
-  padding: 16px 18px 14px;
+  text-align: right;
+}
+
+.race-gauge-panel {
+  min-width: 168px;
+  max-width: min(42vw, 220px);
+  gap: 8px;
+  padding: 12px 14px 10px;
+  pointer-events: none;
+}
+
+.race-gauge-speed {
+  display: grid;
+  gap: 2px;
 }
 
 .race-speed-value {
-  font-size: clamp(52px, 9vw, 84px);
+  font-size: clamp(36px, 6.5vw, 56px);
   line-height: 0.88;
+}
+
+.race-gauge-rpm {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.race-gauge-rpm .race-hud-label {
+  margin: 0;
+}
+
+.race-gauge-rpm-track {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(237, 245, 254, 0.14);
+}
+
+.race-gauge-rpm-fill {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #7fd4ff, #ffda59 72%, #ff6b4a);
+  transform-origin: left center;
+}
+
+.race-gauge-rpm-value {
+  min-width: 3.2ch;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-align: right;
+  color: rgba(237, 245, 254, 0.9);
+}
+
+.race-gauge-gear {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.race-gauge-gear-value {
+  font-size: clamp(22px, 3.6vw, 30px);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  line-height: 1;
 }
 
 .race-start-overlay,
@@ -1957,7 +2020,7 @@ h1 {
   width: min(100%, 1080px);
   height: min(calc(100dvh - (var(--race-overlay-padding) * 2)), 980px);
   max-height: min(calc(100dvh - (var(--race-overlay-padding) * 2)), 980px);
-  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto auto auto auto auto minmax(0, 1fr) auto auto;
   padding: 28px;
   overflow: hidden;
   border-radius: 18px;
@@ -2044,8 +2107,113 @@ h1 {
   line-height: 1.1;
 }
 
+.race-coastal-mode-row {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid rgba(206, 222, 237, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.race-coastal-mode-label {
+  color: rgba(245, 248, 252, 0.64);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.race-coastal-mode-options {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.race-coastal-mode-button {
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(206, 222, 237, 0.22);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(245, 248, 252, 0.86);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.race-coastal-mode-button:hover,
+.race-coastal-mode-button:focus-visible {
+  border-color: rgba(184, 255, 104, 0.5);
+}
+
+.race-coastal-mode-button.is-selected {
+  background: rgba(184, 255, 104, 0.16);
+  border-color: rgba(184, 255, 104, 0.7);
+  color: #b8ff68;
+}
+
+.race-coastal-mode-hint {
+  margin: 0;
+  color: rgba(245, 248, 252, 0.56);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.race-nitro-preset-row {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid rgba(206, 222, 237, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.race-nitro-preset-label {
+  color: rgba(245, 248, 252, 0.64);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.race-nitro-preset-options {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.race-nitro-preset-button {
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(206, 222, 237, 0.22);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(245, 248, 252, 0.86);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.race-nitro-preset-button:hover,
+.race-nitro-preset-button:focus-visible {
+  border-color: rgba(255, 176, 92, 0.5);
+}
+
+.race-nitro-preset-button.is-selected {
+  background: rgba(255, 176, 92, 0.16);
+  border-color: rgba(255, 176, 92, 0.7);
+  color: #ffb05c;
+}
+
+.race-nitro-preset-hint {
+  margin: 0;
+  color: rgba(245, 248, 252, 0.56);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .race-start-layout {
   display: grid;
+  grid-row: 6;
   grid-template-columns: minmax(0, 1.28fr) minmax(280px, 340px);
   gap: 16px;
   align-items: stretch;
@@ -2301,6 +2469,7 @@ h1 {
 
 .race-start-status {
   margin: 0;
+  grid-row: 7;
   color: rgba(245, 248, 252, 0.7);
   font-size: 13px;
   line-height: 1.5;
@@ -2312,6 +2481,7 @@ h1 {
 
 .race-start-actions {
   display: grid;
+  grid-row: 8;
   grid-template-columns: minmax(0, 1.2fr) repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
@@ -2359,59 +2529,159 @@ h1 {
   margin-top: 2px;
 }
 
-.map-select-layout {
-  display: grid;
-  gap: 16px;
-}
-
-.map-select-hero,
-.map-select-group {
-  display: grid;
-  gap: 12px;
-  padding: 18px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 14px 30px rgba(31, 41, 51, 0.08);
-}
-
-.map-select-tag,
-.map-select-name,
-.map-select-meta,
-.map-select-copy,
-.map-select-group-header h2,
-.map-select-empty {
+/*
+ * Map select — B Horizon Strip family. Mirrors the race start overlay
+ * (`.race-start-horizon-strip`): coastal sky gradient + big title up top,
+ * a bottom film-strip of horizontal cards, light text, MAP/GO style labels.
+ */
+.racing-map-select-view.map-select-horizon-strip {
+  --ms-focus: #ffc43a;
+  --ms-go: #3ddc84;
+  width: 100%;
+  max-width: none;
   margin: 0;
+  min-height: calc(100dvh - 20px);
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  border: 1px solid rgba(207, 222, 236, 0.18);
+  border-radius: 14px;
+  overflow: hidden;
+  background: linear-gradient(180deg, #4a90c2 0%, #f0b27a 42%, #c45c26 70%, #1a100c 70%, #0c0a0a 100%);
+  box-shadow: 0 24px 60px rgba(4, 10, 18, 0.38);
+  font-family: "DM Sans", system-ui, sans-serif;
+  color: #f4f1ea;
 }
 
-.map-select-tag {
-  width: fit-content;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(15, 139, 141, 0.12);
-  color: var(--accent-dark);
+.map-select-horizon {
+  position: relative;
+  display: grid;
+  align-content: end;
+  min-height: 0;
+  padding: clamp(14px, 2.4vw, 28px);
+}
+
+.map-select-horizon-sky {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 80% 50% at 70% 18%, #ffffff33 0%, transparent 55%),
+    repeating-linear-gradient(90deg, transparent 0 48px, #ffffff08 48px 49px);
+  opacity: 0.55;
+}
+
+.map-select-horizon-meta {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.map-select-home-button {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid #ffffff28;
+  border-radius: 2px;
+  background: #ffffff14;
+  color: #f4f1ea;
+  font-family: "DM Sans", system-ui, sans-serif;
   font-size: 12px;
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
+  cursor: pointer;
 }
 
-.map-select-name {
-  font-size: clamp(30px, 4.2vw, 42px);
-  line-height: 0.96;
+.map-select-home-button:hover,
+.map-select-home-button:focus-visible {
+  border-color: var(--ms-focus);
+  outline: none;
 }
 
-.map-select-meta {
-  color: var(--accent-dark);
-  font-size: 14px;
-  font-weight: 700;
+.map-select-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.map-select-summary div {
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid #ffffff55;
+  border-radius: 2px;
+  background: #0006;
+  backdrop-filter: blur(6px);
+}
+
+.map-select-summary span {
+  display: block;
+  color: var(--ms-focus);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+.map-select-summary strong {
+  display: block;
+  margin-top: 2px;
+  font-family: "Bebas Neue", "DM Sans", sans-serif;
+  font-size: clamp(16px, 2.4vw, 22px);
   letter-spacing: 0.04em;
+  font-weight: 400;
 }
 
-.map-select-copy,
-.map-select-empty {
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1.55;
+.map-select-summary strong.is-error {
+  color: #ff8a7a;
+}
+
+.map-select-horizon-title {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  font-family: "Bebas Neue", "DM Sans", sans-serif;
+  font-size: clamp(48px, 10vw, 96px);
+  font-weight: 400;
+  line-height: 0.85;
+  letter-spacing: 0.04em;
+  color: #fff8;
+  mix-blend-mode: soft-light;
+  pointer-events: none;
+  text-transform: uppercase;
+}
+
+.map-select-copy {
+  position: relative;
+  z-index: 1;
+  max-width: min(60vw, 640px);
+  margin: 6px 0 0;
+  color: rgba(244, 241, 234, 0.72);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.map-select-strip {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  gap: 10px;
+  padding: 12px clamp(14px, 2.4vw, 28px) 16px;
+  background: #0a0808f0;
+  border-top: 3px solid var(--ms-focus);
+}
+
+.map-select-strip-groups {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  min-height: 0;
+}
+
+.map-select-group {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
 }
 
 .map-select-group-header {
@@ -2423,35 +2693,85 @@ h1 {
 }
 
 .map-select-group-header h2 {
-  font-size: 22px;
-  line-height: 1.05;
+  margin: 0;
+  color: rgba(244, 241, 234, 0.72);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+.map-select-side-button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid #ffffff28;
+  border-radius: 2px;
+  background: #ffffff14;
+  color: #f4f1ea;
+  font-family: "DM Sans", system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.map-select-side-button:hover,
+.map-select-side-button:focus-visible {
+  border-color: var(--ms-focus);
+  outline: none;
 }
 
 .map-select-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 12px;
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  height: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  padding: 4px 0 8px;
+  scroll-snap-type: x mandatory;
+}
+
+.map-select-grid::-webkit-scrollbar {
+  height: 6px;
+}
+
+.map-select-grid::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.map-select-empty {
+  margin: 0;
+  color: rgba(244, 241, 234, 0.6);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .map-select-card {
-  border: 1px solid rgba(15, 139, 141, 0.12);
-  border-radius: 12px;
+  position: relative;
+  flex: 0 0 auto;
+  width: 176px;
+  height: 96px;
+  overflow: hidden;
+  border: 2px solid #ffffff22;
+  border-radius: 2px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(247, 251, 252, 0.96)),
-    linear-gradient(135deg, rgba(15, 139, 141, 0.06), transparent 56%);
-  box-shadow: 0 12px 24px rgba(31, 41, 51, 0.08);
+    linear-gradient(180deg, transparent 55%, #000c 100%),
+    linear-gradient(135deg, #2c3f52, #14202c);
+  scroll-snap-align: center;
 }
 
 .map-select-card.is-selected {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px rgba(15, 139, 141, 0.14), 0 16px 30px rgba(31, 41, 51, 0.1);
+  border-color: var(--ms-focus);
+  box-shadow: 0 0 0 2px #ffc43a55;
 }
 
 .map-select-card-button {
   width: 100%;
+  height: 100%;
   padding: 0;
   border: 0;
-  border-radius: 12px;
   background: transparent;
   color: inherit;
   text-align: left;
@@ -2460,53 +2780,113 @@ h1 {
 
 .map-select-card-button:hover,
 .map-select-card-button:focus-visible {
-  outline: 3px solid rgba(15, 139, 141, 0.18);
-  outline-offset: 2px;
+  outline: none;
+}
+
+.map-select-card:hover,
+.map-select-card:focus-within {
+  border-color: var(--ms-focus);
 }
 
 .map-select-card-header {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 12px;
-  padding: 16px;
+  gap: 8px;
+  padding: 8px;
 }
 
 .map-select-card-copy {
   display: grid;
-  gap: 6px;
+  gap: 2px;
   min-width: 0;
 }
 
 .map-select-card-title {
-  font-size: 22px;
+  margin: 0;
+  font-family: "Bebas Neue", "DM Sans", sans-serif;
+  font-size: 16px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
   line-height: 1;
+  color: #fff;
 }
 
 .map-select-card-meta {
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1.45;
+  margin: 0;
+  color: rgba(244, 241, 234, 0.72);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.3;
 }
 
 .map-select-delete {
-  min-width: 68px;
-  min-height: 34px;
-  padding: 0 10px;
-  border: 1px solid rgba(214, 69, 69, 0.22);
-  border-radius: 8px;
-  background: rgba(214, 69, 69, 0.08);
-  color: var(--danger);
+  flex: 0 0 auto;
+  min-width: 40px;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid #ff8a7a55;
+  border-radius: 2px;
+  background: #2a120fcc;
+  color: #ff8a7a;
   font: inherit;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
 }
 
 .map-select-delete:hover,
 .map-select-delete:focus-visible {
-  outline: 3px solid rgba(214, 69, 69, 0.12);
-  border-color: rgba(214, 69, 69, 0.44);
+  border-color: #ff8a7a;
+  outline: none;
+}
+
+.map-select-strip-actions {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.map-select-go {
+  min-width: 120px;
+  min-height: 56px;
+  border: 0;
+  background: var(--ms-go);
+  color: #042;
+  font-family: "Bebas Neue", "DM Sans", sans-serif;
+  font-size: 26px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.map-select-go:hover,
+.map-select-go:focus-visible {
+  outline: 3px solid var(--ms-focus);
+  outline-offset: 2px;
+}
+
+@media (max-width: 720px) {
+  .map-select-horizon-title {
+    font-size: clamp(40px, 14vw, 64px);
+  }
+
+  .map-select-copy {
+    max-width: 100%;
+  }
+
+  .map-select-strip-groups {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .map-select-strip-actions {
+    grid-column: 1 / -1;
+  }
 }
 
 .editor-layout {
@@ -3067,9 +3447,14 @@ h1 {
     padding: 10px 12px;
   }
 
-  .race-speed-panel {
-    min-width: 148px;
-    padding: 12px 14px;
+  .race-gauge-panel {
+    min-width: 132px;
+    max-width: min(48vw, 180px);
+    padding: 10px 12px 8px;
+  }
+
+  .race-speed-value {
+    font-size: clamp(30px, 8vw, 44px);
   }
 
   .race-route-guide {
@@ -3210,4 +3595,511 @@ h1 {
 
 @keyframes game-lifecycle-spin {
   to { transform: rotate(360deg); }
+}
+
+/* ===== Racing start: Horizon Strip (style B) ===== */
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.race-start-overlay.race-start-horizon-strip {
+  --hs-focus: #ffc43a;
+  --hs-go: #3ddc84;
+  --hs-ink: #0c0a0a;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  place-items: stretch;
+  padding: 0;
+  overflow: hidden;
+  font-family: "DM Sans", system-ui, sans-serif;
+  background:
+    linear-gradient(180deg, #4a90c2 0%, #f0b27a 42%, #c45c26 70%, #1a100c 70%, #0c0a0a 100%);
+  backdrop-filter: none;
+  color: #f4f1ea;
+}
+
+.race-start-horizon {
+  position: relative;
+  display: grid;
+  align-content: end;
+  min-height: 0;
+  padding: clamp(14px, 2.4vw, 28px);
+}
+
+.race-start-horizon-sky {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 80% 50% at 70% 18%, #ffffff33 0%, transparent 55%),
+    repeating-linear-gradient(90deg, transparent 0 48px, #ffffff08 48px 49px);
+  opacity: 0.55;
+}
+
+.race-start-horizon-meta {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.race-start-horizon-strip .race-start-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  grid-template-columns: none;
+}
+
+.race-start-horizon-strip .race-start-summary div {
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid #ffffff55;
+  border-radius: 2px;
+  background: #0006;
+  backdrop-filter: blur(6px);
+}
+
+.race-start-horizon-strip .race-start-summary span {
+  color: #ffc43a;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+.race-start-horizon-strip .race-start-summary strong {
+  margin-top: 2px;
+  font-family: "Bebas Neue", "DM Sans", sans-serif;
+  font-size: clamp(16px, 2.4vw, 22px);
+  letter-spacing: 0.04em;
+  font-weight: 400;
+}
+
+.race-start-cats {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.race-start-cat {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid #ffffff55;
+  background: #0006;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.race-start-cat.is-active {
+  background: var(--hs-focus);
+  color: #1a1200;
+  border-color: var(--hs-focus);
+}
+
+.race-start-horizon-title {
+  position: absolute;
+  left: clamp(14px, 2.4vw, 28px);
+  top: clamp(56px, 10vh, 96px);
+  z-index: 1;
+  max-width: min(70vw, 720px);
+  margin: 0;
+  font-family: "Bebas Neue", "DM Sans", sans-serif;
+  font-size: clamp(48px, 10vw, 96px);
+  font-weight: 400;
+  line-height: 0.85;
+  letter-spacing: 0.04em;
+  color: #fff8;
+  mix-blend-mode: soft-light;
+  pointer-events: none;
+  text-transform: uppercase;
+}
+
+.race-start-horizon-strip .race-car-feature {
+  position: relative;
+  z-index: 2;
+  justify-self: center;
+  width: min(100%, 720px);
+  gap: 8px;
+}
+
+.race-start-horizon-strip .race-car-feature-stage {
+  min-height: 220px;
+  height: clamp(220px, 36dvh, 420px);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  filter: drop-shadow(0 20px 30px #0007);
+}
+
+.race-start-horizon-strip .race-car-feature-stage.is-dragging {
+  box-shadow: none;
+}
+
+.race-start-horizon-strip .race-car-feature-copy {
+  justify-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  text-align: center;
+}
+
+.race-start-horizon-strip .race-car-feature-make {
+  color: #fff;
+  text-shadow: 0 2px 12px #000a;
+  letter-spacing: 0.2em;
+}
+
+.race-start-strip {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  gap: 10px;
+  padding: 12px clamp(14px, 2.4vw, 28px) 16px;
+  background: #0a0808f0;
+  border-top: 3px solid var(--hs-focus);
+}
+
+.race-start-horizon-strip .race-coastal-mode-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.race-start-horizon-strip .race-coastal-mode-row[hidden] {
+  display: none !important;
+}
+
+.race-start-horizon-strip .race-coastal-mode-options {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.race-start-horizon-strip .race-coastal-mode-button {
+  position: relative;
+  display: grid;
+  align-content: end;
+  width: 120px;
+  height: 56px;
+  padding: 8px;
+  overflow: hidden;
+  border: 2px solid #ffffff22;
+  border-radius: 2px;
+  background: #1a1614;
+  color: #f4f1ea;
+  font-family: "Bebas Neue", "DM Sans", sans-serif;
+  font-size: 18px;
+  letter-spacing: 0.06em;
+}
+
+.race-start-horizon-strip .race-coastal-mode-button span:last-child {
+  position: relative;
+  z-index: 1;
+}
+
+.race-start-horizon-strip .race-coastal-mode-swatch {
+  position: absolute;
+  inset: 0;
+  opacity: 0.55;
+  background: linear-gradient(135deg, #ff6b2c, #c45c26);
+}
+
+.race-start-horizon-strip .race-coastal-mode-swatch-cruise {
+  background: linear-gradient(135deg, #3ddc84, #1a8a5a);
+}
+
+.race-start-horizon-strip .race-coastal-mode-button.is-selected,
+.race-start-horizon-strip .race-coastal-mode-button:focus-visible {
+  border-color: var(--hs-focus);
+  box-shadow: 0 0 0 2px #ffc43a55;
+  outline: none;
+}
+
+.race-start-strip-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: stretch;
+  min-height: 0;
+}
+
+.race-start-horizon-strip .race-car-grid {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  height: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  padding: 4px 0 8px;
+  scroll-snap-type: x mandatory;
+  scrollbar-gutter: auto;
+}
+
+.race-start-horizon-strip .race-car-option {
+  flex: 0 0 auto;
+  width: 132px;
+  height: 96px;
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr auto;
+  border: 2px solid #ffffff22;
+  border-radius: 2px;
+  background: #1a1614;
+  scroll-snap-align: center;
+  transform: none;
+}
+
+.race-start-horizon-strip .race-car-option:hover,
+.race-start-horizon-strip .race-car-option:focus-visible {
+  transform: none;
+  border-color: var(--hs-focus);
+  outline: none;
+}
+
+.race-start-horizon-strip .race-car-option.is-selected {
+  border-color: var(--hs-focus);
+  box-shadow: 0 0 0 2px #ffc43a55;
+}
+
+.race-start-horizon-strip .race-car-hero {
+  min-height: 0;
+  height: 100%;
+}
+
+.race-start-horizon-strip .race-car-option-top,
+.race-start-horizon-strip .race-car-picked {
+  display: none;
+}
+
+.race-start-horizon-strip .race-car-copy {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  padding: 6px 8px;
+  background: linear-gradient(180deg, transparent, #000c);
+}
+
+.race-start-horizon-strip .race-car-name {
+  font-family: "Bebas Neue", "DM Sans", sans-serif;
+  font-size: 16px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+
+.race-start-horizon-strip .race-car-meta {
+  display: none;
+}
+
+.race-start-horizon-strip .race-car-option {
+  position: relative;
+}
+
+.race-start-strip-actions {
+  display: grid;
+  grid-template-rows: 1fr auto auto;
+  gap: 6px;
+  align-self: stretch;
+}
+
+.race-start-go {
+  min-width: 92px;
+  min-height: 96px;
+  border: 0;
+  background: var(--hs-go);
+  color: #042;
+  font-family: "Bebas Neue", "DM Sans", sans-serif;
+  font-size: 32px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.race-start-go:hover,
+.race-start-go:focus-visible {
+  outline: 3px solid var(--hs-focus);
+  outline-offset: 2px;
+}
+
+.race-start-side-button {
+  min-height: 36px;
+  border: 1px solid #ffffff28;
+  background: #ffffff14;
+  color: #f4f1ea;
+  font-family: "DM Sans", system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  cursor: pointer;
+}
+
+.race-start-side-button:hover,
+.race-start-side-button:focus-visible {
+  border-color: var(--hs-focus);
+  outline: none;
+}
+
+.race-start-horizon-strip .race-start-status {
+  margin: 0;
+  color: rgba(244, 241, 234, 0.72);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.race-start-horizon-strip .race-start-status.is-error {
+  color: #ff8a7a;
+}
+
+@media (max-width: 720px) {
+  .race-start-horizon-title {
+    top: clamp(72px, 12vh, 110px);
+    font-size: clamp(40px, 14vw, 64px);
+  }
+
+  .race-start-strip-body {
+    grid-template-columns: 1fr;
+  }
+
+  .race-start-strip-actions {
+    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-rows: none;
+  }
+
+  .race-start-go {
+    min-height: 56px;
+    grid-column: 1 / -1;
+  }
+}
+
+.race-start-horizon-strip .race-difficulty-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+}
+
+.race-start-horizon-strip .race-difficulty-row[hidden] {
+  display: none !important;
+}
+
+.race-start-horizon-strip .race-difficulty-options {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.race-start-horizon-strip .race-difficulty-button {
+  min-width: 72px;
+  height: 40px;
+  border: 2px solid #ffffff22;
+  border-radius: 2px;
+  background: #1a1614;
+  color: #f4f1ea;
+  font-family: "Bebas Neue", "DM Sans", sans-serif;
+  font-size: 18px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.race-start-horizon-strip .race-difficulty-button.is-selected,
+.race-start-horizon-strip .race-difficulty-button:focus-visible {
+  border-color: var(--hs-focus);
+  box-shadow: 0 0 0 2px #ffc43a55;
+  outline: none;
+  background: #ffc43a;
+  color: #1a1200;
+}
+
+.race-car-option.is-locked {
+  opacity: 0.42;
+  filter: grayscale(0.7);
+  cursor: not-allowed;
+}
+
+.race-challenge-prompt {
+  position: absolute;
+  left: 50%;
+  bottom: 8%;
+  transform: translateX(-50%);
+  z-index: 24;
+  min-width: min(420px, 88vw);
+  padding: 18px 22px 16px;
+  border: 2px solid #ffc43a;
+  background: linear-gradient(180deg, #1c1814ee, #0f0d0bcc);
+  color: #f4f1ea;
+  text-align: center;
+  pointer-events: auto;
+}
+
+.race-challenge-prompt-kicker {
+  margin: 0 0 4px;
+  font-family: "Bebas Neue", "DM Sans", sans-serif;
+  letter-spacing: 0.18em;
+  font-size: 14px;
+  color: #ffc43a;
+}
+
+.race-challenge-prompt-title {
+  display: block;
+  font-family: "Bebas Neue", "DM Sans", sans-serif;
+  font-size: clamp(28px, 4vw, 40px);
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+
+.race-challenge-prompt-detail {
+  margin: 8px 0 14px;
+  font-family: "DM Sans", sans-serif;
+  font-size: 14px;
+  opacity: 0.86;
+}
+
+.race-challenge-prompt-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.race-challenge-confirm,
+.race-challenge-cancel {
+  min-width: 108px;
+  height: 42px;
+  border: 2px solid #ffffff33;
+  border-radius: 2px;
+  font-family: "Bebas Neue", "DM Sans", sans-serif;
+  font-size: 20px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.race-challenge-confirm {
+  background: #ffc43a;
+  color: #1a1200;
+  border-color: #ffc43a;
+}
+
+.race-challenge-cancel {
+  background: transparent;
+  color: #f4f1ea;
 }

@@ -190,8 +190,7 @@ test("Coastal Showcase runs countdown, timed route, result, and in-place retry",
     globalThis.__ackGamesDebug.racing.completeShowcaseEventScenario()
   )).toBe(true);
   const completedPresentation = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState());
-  expect(new Set(completedPresentation.showcaseEvent.announcedSections))
-    .toEqual(new Set(["final"]));
+  expect(completedPresentation.showcaseEvent.announcedSections).not.toContain("final");
   expect([completedPresentation.presentation.exposure, completedPresentation.presentation.jumpFovPulse,
     completedPresentation.presentation.jumpLiftPulse, completedPresentation.presentation.landingKick]
     .every(Number.isFinite)).toBe(true);
@@ -211,6 +210,125 @@ test("Coastal Showcase runs countdown, timed route, result, and in-place retry",
     globalThis.__ackGamesDebug.racing.getState().showcaseEvent.phase
   )).toBe("countdown");
   await expect(eventBanner).toBeVisible();
+});
+
+test("Coastal Showcase free-cruise skips the tour machine and remembers the choice", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#racingGameCard").click();
+  await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
+  await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-coastal-showcase"] .map-select-card-button').click();
+  await page.locator("#racingMapSelectRaceButton").click();
+
+  const startOverlay = page.locator("#racingStartOverlay");
+  await expect(startOverlay).toBeVisible({ timeout: 25_000 });
+
+  const coastalModeRow = page.locator("#racingCoastalModeRow");
+  await expect(coastalModeRow).toBeVisible();
+  const islandTourButton = page.locator("#racingCoastalModeIslandTourButton");
+  const freeCruiseButton = page.locator("#racingCoastalModeFreeCruiseButton");
+  await expect(islandTourButton).toHaveClass(/is-selected/);
+  await expect(page.locator("#racingStartModeValue")).toHaveText("Festival Showcase");
+
+  await freeCruiseButton.click();
+  await expect(freeCruiseButton).toHaveClass(/is-selected/);
+  await expect(islandTourButton).not.toHaveClass(/is-selected/);
+  await expect(page.locator("#racingStartModeValue")).toHaveText("Free Cruise");
+
+  await page.locator("#racingStartRaceButton").click();
+  await expect(startOverlay).toBeHidden({ timeout: 45_000 });
+  await expect(page.locator("#racingHudOverlay")).toBeVisible();
+
+  const initialState = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState());
+  expect(initialState.startConfig.coastalPlayMode).toBe("free-cruise");
+  expect(initialState.showcaseEvent).not.toBeNull();
+  expect(initialState.showcaseEvent.phase).toBe("idle");
+
+  await page.keyboard.down("KeyW");
+  await page.waitForTimeout(700);
+  await page.keyboard.up("KeyW");
+  await expect.poll(() =>
+    page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().showcaseEvent.phase)
+  ).toBe("idle");
+  expect(await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().speedKmh)).toBeGreaterThan(0);
+
+  expect(await page.evaluate(() => globalThis.__ackGamesDebug.racing.activateBoost())).toBe(true);
+  await expect.poll(() =>
+    page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().boostSeconds)
+  ).toBeGreaterThan(0);
+  expect(await page.evaluate(() => {
+    globalThis.__ackGamesDebug.racing.setNitroAudioPreset("jet-whoosh");
+    return globalThis.__ackGamesDebug.racing.getNitroAudioPreset();
+  })).toBe("jet-whoosh");
+
+  await page.keyboard.press("F2");
+  await expect.poll(() =>
+    page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().collisionDebugEnabled)
+  ).toBe(true);
+  await page.keyboard.press("F2");
+  await expect.poll(() =>
+    page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().collisionDebugEnabled)
+  ).toBe(false);
+
+  await page.keyboard.press("Escape");
+  const pauseOverlay = page.locator("#racingPauseOverlay");
+  await expect(pauseOverlay).toBeVisible();
+  await page.locator("#racingPauseHomeButton").click();
+  await expect(page.locator("#homeView")).toBeVisible();
+
+  await page.locator("#racingGameCard").click();
+  await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
+  await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-coastal-showcase"] .map-select-card-button').click();
+  await page.locator("#racingMapSelectRaceButton").click();
+  await expect(startOverlay).toBeVisible({ timeout: 25_000 });
+  await expect(freeCruiseButton).toHaveClass(/is-selected/);
+  await expect(page.locator("#racingStartModeValue")).toHaveText("Free Cruise");
+
+  const storedConfig = await page.evaluate(
+    () => JSON.parse(localStorage.getItem("ack-games:racing-start-config:v1"))
+  );
+  expect(storedConfig.coastalPlayMode).toBe("free-cruise");
+  expect(storedConfig.version).toBe(4);
+});
+
+test("Coastal Tour difficulty persists and scales opponent cruise", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#racingGameCard").click();
+  await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
+  await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-coastal-showcase"] .map-select-card-button').click();
+  await page.locator("#racingMapSelectRaceButton").click();
+
+  const startOverlay = page.locator("#racingStartOverlay");
+  await expect(startOverlay).toBeVisible({ timeout: 25_000 });
+  await expect(page.locator("#racingDifficultyRow")).toBeVisible();
+  await expect(page.locator("#racingDifficultyStandardButton")).toHaveClass(/is-selected/);
+
+  await page.locator("#racingDifficultyHardButton").click();
+  await expect(page.locator("#racingDifficultyHardButton")).toHaveClass(/is-selected/);
+  await page.locator("#racingStartRaceButton").click();
+  await expect(startOverlay).toBeHidden({ timeout: 45_000 });
+
+  const hardState = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState());
+  expect(hardState.startConfig.difficulty).toBe("hard");
+  expect(hardState.difficulty.profile.cruiseScale).toBeGreaterThan(1.2);
+  const hardCruise = Math.max(...hardState.traffic.map((row) => row.cruiseSpeedKmh));
+  expect(hardCruise).toBeGreaterThan(180);
+
+  await page.keyboard.press("Escape");
+  await page.locator("#racingPauseHomeButton").click();
+  await expect(page.locator("#homeView")).toBeVisible();
+
+  await page.locator("#racingGameCard").click();
+  await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
+  await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-coastal-showcase"] .map-select-card-button').click();
+  await page.locator("#racingMapSelectRaceButton").click();
+  await expect(page.locator("#racingStartOverlay")).toBeVisible({ timeout: 25_000 });
+  await expect(page.locator("#racingDifficultyHardButton")).toHaveClass(/is-selected/);
+
+  const storedConfig = await page.evaluate(
+    () => JSON.parse(localStorage.getItem("ack-games:racing-start-config:v1"))
+  );
+  expect(storedConfig.difficulty).toBe("hard");
+  expect(storedConfig.version).toBe(4);
 });
 
 test("Urus clears both Showcase bridges at 88 km/h", async ({ page }) => {
