@@ -27,3 +27,13 @@ The textures in `textures/` are distributed under the CC0 1.0 license.
 - `models/palm-tree-quaternius-lod0.glb`: optimized derivative of [Palm Tree](https://poly.pizza/m/P0tgwyXBgr), Quaternius, distributed as Public Domain (CC0) by Poly Pizza. The derivative uses WebP texture compression and Draco geometry compression.
 
 Source files were downloaded from Poly Haven's official asset CDN at 1K resolution. They may be copied, modified, and redistributed without attribution; this file preserves provenance for maintainers.
+
+## Traffic vehicles (`models/traffic-*-lod0.glb`)
+
+Civilian free-cruise traffic (not garage cars). Optimized with Draco + WebP.
+
+- `traffic-sedan-lod0.glb`: [Car](https://poly.pizza/m/Cz6yDaUcM9), Quaternius, Public Domain (CC0) via Poly Pizza.
+- `traffic-suv-lod0.glb`: [SUV](https://poly.pizza/m/xsMtZhBkxL), Quaternius, Public Domain (CC0) via Poly Pizza.
+- `traffic-mini-lod0.glb`: [Car Hatchback](https://poly.pizza/m/BG0KAhmGDt), Kay Lousberg, Public Domain (CC0) via Poly Pizza. Used as Mini Cooper stand-in (small two-box hatch).
+- `traffic-truck-lod0.glb`: [Pickup Truck](https://poly.pizza/m/qn4grQgHm8), Quaternius, Public Domain (CC0) via Poly Pizza. Used as truck stand-in (light pickup / ute).
+
