@@ -176,3 +176,37 @@ test("手柄动作按钮只在按下边沿触发", () => {
   assert.equal(driveStates.at(0).connected, true);
   assert.equal(driveStates.at(-1).connected, false);
 });
+
+test("B 键触发 onCancel 且只在按下边沿生效", () => {
+  const windowObject = createEventTarget();
+  const documentObject = createEventTarget();
+  const buttons = Array.from({ length: 16 }, () => ({ pressed: false, value: 0 }));
+  const gamepad = { connected: true, index: 0, axes: [0], buttons };
+  const actions = [];
+  const input = createBrowserRacingInput({
+    onDrive() {},
+    onPause() {},
+    onBoost() {},
+    onCancel() { actions.push("cancel"); },
+    onToggleOpponent() {},
+    onToggleCamera() {},
+    onReplaceSession() {},
+    onToggleDebug() {},
+    onBlur() {},
+    onHidden() {}
+  }, {
+    windowObject,
+    documentObject,
+    navigatorObject: { getGamepads: () => [gamepad] }
+  });
+
+  input.start();
+  buttons[1] = { pressed: true, value: 1 };
+  input.pollGamepad();
+  input.pollGamepad();
+  buttons[1] = { pressed: false, value: 0 };
+  input.pollGamepad();
+  input.stop();
+
+  assert.deepEqual(actions, ["cancel"]);
+});

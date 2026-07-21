@@ -66,7 +66,7 @@ export function readRacingGamepad(gamepads = []) {
     steering,
     throttle: buttonValue(buttons[7]),
     brake: buttonValue(buttons[6]),
-    buttons: [0, 2, 3, 8, 9].map((index) => buttonValue(buttons[index]) > 0.5)
+    buttons: [0, 1, 2, 3, 8, 9].map((index) => buttonValue(buttons[index]) > 0.5)
   });
 }
 
@@ -74,6 +74,7 @@ export function createBrowserRacingInput({
   onDrive,
   onPause,
   onBoost,
+  onCancel = () => {},
   onToggleOpponent,
   onToggleCamera,
   onReplaceSession,
@@ -141,10 +142,11 @@ export function createBrowserRacingInput({
     const changedGamepad = state.index !== previousGamepadIndex;
     const pressed = (buttonIndex) => buttons[buttonIndex] && (changedGamepad || !previousGamepadButtons[buttonIndex]);
     if (pressed(0)) onBoost();
-    if (pressed(1)) onToggleOpponent();
-    if (pressed(2)) onToggleCamera();
-    if (pressed(3)) onReplaceSession();
-    if (pressed(4)) onPause();
+    if (pressed(1)) onCancel();
+    if (pressed(2)) onToggleOpponent();
+    if (pressed(3)) onToggleCamera();
+    if (pressed(4)) onReplaceSession();
+    if (pressed(5)) onPause();
     previousGamepadIndex = state.index;
     previousGamepadButtons = buttons;
   }
