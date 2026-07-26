@@ -48,5 +48,5 @@ export function createResourceLeaseCache({ load, dispose = () => {}, retainUnuse
     }));
   }
 
-  return Object.freeze({ acquire, clear });
+  return Object.freeze({ acquire, clear, has: (key) => entries.has(key) });
 }

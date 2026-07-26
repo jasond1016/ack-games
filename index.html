@@ -134,12 +134,18 @@
       </section>
 
       <section id="gameLifecycleView" class="game-lifecycle-view" aria-live="polite" hidden>
+        <picture id="gameLifecycleBackdrop" class="game-lifecycle-backdrop" aria-hidden="true">
+          <source id="gameLifecycleBackdropAvif" type="image/avif">
+          <source id="gameLifecycleBackdropWebp" type="image/webp">
+          <img id="gameLifecycleBackdropImage" alt="" decoding="async">
+        </picture>
         <div class="game-lifecycle-card">
           <span class="game-lifecycle-spinner" aria-hidden="true"></span>
           <p class="brand">ACK Games</p>
           <h2 id="gameLifecycleTitle">正在加载</h2>
           <p id="gameLifecycleMessage">正在加载游戏…</p>
           <div class="game-lifecycle-actions">
+            <button id="gameLifecycleEnterButton" class="primary-button" type="button" hidden>按 Enter 开始</button>
             <button id="gameLifecycleRetryButton" class="primary-button" type="button" hidden>重试</button>
             <button id="gameLifecycleHomeButton" class="secondary-button" type="button">返回首页</button>
           </div>
@@ -303,7 +309,7 @@
             </div>
 
             <div class="race-hud-panel race-camera-panel">
-              <span class="race-hud-label">CAM · Y / C</span>
+              <span class="race-hud-label">CAM · → / C</span>
               <strong id="racingCameraValue" class="race-camera-value">跟车</strong>
             </div>
 

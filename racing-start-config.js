@@ -1,4 +1,4 @@
-import { defaultRacingCarId, getRacingCarById } from "./racing-car-config.js";
+import { defaultRacingCarId, getRacingCarById, racingCarCatalog } from "./racing-car-config.js";
 import {
   isChallengeCarUnlocked,
   loadChallengeUnlockState
@@ -10,6 +10,8 @@ import {
 
 const STORAGE_KEY = "ack-games:racing-start-config:v1";
 const START_CONFIG_VERSION = 4;
+/** Preferred car when memory is missing/invalid (#22 E1). Falls back if locked. */
+export const ENTRY_DEFAULT_CAR_ID = "veneno";
 
 export const RACING_CAMERA_MODES = Object.freeze({
   CHASE: "chase",
@@ -32,14 +34,37 @@ function normalizeCameraMode(cameraMode) {
     : RACING_CAMERA_MODES.CHASE;
 }
 
-function normalizeCarId(carId) {
-  const resolved = typeof carId === "string" && getRacingCarById(carId)?.id === carId
-    ? carId
-    : defaultRacingCarId;
-  if (!isChallengeCarUnlocked(resolved, loadChallengeUnlockState())) {
+function firstUnlockedCarId(state = loadChallengeUnlockState()) {
+  if (
+    getRacingCarById(ENTRY_DEFAULT_CAR_ID)?.id === ENTRY_DEFAULT_CAR_ID
+    && isChallengeCarUnlocked(ENTRY_DEFAULT_CAR_ID, state)
+  ) {
+    return ENTRY_DEFAULT_CAR_ID;
+  }
+  if (isChallengeCarUnlocked(defaultRacingCarId, state)) {
     return defaultRacingCarId;
   }
-  return resolved;
+  for (const car of racingCarCatalog) {
+    if (isChallengeCarUnlocked(car.id, state)) return car.id;
+  }
+  return defaultRacingCarId;
+}
+
+function normalizeCarId(carId) {
+  const state = loadChallengeUnlockState();
+  if (
+    typeof carId === "string"
+    && getRacingCarById(carId)?.id === carId
+    && isChallengeCarUnlocked(carId, state)
+  ) {
+    return carId;
+  }
+  return firstUnlockedCarId(state);
+}
+
+/** Resolve lobby entry car: last selected if valid, else veneno (or unlocked fallback). */
+export function resolveEntryPlayerCarId(carId) {
+  return normalizeCarId(carId);
 }
 
 function normalizeForcedOpponentCarId(carId) {
@@ -57,7 +82,7 @@ export function normalizeCoastalPlayMode(coastalPlayMode) {
 export function getDefaultRacingStartConfig() {
   return {
     version: START_CONFIG_VERSION,
-    playerCarId: defaultRacingCarId,
+    playerCarId: resolveEntryPlayerCarId(null),
     cameraMode: RACING_CAMERA_MODES.CHASE,
     coastalPlayMode: DEFAULT_COASTAL_PLAY_MODE,
     difficulty: DEFAULT_RACING_DIFFICULTY,

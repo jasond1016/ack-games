@@ -1733,6 +1733,41 @@ h1 {
   pointer-events: none;
 }
 
+.race-rewind-hud {
+  position: absolute;
+  top: 18%;
+  left: 50%;
+  z-index: 5;
+  transform: translateX(-50%);
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 10px 22px 12px;
+  border: 1px solid rgba(120, 210, 255, 0.45);
+  background: linear-gradient(180deg, rgba(8, 24, 36, 0.82), rgba(4, 12, 20, 0.72));
+  color: #d7f3ff;
+  pointer-events: none;
+  letter-spacing: 0.14em;
+}
+
+.race-rewind-hud-title {
+  font-family: "Bebas Neue", "DM Sans", sans-serif;
+  font-size: 28px;
+  font-weight: 400;
+}
+
+.race-rewind-hud-meta {
+  font-family: "DM Sans", system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 0.85;
+}
+
+.race-rewind-hud.is-at-start {
+  border-color: rgba(255, 196, 58, 0.7);
+  color: #ffe6a8;
+}
+
 .race-event-banner {
   position: absolute;
   top: 50%;
@@ -3540,11 +3575,15 @@ h1 {
 }
 
 .game-lifecycle-view {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
   min-height: 100dvh;
   display: grid;
   place-items: center;
   padding: 24px;
   background: radial-gradient(circle at top, #203247 0, #0c1119 58%, #070a0f 100%);
+  overflow: hidden;
 }
 
 .game-lifecycle-view[hidden] {
@@ -3552,6 +3591,8 @@ h1 {
 }
 
 .game-lifecycle-card {
+  position: relative;
+  z-index: 1;
   width: min(440px, 100%);
   padding: 34px;
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -3560,6 +3601,109 @@ h1 {
   text-align: center;
   background: rgba(10, 16, 24, 0.92);
   box-shadow: 0 28px 80px rgba(0, 0, 0, 0.36);
+}
+
+.game-lifecycle-backdrop {
+  position: absolute;
+  inset: -4%;
+  display: block;
+  opacity: 0;
+  transform: scale(1.035);
+  transition: opacity 360ms ease, transform 700ms ease;
+  background:
+    radial-gradient(circle at 72% 64%, rgba(196, 53, 15, 0.42), transparent 32%),
+    linear-gradient(120deg, #d08443 0%, #263b4b 48%, #070b10 100%);
+}
+
+.game-lifecycle-backdrop img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 63% 54%;
+  opacity: 0;
+  filter: blur(16px) saturate(0.88);
+  transition: opacity 360ms ease, filter 520ms ease;
+}
+
+.game-lifecycle-view[data-racing-backdrop="loaded"] .game-lifecycle-backdrop,
+.game-lifecycle-view[data-racing-backdrop="loaded"] .game-lifecycle-backdrop img {
+  opacity: 1;
+}
+
+.game-lifecycle-view[data-racing-backdrop="loaded"] .game-lifecycle-backdrop img {
+  filter: blur(0) saturate(1);
+}
+
+.game-lifecycle-view[data-racing="true"] {
+  place-items: end;
+  padding: clamp(18px, 3vw, 42px);
+  background: #101820;
+}
+
+.game-lifecycle-view[data-racing="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgba(5, 8, 12, 0.2), transparent 55%, rgba(5, 8, 12, 0.52));
+}
+
+.game-lifecycle-view[data-racing="true"] .game-lifecycle-card {
+  width: min(360px, calc(100vw - 36px));
+  padding: 20px 22px;
+  border-radius: 18px;
+  text-align: left;
+  background: rgba(7, 11, 16, 0.78);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 18px 54px rgba(0, 0, 0, 0.42);
+}
+
+.game-lifecycle-view[data-racing="true"] .game-lifecycle-card .brand {
+  margin: 0 0 6px;
+  color: #f2b705;
+  font-size: 0.72rem;
+}
+
+.game-lifecycle-view[data-racing="true"] .game-lifecycle-card h2 {
+  margin: 0 0 6px;
+  font-size: clamp(1.25rem, 3vw, 1.7rem);
+}
+
+.game-lifecycle-view[data-racing="true"] .game-lifecycle-card p {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.game-lifecycle-view[data-racing="true"] .game-lifecycle-spinner {
+  float: right;
+  width: 25px;
+  height: 25px;
+  border-width: 2px;
+}
+
+.game-lifecycle-view[data-state="ready"] .game-lifecycle-spinner {
+  animation: none;
+  border-color: #3ddc84;
+}
+
+.game-lifecycle-view[data-racing="true"] .game-lifecycle-actions {
+  justify-content: flex-start;
+  margin-top: 16px;
+}
+
+@media (max-width: 680px) {
+  .game-lifecycle-view[data-racing="true"] {
+    place-items: end stretch;
+    padding: 16px;
+  }
+
+  .game-lifecycle-view[data-racing="true"] .game-lifecycle-card {
+    width: auto;
+  }
+
+  .game-lifecycle-backdrop img {
+    object-position: 67% 55%;
+  }
 }
 
 .game-lifecycle-card h2 {
@@ -3857,32 +4001,67 @@ h1 {
 
 .race-start-horizon-strip .race-car-option {
   flex: 0 0 auto;
-  width: 132px;
-  height: 96px;
+  width: 264px;
+  height: 192px;
   grid-template-columns: 1fr;
   grid-template-rows: 1fr auto;
-  border: 2px solid #ffffff22;
-  border-radius: 2px;
-  background: #1a1614;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   scroll-snap-align: center;
   transform: none;
+  overflow: visible;
 }
 
 .race-start-horizon-strip .race-car-option:hover,
 .race-start-horizon-strip .race-car-option:focus-visible {
-  transform: none;
-  border-color: var(--hs-focus);
+  transform: scale(1.04);
+  border-color: transparent;
   outline: none;
+  box-shadow: none;
 }
 
 .race-start-horizon-strip .race-car-option.is-selected {
-  border-color: var(--hs-focus);
-  box-shadow: 0 0 0 2px #ffc43a55;
+  border-color: transparent;
+  box-shadow: none;
+  transform: scale(1.1);
+  z-index: 2;
+}
+
+.race-start-horizon-strip .race-car-option.is-selected::after {
+  content: "";
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  bottom: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, color-mix(in srgb, var(--car-accent) 55%, transparent), transparent 70%);
+  pointer-events: none;
+  z-index: 0;
 }
 
 .race-start-horizon-strip .race-car-hero {
   min-height: 0;
   height: 100%;
+  background: transparent;
+  overflow: visible;
+}
+
+.race-start-horizon-strip .race-car-strip-thumb {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.race-start-horizon-strip .race-car-option.is-locked .race-car-strip-thumb {
+  filter: grayscale(0.55) brightness(0.72);
+  opacity: 0.78;
 }
 
 .race-start-horizon-strip .race-car-option-top,

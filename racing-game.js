@@ -15,6 +15,7 @@ import {
   RACING_COASTAL_PLAY_MODES,
   loadActiveRacingStartConfig,
   normalizeCoastalPlayMode,
+  resolveEntryPlayerCarId,
   saveActiveRacingStartConfig
 } from "./racing-start-config.js";
 import {
@@ -64,6 +65,7 @@ import {
   createSeededRandom
 } from "./racing-session.mjs";
 import { createBrowserRacingClock, createBrowserRacingInput } from "./racing-runtime-adapters.mjs";
+import { createRewindBuffer, REWIND_BUFFER_SECONDS } from "./racing-rewind.mjs";
 import { createGamepadFocusNav } from "./racing-focus-nav.mjs";
 import { createResourceLeaseCache } from "./racing-resource-leases.mjs";
 import {
@@ -221,9 +223,13 @@ export function createRacingGame({
   clock = createBrowserRacingClock(),
   onHome = () => {},
   onEditMap = () => {},
-  onReplaceSession = () => {}
+  onReplaceSession = () => {},
+  onLoadingStage = () => {}
 } = {}) {
   const qualityPreset = resolveRacingQualityPreset();
+  // Test-only paired A/B switch for the post-ready viewport synchronization
+  // fix. Production/default behavior always enables it.
+  const viewportSyncFixEnabled = new URLSearchParams(location.search).get("viewportSyncFix") !== "off";
   const selectedMapEntry = initialSnapshot ? null : racingMapLibrary.snapshot().selected;
   const mapData = initialSnapshot?.map ?? selectedMapEntry.map;
   const environmentProfile = initialSnapshot?.environmentProfile ?? selectedMapEntry?.environmentProfile ?? null;
@@ -235,6 +241,7 @@ export function createRacingGame({
   const freeDriveShowcaseConfig = isShowcase ? COASTAL_SHOWCASE_ROUTE : FREE_DRIVE_SHOWCASE;
   const startConfig = initialSnapshot?.startConfig ?? loadActiveRacingStartConfig();
   const canvas = document.getElementById("racingCanvas");
+  const racingStage = canvas.closest(".racing-stage");
   const hudOverlay = document.getElementById("racingHudOverlay");
   const progressLabel = document.getElementById("racingProgressLabel");
   const progressValue = document.getElementById("racingProgressValue");
@@ -247,6 +254,9 @@ export function createRacingGame({
   const boostValue = document.getElementById("racingBoostValue");
   const cameraValue = document.getElementById("racingCameraValue");
   let frozenHudGaugeReading = null;
+  let lobbyCruisePrepared = false;
+  let lobbyConfirmationCount = 0;
+  let simulationStartCount = 0;
   const eventBanner = document.getElementById("racingEventBanner");
   const eventBannerKicker = document.getElementById("racingEventBannerKicker");
   const eventBannerValue = document.getElementById("racingEventBannerValue");
@@ -324,10 +334,7 @@ export function createRacingGame({
   const startOverlayFocusNav = createGamepadFocusNav();
   let startOverlayGamepadFrameId = 0;
   let nitroAudioPresetId = loadStoredNitroAudioPresetId();
-  let selectedCarId = getRacingCarById(startConfig.playerCarId).id;
-  if (!isChallengeCarUnlocked(selectedCarId)) {
-    selectedCarId = getRacingCarById("aventador").id;
-  }
+  let selectedCarId = resolveEntryPlayerCarId(startConfig.playerCarId);
   let cameraMode = startConfig.cameraMode;
   // Test-only inspection camera. It is unset in normal play and lets the
   // visual regression suite take rear three-quarter evidence without adding
@@ -335,7 +342,12 @@ export function createRacingGame({
   let brakeLightEvidenceView = null;
   let wheelEvidenceView = null;
   let coastalPlayMode = normalizeCoastalPlayMode(startConfig.coastalPlayMode);
+  const requiresLobbyConfirmation = Boolean(initialSnapshot) && isCoastalFreeCruise();
   let racingDifficulty = normalizeRacingDifficulty(startConfig.difficulty);
+  /** null | "cruise-swap" — Esc car picker during free-cruise (#22). */
+  let carSelectMode = null;
+  let carSelectBaselineCarId = null;
+  let carSelectBusy = false;
   const activeChallenge = initialSnapshot?.challenge ?? null;
   let challengeUnlockState = loadChallengeUnlockState();
   let coastalChallengeRuntime = [];
@@ -352,9 +364,14 @@ export function createRacingGame({
   };
   const handleStartRaceButtonClick = () => {
     void racingAudio.resume();
+    if (carSelectMode === "cruise-swap") {
+      void confirmCruiseCarSelect();
+      return;
+    }
     beginRace();
   };
   const handleStartEditorButtonClick = () => {
+    if (carSelectMode === "cruise-swap") return;
     void requestSessionIntent({ type: "exit-to-editor" });
   };
   const handleStartHomeButtonClick = () => {
@@ -386,22 +403,44 @@ export function createRacingGame({
   };
   const input = createBrowserRacingInput({
     onDrive(code, pressed) {
+      if (isAwaitingLobbyConfirmation()) return;
       if (isStartOverlayVisible() || raceState.paused) return;
       if (pressed) void racingAudio.resume();
       if (pressed) keyState.add(code);
       else keyState.delete(code);
     },
     onPause: () => {
+      if (isAwaitingLobbyConfirmation()) return;
       if (activeChallengePromptId && !challengePrompt?.hidden) {
         handleChallengeCancelButtonClick();
+        return;
+      }
+      if (carSelectMode === "cruise-swap") {
+        cancelCruiseCarSelect();
+        return;
+      }
+      if (
+        isCoastalFreeCruise()
+        && active
+        && initialized
+        && !raceState.resultVisible
+        && !isStartOverlayVisible()
+      ) {
+        if (raceState.paused && !pauseOverlay.hidden) {
+          setPaused(false);
+          return;
+        }
+        openCruiseCarSelect();
         return;
       }
       if (!isStartOverlayVisible()) setPaused(!raceState.paused);
     },
     onBoost: () => {
+      if (isAwaitingLobbyConfirmation()) return;
       void racingAudio.resume();
       if (isStartOverlayVisible()) {
-        beginRace();
+        if (carSelectMode === "cruise-swap") void confirmCruiseCarSelect();
+        else beginRace();
       } else if (activeChallengePromptId && !challengePrompt?.hidden) {
         handleChallengeConfirmButtonClick();
       } else if (raceState.resultVisible) {
@@ -413,12 +452,19 @@ export function createRacingGame({
       }
     },
     onToggleOpponent: () => {
+      if (isAwaitingLobbyConfirmation()) return;
       if (!isStartOverlayVisible() && !raceState.paused) toggleOpponent();
     },
     onToggleCamera: () => {
+      if (isAwaitingLobbyConfirmation()) return;
       if (!isStartOverlayVisible() && !raceState.paused) toggleCameraMode();
     },
+    onRewindHeld: (held) => {
+      if (isAwaitingLobbyConfirmation()) return;
+      rewindInputHeld = Boolean(held);
+    },
     onReplaceSession: () => {
+      if (isAwaitingLobbyConfirmation()) return;
       if (!isStartOverlayVisible() && !raceState.paused) {
         if (isShowcase) restartShowcaseEvent();
         else void requestSessionIntent({ type: "replace-session", snapshot: activeSnapshot });
@@ -551,6 +597,9 @@ export function createRacingGame({
 
   const keyState = new Set();
   let gamepadDrive = Object.freeze({ connected: false, steering: 0, throttle: 0, brake: 0 });
+  let rewindInputHeld = false;
+  const rewindBuffer = createRewindBuffer({ capacitySeconds: REWIND_BUFFER_SECONDS });
+  let rewindHud = null;
   let showcaseMatrixControls = null;
   const state = {
     position: new THREE.Vector2(),
@@ -692,9 +741,17 @@ export function createRacingGame({
   let initialized = false;
   let active = false;
   let listening = false;
+  let rendererResizeFrameId = 0;
+  let rendererResizeObserver = null;
+  const pendingRendererResizeSources = new Set();
+  const rendererResizeSync = {
+    count: 0,
+    sources: { manual: 0, window: 0, observer: 0, "visual-viewport": 0 }
+  };
   let animationFrameId = 0;
   let lastFrameTime = 0;
   let physicsAccumulator = 0;
+  let physicsStepTotal = 0;
   let initializationPromise = null;
   let raceStarting = false;
   let physics = null;
@@ -716,6 +773,14 @@ export function createRacingGame({
   let selectedCarPreviewPointerId = null;
   let selectedCarPreviewLastPointerX = 0;
   let selectedCarPreviewLastPointerTime = 0;
+  const STRIP_PREVIEW_YAW = Math.PI / 4;
+  const STRIP_OPTION_WIDTH_PX = 264;
+  const STRIP_OPTION_HEIGHT_PX = 192;
+  const stripPreview = {
+    entries: new Map(),
+    strategy: "prebaked-thumbnailUrl(~45°)+img+zero-webgl-bake",
+    usesPrebakedFrames: true
+  };
   const collisionDebug = {
     enabled: false,
     group: null,
@@ -788,6 +853,8 @@ export function createRacingGame({
     },
     toggleOpponent,
     toggleCollisionDebug: () => setCollisionDebugEnabled(!collisionDebug.enabled),
+    setPaused: (paused = true) => setPaused(Boolean(paused)),
+    openCruiseCarSelect: () => openCruiseCarSelect(),
     listNitroAudioPresets: () => listNitroAudioPresets(),
     getNitroAudioPreset: () => nitroAudioPresetId,
     setNitroAudioPreset: (presetId) => setNitroAudioPreset(presetId),
@@ -801,15 +868,44 @@ export function createRacingGame({
       eventOpponent: Boolean(traffic.eventOpponent),
       progress: Number(traffic.progress.toFixed(3))
     })),
+    diagnoseBrakeLampCandidates: () => diagnoseBrakeLampCandidates(car?.userData?.model),
     diagnoseWheelVisuals: () => diagnoseWheelVisuals(),
     getState: () => ({
       quality: qualityPreset.id,
       render: renderer ? {
         calls: renderer.info.render.calls,
         triangles: renderer.info.render.triangles,
-        points: renderer.info.render.points
+        points: renderer.info.render.points,
+        layout: (() => {
+          const rect = canvas.getBoundingClientRect();
+          return Object.freeze({
+            cssWidth: Number(rect.width.toFixed(2)),
+            cssHeight: Number(rect.height.toFixed(2)),
+            clientWidth: canvas.clientWidth,
+            clientHeight: canvas.clientHeight,
+            bufferWidth: canvas.width,
+            bufferHeight: canvas.height,
+            pixelRatio: Number(renderer.getPixelRatio().toFixed(3)),
+            devicePixelRatio: Number((window.devicePixelRatio || 1).toFixed(3)),
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
+            cameraAspect: Number(camera?.aspect?.toFixed(6) ?? 0),
+            cameraFov: Number(camera?.fov?.toFixed(3) ?? 0),
+            resizeSyncCount: rendererResizeSync.count,
+            resizeSources: Object.freeze({ ...rendererResizeSync.sources })
+          });
+        })()
       } : null,
       telemetry: racingTelemetry.snapshot(),
+      lifecycle: Object.freeze({
+        requiresLobbyConfirmation,
+        viewportSyncFixEnabled,
+        lobbyCruisePrepared,
+        simulationStarted: Boolean(animationFrameId),
+        physicsStepTotal,
+        lobbyConfirmationCount,
+        simulationStartCount
+      }),
       provingGround: provingGroundRunner.snapshot(),
       lapText: formatLapDisplay(state.completedLaps),
       completedLaps: state.completedLaps,
@@ -856,7 +952,21 @@ export function createRacingGame({
         rallyDirtMeshes: staticWorldMeshColliderSpecs.filter((spec) => spec.tag === FREE_DRIVE_RALLY.surfaceId).length,
         buildings: staticWorldColliderSpecs
           .filter((spec) => spec.tag === "building")
-          .map((spec) => ({ x: spec.x, z: spec.z, width: spec.width, depth: spec.depth }))
+          .map((spec) => ({ x: spec.x, z: spec.z, width: spec.width, depth: spec.depth })),
+        nearbyStatic: staticWorldColliderSpecs
+          .map((spec) => {
+            const distance = Math.hypot(spec.x - state.position.x, spec.z - state.position.y);
+            return { ...spec, distance: Number(distance.toFixed(1)) };
+          })
+          .filter((spec) => spec.distance < 40)
+          .sort((a, b) => a.distance - b.distance)
+          .slice(0, 12),
+        challengePoints: coastalChallengeRuntime.map((point) => ({
+          id: point.id,
+          x: Number(point.x.toFixed(1)),
+          z: Number(point.z.toFixed(1)),
+          distance: Number(Math.hypot(point.x - state.position.x, point.z - state.position.y).toFixed(1))
+        }))
       },
       surfaceValidation: {
         valid: surfaceValidationReport.valid,
@@ -896,7 +1006,15 @@ export function createRacingGame({
       playerMaxForwardSpeed: playerMaxForwardSpeed(),
       status: currentStatusLabel(),
       paused: raceState.paused,
+      elapsedSeconds: Number(raceState.elapsedSeconds.toFixed(3)),
+      carSelectMode,
+      entryAutostart: Boolean(initialSnapshot) && isCoastalFreeCruise(),
       opponentEnabled: raceState.opponentEnabled,
+      // Rapier exposes setEnabled but not a reliable public getter in the
+      // browser build we ship. Keep this value at the sole write seam below
+      // so the F2/repro probe can verify the physical collider state too.
+      opponentColliderEnabled: physics?.opponentColliderEnabled ?? null,
+      opponentCollisionGroups: physics?.opponentCollisionGroups ?? null,
       playerHeading: Number(state.heading.toFixed(4)),
       playerPosition: { x: Number(state.position.x.toFixed(2)), y: Number(state.position.y.toFixed(2)) },
       opponentPosition: {
@@ -933,6 +1051,11 @@ export function createRacingGame({
       playerCar: formatCarLabel(selectedCar()),
       opponentCar: formatCarLabel(opponentCarSelection()),
       cameraMode,
+      map: Object.freeze({
+        name: mapData.name,
+        activity: mapData.activity ?? null,
+        environmentProfile
+      }),
       startConfig: Object.freeze({
         playerCarId: selectedCarId,
         cameraMode,
@@ -1081,6 +1204,27 @@ export function createRacingGame({
         halfLength: Number(playerVehicleSpec().chassisHalfLength.toFixed(2))
       },
       collisionDebugEnabled: collisionDebug.enabled,
+      collisionDebugHudVisible: Boolean(collisionDebug.hud && !collisionDebug.hud.hidden),
+      carStripPreview: Object.freeze({
+        strategy: stripPreview.strategy,
+        cameraYawDegrees: Math.round(THREE.MathUtils.radToDeg(STRIP_PREVIEW_YAW)),
+        usesPrebakedFrames: stripPreview.usesPrebakedFrames,
+        sharedRenderer: false,
+        activeDraws: 0,
+        entryCount: stripPreview.entries.size,
+        optionWidthPx: STRIP_OPTION_WIDTH_PX,
+        optionHeightPx: STRIP_OPTION_HEIGHT_PX
+      }),
+      rewind: rewindBuffer.getState(),
+      camera: camera
+        ? Object.freeze({
+            x: Number(camera.position.x.toFixed(3)),
+            y: Number(camera.position.y.toFixed(3)),
+            z: Number(camera.position.z.toFixed(3)),
+            fov: Number(camera.fov.toFixed(2)),
+            heading: Number(cameraHeading.toFixed(4))
+          })
+        : null,
       lastCollision: collisionDebug.lastCollision,
       flameStates: (car?.userData.boostFlames || []).map((flame) => ({
         visible: flame.visible,
@@ -1092,7 +1236,32 @@ export function createRacingGame({
       brakeLights: Object.freeze({
         active: Boolean(car?.userData.brakeLightsActive),
         count: car?.userData.brakeLights?.length ?? 0,
-        intensity: Number((car?.userData.brakeLightMaterials?.[0]?.emissiveIntensity ?? 0).toFixed(2))
+        anchor: car?.userData.brakeLightAnchor ?? null,
+        materialCount: car?.userData.brakeLightMaterials?.length ?? 0,
+        intensity: Number((car?.userData.brakeLightMaterials?.[0]?.emissiveIntensity ?? 0).toFixed(2)),
+        baselineIntensity: Number((car?.userData.brakeLightBaselines?.[0]?.emissiveIntensity ?? 0).toFixed(2)),
+        nodes: (car?.userData.brakeLights ?? []).map((node) => {
+          const world = node.getWorldPosition(new THREE.Vector3());
+          const local = car.worldToLocal(world.clone());
+          return Object.freeze({
+            name: node.name ?? "",
+            local: [
+              Number(local.x.toFixed(3)),
+              Number(local.y.toFixed(3)),
+              Number(local.z.toFixed(3))
+            ],
+            world: [
+              Number(world.x.toFixed(3)),
+              Number(world.y.toFixed(3)),
+              Number(world.z.toFixed(3))
+            ]
+          });
+        })
+      }),
+      opponentBrakeLights: Object.freeze({
+        active: Boolean(opponentCar?.userData.brakeLightsActive),
+        intensity: Number((opponentCar?.userData.brakeLightMaterials?.[0]?.emissiveIntensity ?? 0).toFixed(2)),
+        baselineIntensity: Number((opponentCar?.userData.brakeLightBaselines?.[0]?.emissiveIntensity ?? 0).toFixed(2))
       }),
       opponentFlameStates: (opponentCar?.userData.boostFlames || []).map((flame) => ({
         visible: flame.visible,
@@ -1104,16 +1273,22 @@ export function createRacingGame({
     })
   };
 
-  function start() {
+  async function start() {
     prepareConfetti();
     keyState.clear();
     setPaused(false);
     addListeners();
     active = true;
     updateCollisionDebugVisibility();
-    showStartOverlay();
-    if (initialSnapshot) {
-      void beginRace();
+    if (requiresLobbyConfirmation) {
+      // Lobby prepares a fully drivable world but keeps simulation, audio,
+      // input and the first reveal behind lifecycle confirmation.
+      await prepareLobbyCruise();
+    } else {
+      showStartOverlay();
+      if (initialSnapshot) {
+        void beginRace();
+      }
     }
   }
 
@@ -1277,6 +1452,37 @@ export function createRacingGame({
     startStatus.classList.toggle("is-error", isError);
   }
 
+  function clearStripPreviewEntries() {
+    stripPreview.entries.clear();
+  }
+
+  function syncStripSelectionUi() {
+    for (const button of carOptions.querySelectorAll(".race-car-option")) {
+      const selected = button.dataset.carId === selectedCarId;
+      button.classList.toggle("is-selected", selected);
+      button.setAttribute("aria-pressed", String(selected));
+      if (selected) {
+        button.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+      }
+    }
+  }
+
+  function selectCarFromStrip(carId) {
+    if (!isChallengeCarUnlocked(carId, challengeUnlockState)) return false;
+    if (selectedCarId === carId) {
+      carOptions.querySelector(`[data-car-id="${carId}"]`)?.focus({ preventScroll: true });
+      return true;
+    }
+    selectedCarId = carId;
+    syncStripSelectionUi();
+    const currentCar = selectedCar();
+    updateSelectedCarPanel(currentCar);
+    scheduleSelectedCarPreview(currentCar);
+    setStartStatus(`Xbox · A · ${formatCarLabel(currentCar)}`);
+    carOptions.querySelector(`[data-car-id="${carId}"]`)?.focus({ preventScroll: true });
+    return true;
+  }
+
   function renderCarOptions() {
     const rival = opponentCarSelection();
     const currentCar = selectedCar();
@@ -1284,6 +1490,7 @@ export function createRacingGame({
       ? "3 位 Festival 对手"
       : isFreeDrive ? "无 · 自由探索" : rival.name;
     updateSelectedCarPanel(currentCar);
+    clearStripPreviewEntries();
     carOptions.replaceChildren(
       ...racingCarCatalog.map((carConfig) => {
         const button = document.createElement("button");
@@ -1296,34 +1503,51 @@ export function createRacingGame({
         button.style.setProperty("--car-accent", carConfig.accentColor);
         button.setAttribute("aria-pressed", String(isSelected));
         button.setAttribute("aria-disabled", String(locked));
-        button.innerHTML = `
-          <span class="race-car-hero" aria-hidden="true">
-            <img class="race-car-thumbnail" alt="" data-car-id="${carConfig.id}">
-            <span class="race-car-option-top">
-              <span class="race-car-badge">${locked ? "挑战解锁" : carConfig.tag}</span>
-              <span class="race-car-picked">${isSelected ? "ON" : ""}</span>
-            </span>
-          </span>
-          <span class="race-car-copy">
-            <strong class="race-car-name">${carConfig.name}</strong>
-            <span class="race-car-meta">${carConfig.make}</span>
-          </span>
+
+        const hero = document.createElement("span");
+        hero.className = "race-car-hero";
+        hero.setAttribute("aria-hidden", "true");
+        const image = document.createElement("img");
+        image.className = "race-car-strip-thumb";
+        image.alt = "";
+        image.decoding = "async";
+        image.loading = "eager";
+        image.draggable = false;
+        image.dataset.carId = carConfig.id;
+        image.src = carConfig.thumbnailUrl;
+        hero.append(image);
+        const top = document.createElement("span");
+        top.className = "race-car-option-top";
+        top.innerHTML = `
+          <span class="race-car-badge">${locked ? "挑战解锁" : carConfig.tag}</span>
+          <span class="race-car-picked">${isSelected ? "ON" : ""}</span>
         `;
+        hero.append(top);
+
+        const copy = document.createElement("span");
+        copy.className = "race-car-copy";
+        copy.innerHTML = `
+          <strong class="race-car-name">${carConfig.name}</strong>
+          <span class="race-car-meta">${carConfig.make}</span>
+        `;
+
+        button.append(hero, copy);
         button.addEventListener("click", () => {
-          if (locked) return;
-          selectedCarId = carConfig.id;
-          renderCarOptions();
-          setStartStatus(`Xbox · A · ${formatCarLabel(selectedCar())}`);
-          carOptions.querySelector(`[data-car-id="${carConfig.id}"]`)?.focus({ preventScroll: true });
+          selectCarFromStrip(carConfig.id);
         });
-        const thumbnail = button.querySelector(".race-car-thumbnail");
-        if (thumbnail instanceof HTMLImageElement) {
-          void hydrateCarOptionThumbnail(thumbnail, carConfig);
-        }
+        stripPreview.entries.set(carConfig.id, {
+          image,
+          carConfig,
+          locked
+        });
         return button;
       })
     );
     scheduleSelectedCarPreview(currentCar);
+  }
+
+  function disposeStripPreviewResources() {
+    clearStripPreviewEntries();
   }
 
   function disposeCarOptionPreviews() {
@@ -1335,6 +1559,7 @@ export function createRacingGame({
     }
     disposeSelectedCarPreviewCar();
     disposeCarThumbnailCache();
+    disposeStripPreviewResources();
     if (selectedCarPreviewRenderer) {
       disposeSceneResources(selectedCarPreviewScene);
       disposeRenderer(selectedCarPreviewRenderer);
@@ -1601,8 +1826,19 @@ export function createRacingGame({
 
     const previewCar = await buildCarPreviewObject(carConfig);
     previewScene.add(previewCar);
-    configurePreviewCamera(previewCamera, shadowDisc, measurePreviewCar(previewCar));
-    applyPreviewAngle(previewCar, THREE.MathUtils.degToRad(-30));
+    // Strip / catalog thumbnails: left-front ~45° (same contract as carStripPreview).
+    const previewMetrics = measurePreviewCar(previewCar);
+    const yaw = Math.PI / 4;
+    const distance = previewMetrics.length * 1.55;
+    const height = previewMetrics.focusY + previewMetrics.length * 0.22;
+    shadowDisc.scale.set(previewMetrics.length * 0.7, previewMetrics.length * 0.55, 1);
+    applyPreviewAngle(previewCar, 0);
+    previewCamera.position.set(
+      -Math.sin(yaw) * distance,
+      height,
+      Math.cos(yaw) * distance
+    );
+    previewCamera.lookAt(0, previewMetrics.focusY * 0.92, 0);
     previewRenderer.render(previewScene, previewCamera);
 
     const thumbnailUrl = previewCanvas.toDataURL("image/png");
@@ -1667,6 +1903,158 @@ export function createRacingGame({
     stopOverlayGamepadNavLoop();
   }
 
+  function configureStartOverlayForCruiseSwap(enabled) {
+    if (enabled) {
+      startModeValue.textContent = "换车";
+      startOpponentValue.textContent = "同位姿续开";
+      startRaceButton.textContent = "确认";
+      startHomeButton.textContent = "大厅";
+      startEditorButton.hidden = true;
+      if (coastalModeRow) coastalModeRow.hidden = true;
+      if (difficultyRow) difficultyRow.hidden = true;
+    } else {
+      startRaceButton.textContent = "GO";
+      startHomeButton.textContent = "HOME";
+      startEditorButton.hidden = false;
+      renderCoastalModeOptions();
+      renderDifficultyOptions();
+    }
+  }
+
+  function openCruiseCarSelect() {
+    if (!isCoastalFreeCruise() || !initialized || carSelectBusy) return false;
+    carSelectMode = "cruise-swap";
+    carSelectBaselineCarId = selectedCarId;
+    raceState.paused = true;
+    pauseOverlay.hidden = true;
+    keyState.clear();
+    sessionControls?.transition("paused");
+    showStartOverlay();
+    configureStartOverlayForCruiseSwap(true);
+    setStartStatus("选车后确认 · Esc/B 取消换车");
+    return true;
+  }
+
+  function closeCruiseCarSelectUi() {
+    carSelectMode = null;
+    carSelectBaselineCarId = null;
+    configureStartOverlayForCruiseSwap(false);
+    hideStartOverlay();
+  }
+
+  function cancelCruiseCarSelect() {
+    if (carSelectMode !== "cruise-swap" || carSelectBusy) return false;
+    selectedCarId = carSelectBaselineCarId ?? selectedCarId;
+    closeCruiseCarSelectUi();
+    raceState.paused = false;
+    sessionControls?.transition("running");
+    updateHud();
+    return true;
+  }
+
+  async function confirmCruiseCarSelect() {
+    if (carSelectMode !== "cruise-swap" || carSelectBusy) return false;
+    carSelectBusy = true;
+    const nextId = selectedCarId;
+    const baseline = carSelectBaselineCarId;
+    try {
+      if (nextId !== baseline) {
+        setStartStatus(`正在切换 ${formatCarLabel(selectedCar())}...`);
+        setStartButtonsDisabled(true);
+        const swapped = await swapPlayerCarInPlace(nextId);
+        if (!swapped) {
+          selectedCarId = baseline;
+          setStartStatus("换车失败，已取消", true);
+          setStartButtonsDisabled(false);
+          carSelectBusy = false;
+          return false;
+        }
+      }
+      closeCruiseCarSelectUi();
+      raceState.paused = false;
+      sessionControls?.transition("running");
+      updateHud();
+      return true;
+    } finally {
+      carSelectBusy = false;
+      setStartButtonsDisabled(false);
+    }
+  }
+
+  async function swapPlayerCarInPlace(nextCarId) {
+    if (!physics?.world || !physics.playerBody || !scene) return false;
+    if (!isChallengeCarUnlocked(nextCarId, challengeUnlockState)) return false;
+    const carConfig = getRacingCarById(nextCarId);
+    if (!carConfig) return false;
+
+    const resumePosition = state.position.clone();
+    const resumeHeading = state.heading;
+
+    if (physics.playerVehicle?.controller) {
+      physics.world.removeVehicleController?.(physics.playerVehicle.controller);
+      physics.playerVehicle = null;
+    }
+    if (physics.playerCollider) {
+      physics.colliderTags.delete(physics.playerCollider.handle);
+      physics.world.removeCollider(physics.playerCollider, true);
+      physics.playerCollider = null;
+    }
+
+    selectedCarId = carConfig.id;
+    const vehicleSpec = getPhysicalVehicleSpec(selectedCarId);
+    const playerColliderDesc = RAPIER.ColliderDesc.roundCuboid(
+      vehicleSpec.chassisHalfWidth,
+      vehicleSpec.chassisHalfHeight,
+      vehicleSpec.chassisHalfLength,
+      vehicleSpec.chassisRoundRadius
+    )
+      .setMass(vehicleSpec.mass)
+      .setFriction(0.42)
+      .setRestitution(0.03);
+    physics.playerCollider = physics.world.createCollider(
+      playerColliderDesc.setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
+      physics.playerBody
+    );
+    physics.colliderTags.set(physics.playerCollider.handle, "player");
+    physics.playerVehicle = createPhysicalVehicle({
+      world: physics.world,
+      chassis: physics.playerBody,
+      config: vehicleSpec
+    });
+
+    if (car) {
+      scene.remove(car);
+      disposeObject3DTree(car);
+      car = null;
+    }
+    car = await createCar(selectedCar(), 0xd40000);
+    scene.add(car);
+    ensureCollisionDebugVisuals();
+
+    const savedStartConfig = saveActiveRacingStartConfig({
+      playerCarId: selectedCarId,
+      cameraMode,
+      coastalPlayMode,
+      difficulty: racingDifficulty
+    });
+    if (activeSnapshot) {
+      activeSnapshot = createRacingSnapshot({
+        map: activeSnapshot.map,
+        startConfig: savedStartConfig,
+        environmentProfile: activeSnapshot.environmentProfile,
+        randomSeed: activeSnapshot.randomSeed,
+        challenge: activeSnapshot.challenge
+      });
+    }
+
+    setPlayerBodyPose(resumePosition, resumeHeading);
+    state.position.copy(resumePosition);
+    state.heading = resumeHeading;
+    syncPlayerPhysicsState(state.trackIndex);
+    updateCarTransform();
+    return true;
+  }
+
   // The main race `loop()` (and its `input.pollGamepad()` call) only starts
   // once `beginRace()` succeeds, so the overlay needs its own tiny polling
   // loop to read the Xbox pad while it is up. D-pad / left stick move focus
@@ -1694,7 +2082,10 @@ export function createRacingGame({
 
     startOverlayFocusNav.poll({
       root: startOverlay,
-      onCancel: () => startHomeButton.click()
+      onCancel: () => {
+        if (carSelectMode === "cruise-swap") cancelCruiseCarSelect();
+        else startHomeButton.click();
+      }
     });
     startOverlayGamepadFrameId = clock.requestFrame(tickStartOverlayGamepadNav);
   }
@@ -1756,7 +2147,8 @@ export function createRacingGame({
       collisionDebug.group.visible = collisionDebug.enabled && Boolean(scene);
     }
     if (collisionDebug.hud) {
-      collisionDebug.hud.hidden = !active;
+      // #23: F2 toggles enabled — HUD must follow enabled, not only session active.
+      collisionDebug.hud.hidden = !(active && collisionDebug.enabled);
     }
   }
 
@@ -1766,14 +2158,17 @@ export function createRacingGame({
     startHomeButton.disabled = disabled;
   }
 
-  async function beginRace() {
+  async function beginRace({ preparedLobbyCruise = false } = {}) {
     if (!active || raceStarting) {
       return;
     }
 
     raceStarting = true;
     setStartButtonsDisabled(true);
-    setStartStatus(`正在加载 ${selectedCar().name} 与对手车辆...`);
+    if (!preparedLobbyCruise) {
+      onLoadingStage("session", "正在锁定本次巡游配置…");
+      setStartStatus(`正在加载 ${selectedCar().name} 与对手车辆...`);
+    }
     const savedStartConfig = saveActiveRacingStartConfig({
       playerCarId: selectedCarId,
       cameraMode,
@@ -1796,14 +2191,20 @@ export function createRacingGame({
       implementation: {
         async start(controls) {
           sessionControls = controls;
-          await initializeScene();
+          if (!preparedLobbyCruise) {
+            onLoadingStage("scene", "正在搭建 Coastal 赛道…");
+            await initializeScene();
+          }
           if (controls.signal.aborted || !active) return;
           hideStartOverlay();
-          resetRace();
+          if (!preparedLobbyCruise) resetRace();
           resizeRenderer();
+          if (viewportSyncFixEnabled) startRendererResizeObservation();
           lastFrameTime = clock.now();
           controls.transition("running");
+          if (!preparedLobbyCruise) onLoadingStage("ready", "赛道已就绪，开放驾驶。");
           if (animationFrameId) clock.cancelFrame(animationFrameId);
+          if (preparedLobbyCruise) simulationStartCount += 1;
           animationFrameId = clock.requestFrame(loop);
         },
         destroy: destroyRaceRuntime
@@ -1811,6 +2212,47 @@ export function createRacingGame({
     });
     await session.start();
     raceStarting = false;
+  }
+
+  async function prepareLobbyCruise() {
+    if (!active || raceStarting || lobbyCruisePrepared) return lobbyCruisePrepared;
+    raceStarting = true;
+    onLoadingStage("session", "正在锁定本次巡游配置…");
+    const savedStartConfig = saveActiveRacingStartConfig({
+      playerCarId: selectedCarId,
+      cameraMode,
+      coastalPlayMode,
+      difficulty: racingDifficulty
+    });
+    activeSnapshot ??= createRacingSnapshot({ map: mapData, startConfig: savedStartConfig, environmentProfile });
+    random = createSeededRandom(activeSnapshot.randomSeed);
+    onLoadingStage("scene", "正在搭建 Coastal 赛道…");
+    try {
+      await initializeScene();
+      if (!active) return false;
+      resetRace();
+      resizeRenderer();
+      lobbyCruisePrepared = true;
+      onLoadingStage("ready", "赛道已就绪，等待玩家开始。");
+      return true;
+    } finally {
+      raceStarting = false;
+    }
+  }
+
+  async function confirmLobbyCruiseStart() {
+    if (!requiresLobbyConfirmation || !lobbyCruisePrepared || raceStarting || animationFrameId) return false;
+    // State held while the cover is up cannot leak into the first drive frame.
+    keyState.clear();
+    input.primeGamepad();
+    await beginRace({ preparedLobbyCruise: true });
+    const started = Boolean(animationFrameId);
+    if (started) lobbyConfirmationCount += 1;
+    return started;
+  }
+
+  function isAwaitingLobbyConfirmation() {
+    return requiresLobbyConfirmation && lobbyCruisePrepared && !animationFrameId;
   }
 
   async function requestSessionIntent(intent) {
@@ -1870,19 +2312,35 @@ export function createRacingGame({
 
       camera = new THREE.PerspectiveCamera(cameraConfig.fov, 1, 0.1, isFreeDrive ? 900 : 500);
 
+      // Model parsing is independent of track construction and Rapier setup.
+      // Warm only uncached templates: a cold launch loses the serial vehicle
+      // wait, while a revisit adds no competing work to its hot path.
+      const uncachedVehicleSpecs = [selectedCar(), opponentCarSelection()]
+        .filter((carSpec) => !carTemplateLeases.has(carSpec.id));
+      const vehicleTemplateWarmup = uncachedVehicleSpecs.length
+        ? Promise.all(uncachedVehicleSpecs.map(loadCarTemplate)).then((leases) => {
+          leases.forEach((lease) => lease.release());
+        }).catch((error) => {
+          console.warn("Vehicle template warmup failed; creation will use its normal fallback.", error);
+        })
+        : Promise.resolve();
+
       await applySceneEnvironment();
       createLights();
       await createWorld();
+      onLoadingStage("physics", "赛道已就绪，正在校准物理车辆…");
       await initializePhysics();
       if (initializationToken !== runtimeToken) {
         disposeRuntimeResources();
         return;
       }
 
+      await vehicleTemplateWarmup;
       [car, opponentCar] = await Promise.all([
         createCar(selectedCar(), 0xd40000),
         createCar(opponentCarSelection(), 0x88a5ff)
       ]);
+      onLoadingStage("vehicles", "车辆已就绪，正在接入道路交通…");
       if (initializationToken !== runtimeToken) {
         disposeRuntimeResources();
         return;
@@ -1892,6 +2350,7 @@ export function createRacingGame({
       scene.add(opponentCar);
       if (isFreeDrive && !isProvingGround) await initializeFreeDriveTraffic();
       if (isCoastalFreeCruise()) await setupCoastalChallengePoints();
+      onLoadingStage("input", "输入与物理已就绪，正在进入赛道…");
       if (initializationToken !== runtimeToken) {
         disposeRuntimeResources();
         return;
@@ -4552,10 +5011,10 @@ export function createRacingGame({
     if (!isFreeDrive) {
       createRailColliders(1);
       createRailColliders(-1);
-    } else if (isIslandWorld) {
-      createRailColliders(1, (sample) => isFreeDriveBridgeCorridor(sample.center));
-      createRailColliders(-1, (sample) => isFreeDriveBridgeCorridor(sample.center));
     }
+    // Free-drive / island: never create rail cuboids. Island used to spawn
+    // invisible bridge-corridor rails with no matching visuals (#28). Visible
+    // free-drive bridge barriers remain visual-only (open edges / fall-off).
 
     const playerBodyDesc = RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(0, physicsConfig.fixedHeight, 0)
@@ -4601,7 +5060,24 @@ export function createRacingGame({
         .setRestitution(0),
       physics.opponentBody
     );
+    // Free-drive has no race opponent. Disable at construction rather than
+    // waiting for the first simulation step, so no stale/unrendered opponent
+    // body can register as an invisible impact near the spawn route.
+    setOpponentColliderEnabled(raceState.opponentEnabled);
     physics.colliderTags.set(physics.opponentCollider.handle, "opponent");
+  }
+
+  function setOpponentColliderEnabled(enabled) {
+    if (!physics?.opponentCollider) return false;
+    const nextEnabled = Boolean(enabled);
+    // Defence in depth for free-cruise: a disabled Rapier collider should be
+    // non-interactive, but collision group 0 also prevents an old queued or
+    // stale body from generating contacts during mode/session transitions.
+    physics.opponentCollisionGroups = nextEnabled ? 0x00010001 : 0;
+    physics.opponentCollider.setCollisionGroups(physics.opponentCollisionGroups);
+    physics.opponentCollider.setEnabled(nextEnabled);
+    physics.opponentColliderEnabled = nextEnabled;
+    return nextEnabled;
   }
 
   function createRailColliders(side, sampleFilter = null) {
@@ -4702,7 +5178,12 @@ export function createRacingGame({
     );
     playerSurfaceState.contacts = contacts;
     freeDriveJumpState.airborne = contacts.length === 0;
-    if (isShowcase && showcaseEvent.phase === "running" && !presentationState.suppressJumpTransitions) {
+    if (
+      isShowcase
+      && showcaseEvent.phase === "running"
+      && !presentationState.suppressJumpTransitions
+      && !rewindBuffer.active
+    ) {
       const planarSpeed = Math.hypot(velocity?.x ?? 0, velocity?.z ?? 0);
       if (!presentationState.landingArmed && contacts.length === 0 && freeDriveJumpState.wasGrounded
         && planarSpeed > 8 && (velocity?.y ?? 0) > 0.35) {
@@ -6518,7 +6999,7 @@ export function createRacingGame({
       group.userData.boostGroup = boostGroup;
       group.userData.wheelShaderBindings = wheelVisuals.bindings;
       group.userData.wheelCount = wheelVisuals.logicalWheelCount;
-      attachBrakeLights(group, size, box);
+      attachBrakeLights(group, size, box, model);
       visualRoot.add(boostGroup);
       group.add(visualRoot);
       return group;
@@ -6654,7 +7135,9 @@ export function createRacingGame({
 
   function resetFreeDriveTraffic() {
     for (const traffic of freeDriveTraffic) {
-      if (isShowcase) {
+      // Island Tour only: park opponents on the start grid.
+      // Free-cruise uses civilian loop traffic — never the Tour grid (would pin the player).
+      if (isShowcase && !isCoastalFreeCruise()) {
         const gridDistances = [-9, -16, -23];
         const gridLanes = [-2.4, 0, 2.4];
         traffic.direction = 1;
@@ -6714,7 +7197,8 @@ export function createRacingGame({
 
   function updateFreeDriveTraffic(deltaSeconds) {
     if (!isFreeDrive || freeDriveTraffic.length === 0) return;
-    if (isShowcase) {
+    // Tour opponents follow the showcase driving line; free-cruise civilians cruise the loop.
+    if (isShowcase && !isCoastalFreeCruise()) {
       updateShowcaseOpponents(deltaSeconds);
       return;
     }
@@ -7267,6 +7751,219 @@ export function createRacingGame({
     return group;
   }
 
+  function canUseRewind() {
+    if (!active || !initialized || !physics?.playerBody) return false;
+    if (isStartOverlayVisible() || raceState.paused || raceState.resultVisible) return false;
+    if (raceState.finished) return false;
+    if (carSelectMode === "cruise-swap") return false;
+    if (isShowcase && !isCoastalFreeCruise() && showcaseEvent.phase !== "running") return false;
+    return true;
+  }
+
+  function captureRewindSample() {
+    if (!physics?.playerBody) return null;
+    const translation = physics.playerBody.translation();
+    const rotation = physics.playerBody.rotation();
+    const linvel = physics.playerBody.linvel();
+    const angvel = physics.playerBody.angvel();
+    const drivetrain = physics.playerVehicle?.drivetrain;
+    const sample = {
+      time: raceState.elapsedSeconds,
+      player: {
+        x: translation.x,
+        y: translation.y,
+        z: translation.z,
+        qx: rotation.x,
+        qy: rotation.y,
+        qz: rotation.z,
+        qw: rotation.w,
+        vx: linvel.x,
+        vy: linvel.y,
+        vz: linvel.z,
+        wx: angvel.x,
+        wy: angvel.y,
+        wz: angvel.z,
+        heading: state.heading,
+        trackProgress: state.trackProgress,
+        raceProgress: state.raceProgress,
+        boostSeconds: state.boostSeconds,
+        boostCharges: state.boostCharges,
+        gear: drivetrain?.gear ?? 0,
+        engineRpm: drivetrain?.engineRpm ?? 0
+      },
+      opponent: null,
+      traffic: []
+    };
+
+    if (physics.opponentBody) {
+      const ot = physics.opponentBody.translation();
+      const or = physics.opponentBody.rotation();
+      const ov = physics.opponentBody.linvel();
+      const oa = physics.opponentBody.angvel();
+      sample.opponent = {
+        x: ot.x,
+        y: ot.y,
+        z: ot.z,
+        qx: or.x,
+        qy: or.y,
+        qz: or.z,
+        qw: or.w,
+        vx: ov.x,
+        vy: ov.y,
+        vz: ov.z,
+        wx: oa.x,
+        wy: oa.y,
+        wz: oa.z,
+        progress: opponentState.progress,
+        heading: opponentState.heading,
+        laneOffset: opponentState.laneOffset,
+        raceProgress: opponentState.raceProgress,
+        currentSpeed: opponentState.currentSpeed,
+        boostSeconds: opponentState.boostSeconds,
+        boostCharges: opponentState.boostCharges
+      };
+    }
+
+    for (const traffic of freeDriveTraffic) {
+      if (!traffic?.body) continue;
+      const tt = traffic.body.translation();
+      const tr = traffic.body.rotation();
+      sample.traffic.push({
+        index: traffic.index,
+        x: tt.x,
+        y: tt.y,
+        z: tt.z,
+        qx: tr.x,
+        qy: tr.y,
+        qz: tr.z,
+        qw: tr.w,
+        eventDistance: traffic.eventDistance ?? 0,
+        laneOffset: traffic.laneOffset ?? 0,
+        currentSpeed: traffic.currentSpeed ?? 0,
+        direction: traffic.direction ?? 1
+      });
+    }
+
+    return sample;
+  }
+
+  function applyRewindBody(body, pose) {
+    if (!body || !pose) return;
+    body.setTranslation({ x: pose.x, y: pose.y, z: pose.z }, true);
+    body.setRotation({ x: pose.qx, y: pose.qy, z: pose.qz, w: pose.qw }, true);
+    body.setLinvel({ x: pose.vx, y: pose.vy, z: pose.vz }, true);
+    body.setAngvel({ x: pose.wx, y: pose.wy, z: pose.wz }, true);
+  }
+
+  function applyRewindSample(sample) {
+    if (!sample?.player || !physics?.playerBody) return;
+    applyRewindBody(physics.playerBody, sample.player);
+    state.heading = sample.player.heading;
+    state.trackProgress = sample.player.trackProgress;
+    state.raceProgress = sample.player.raceProgress;
+    state.boostSeconds = sample.player.boostSeconds;
+    state.boostCharges = sample.player.boostCharges;
+    if (physics.playerVehicle?.drivetrain) {
+      physics.playerVehicle.drivetrain.gear = sample.player.gear;
+      physics.playerVehicle.drivetrain.engineRpm = sample.player.engineRpm;
+    }
+    resetPhysicalVehicleControls(physics.playerVehicle);
+    syncPlayerPhysicsState();
+    syncPhysicalVehicleState();
+
+    if (sample.opponent && physics.opponentBody) {
+      applyRewindBody(physics.opponentBody, sample.opponent);
+      opponentState.progress = sample.opponent.progress;
+      opponentState.heading = sample.opponent.heading;
+      opponentState.laneOffset = sample.opponent.laneOffset;
+      opponentState.raceProgress = sample.opponent.raceProgress;
+      opponentState.currentSpeed = sample.opponent.currentSpeed;
+      opponentState.boostSeconds = sample.opponent.boostSeconds;
+      opponentState.boostCharges = sample.opponent.boostCharges;
+      syncOpponentPhysicsState();
+    }
+
+    if (sample.traffic?.length) {
+      for (const entry of sample.traffic) {
+        const traffic = freeDriveTraffic.find((item) => item.index === entry.index);
+        if (!traffic?.body) continue;
+        traffic.body.setTranslation({ x: entry.x, y: entry.y, z: entry.z }, true);
+        traffic.body.setRotation({ x: entry.qx, y: entry.qy, z: entry.qz, w: entry.qw }, true);
+        traffic.eventDistance = entry.eventDistance;
+        traffic.laneOffset = entry.laneOffset;
+        traffic.currentSpeed = entry.currentSpeed;
+        traffic.direction = entry.direction;
+      }
+    }
+  }
+
+  function endRewindPlayback() {
+    if (rewindBuffer.active) rewindBuffer.end();
+  }
+
+  function clearRewindCameraNoise() {
+    boostCameraKick = 0;
+    presentationState.jumpFovPulse = 0;
+    presentationState.jumpLiftPulse = 0;
+    presentationState.landingKick = 0;
+    presentationState.landingArmed = false;
+    presentationState.maximumAirborneDownwardSpeed = 0;
+  }
+
+  function updateRewindPlayback(deltaSeconds) {
+    const want = rewindInputHeld && canUseRewind() && rewindBuffer.bufferedSeconds > 0.05;
+    if (!want) {
+      if (rewindBuffer.active) endRewindPlayback();
+      return false;
+    }
+    if (!rewindBuffer.active) {
+      if (!rewindBuffer.begin()) return false;
+      clearRewindCameraNoise();
+    }
+    const { sample, atStart } = rewindBuffer.stepBackward(deltaSeconds);
+    if (sample) applyRewindSample(sample);
+    if (atStart && sample) {
+      // Hold on the oldest frame while input remains pressed.
+      applyRewindSample(sample);
+    }
+    return true;
+  }
+
+  function recordRewindSample(deltaSeconds) {
+    if (!canUseRewind() || rewindBuffer.active) return;
+    rewindBuffer.maybeRecord(deltaSeconds, captureRewindSample);
+  }
+
+  function ensureRewindHud() {
+    if (rewindHud) return rewindHud;
+    const hud = document.createElement("div");
+    hud.id = "racingRewindHud";
+    hud.className = "race-rewind-hud";
+    hud.setAttribute("aria-live", "polite");
+    hud.hidden = true;
+    hud.innerHTML = `
+      <strong class="race-rewind-hud-title">REWIND</strong>
+      <span class="race-rewind-hud-meta"></span>
+    `;
+    (document.getElementById("racingView") || document.body).append(hud);
+    rewindHud = hud;
+    return hud;
+  }
+
+  function updateRewindHud() {
+    const hud = ensureRewindHud();
+    const activeRewind = rewindBuffer.active && canUseRewind();
+    hud.hidden = !activeRewind;
+    if (!activeRewind) return;
+    const meta = hud.querySelector(".race-rewind-hud-meta");
+    const buffered = rewindBuffer.bufferedSeconds;
+    const label = rewindBuffer.atStart
+      ? "START · 到头"
+      : `${buffered.toFixed(1)}s`;
+    if (meta) meta.textContent = label;
+    hud.classList.toggle("is-at-start", rewindBuffer.atStart);
+  }
+
   function loop(timestamp) {
     if (!active) return;
 
@@ -7279,12 +7976,19 @@ export function createRacingGame({
     input.pollGamepad();
     if (!raceState.paused) {
       const sprintGlide = raceConfig.mode === "sprint" && raceState.finished && !raceState.resultVisible;
+      const rewinding = updateRewindPlayback(deltaSeconds);
 
-      if (!raceState.finished || sprintGlide) {
+      if (!rewinding && (!raceState.finished || sprintGlide)) {
         updateControls();
         const physicsStartedAt = clock.now();
         physicsSteps = updatePhysics(deltaSeconds);
         physicsMs = clock.now() - physicsStartedAt;
+        updateRaceState(deltaSeconds);
+      } else if (rewinding) {
+        // Timer keeps running while scrubbing back (product default).
+        state.throttle = 0;
+        state.brake = 0;
+        state.steering = 0;
         updateRaceState(deltaSeconds);
       } else {
         state.throttle = 0;
@@ -7303,8 +8007,11 @@ export function createRacingGame({
       updateShowcaseAtmosphere(deltaSeconds);
       updateCollisionDebugVisuals();
       updateCollisionDebugHud();
+    } else if (rewindBuffer.active) {
+      endRewindPlayback();
     }
 
+    updateRewindHud();
     updateRacingAudio();
     updateRacingHaptics();
     updateCoastalChallengePrompt();
@@ -7572,8 +8279,22 @@ export function createRacingGame({
     }
   }
 
-  function attachBrakeLights(group, size, box) {
+  function attachBrakeLights(group, size, box, model = null) {
     if (!group?.userData?.visualRoot) return null;
+
+    const anchored = findTailLampAnchors(model, box, size);
+    if (anchored.materials.length) {
+      group.userData.brakeLights = anchored.nodes;
+      group.userData.brakeLightMaterials = anchored.materials;
+      group.userData.brakeLightBaselines = captureBrakeLightBaselines(anchored.materials);
+      group.userData.brakeLightAnchor = "model-tail-lamps";
+      group.userData.brakeLightsActive = false;
+      setCarBrakeLightsActive(group, false);
+      return group.userData.brakeLights;
+    }
+
+    // Fallback bodies have no GLB lamp nodes. These are inset into the rear
+    // fascia itself, never positioned behind the car as detached effects.
     const material = new THREE.MeshStandardMaterial({
       color: 0x3a1010,
       emissive: 0xff1a12,
@@ -7588,7 +8309,7 @@ export function createRacingGame({
     );
     const left = new THREE.Mesh(geometry, material);
     const right = new THREE.Mesh(geometry, material.clone());
-    const rearZ = (Number.isFinite(box?.min?.z) ? box.min.z : -size.z * 0.5) - 0.01;
+    const rearZ = (Number.isFinite(box?.min?.z) ? box.min.z : -size.z * 0.5) + 0.025;
     const y = Math.max(0.28, (Number.isFinite(box?.min?.y) ? box.min.y : 0) + size.y * 0.42);
     const x = Math.max(0.35, size.x * 0.28);
     left.position.set(-x, y, rearZ);
@@ -7596,20 +8317,144 @@ export function createRacingGame({
     group.userData.visualRoot.add(left, right);
     group.userData.brakeLights = [left, right];
     group.userData.brakeLightMaterials = [left.material, right.material];
+    group.userData.brakeLightBaselines = captureBrakeLightBaselines(group.userData.brakeLightMaterials);
+    group.userData.brakeLightAnchor = "fallback-rear-fascia";
     group.userData.brakeLightsActive = false;
     return group.userData.brakeLights;
+  }
+
+  function findTailLampAnchors(model, carBox, carSize) {
+    if (!model?.traverse) return { nodes: [], materials: [] };
+    model.updateMatrixWorld(true);
+    const centerZ = carBox?.getCenter(new THREE.Vector3()).z ?? 0;
+    const rearThreshold = centerZ - Math.max(0.2, (carSize?.z ?? 1) * 0.18);
+    const candidates = [];
+    model.traverse((node) => {
+      if (!node?.isMesh || !node.material) return;
+      const nodeBox = new THREE.Box3().setFromObject(node);
+      const nodeCenter = nodeBox.getCenter(new THREE.Vector3());
+      const nodeSize = nodeBox.getSize(new THREE.Vector3());
+      const label = materialLabelFor(node, Array.isArray(node.material) ? node.material[0] : node.material);
+      const nodeMaterials = Array.isArray(node.material) ? node.material : [node.material];
+      if (isNonLampBrakePart(label)) return;
+      const tailNamed = /tail|taillight|tail_light|rear.*light|back.*light|lights?_position_back|lights?_brakes|fanali/.test(label);
+      const brakeNamed = /brake/.test(label);
+      const genericLamp = /light|lamp|glow/.test(label);
+      // The Veneno asset names its rear lens only `lamp`; it has no separate
+      // headlamp mesh with that material name. Treat this exact material name
+      // as a lamp anchor even when the source model's local forward axis is
+      // reversed and the rear-side position heuristic cannot classify it.
+      const explicitLamp = /(?:^|\s)lamp(?:\s|$)/.test(label);
+      // Several catalog GLBs merge both rear lenses into a single light-cluster
+      // mesh, so its center is the car origin rather than either lamp side.
+      const clusteredLamp = /lightcluster|lightrefracted|emiss/.test(label);
+      const atRear = nodeCenter.z < rearThreshold;
+      // Some source models have anonymous `MeshPart..Mtl` names but preserve
+      // the small, warm-red lens material. Restrict this geometry fallback to
+      // compact parts so a red body panel can never become a brake anchor.
+      const warmLensColor = nodeMaterials.some((material) => {
+        const color = material?.color;
+        return color && color.r > 0.05 && color.r > color.g * 1.35 && color.r > color.b * 1.35;
+      });
+      const compactWarmLens = warmLensColor
+        && nodeSize.x < (carSize?.x ?? 1) * 0.72
+        && nodeSize.z < (carSize?.z ?? 1) * 0.72;
+      // The Countach 5000QV exports both rear lenses as two named MeshPart
+      // groups spanning the left/right clusters. Their boxes are broad, but
+      // their materials are uniquely warm red and are still model geometry.
+      const anonymousWarmLens = warmLensColor && /meshpart\d+mtl/.test(label);
+      const warmLens = compactWarmLens || anonymousWarmLens;
+      // Last-resort source-geometry path for legacy models that ship no mesh
+      // or material names at all. It is deliberately constrained to compact,
+      // elevated pieces at the rear — never a world-space effect or body panel.
+      const anonymousRearLens = atRear
+        && nodeCenter.y > (carBox?.min?.y ?? 0) + (carSize?.y ?? 1) * 0.24
+        && nodeSize.x < (carSize?.x ?? 1) * 0.58
+        && nodeSize.y < (carSize?.y ?? 1) * 0.42
+        && nodeSize.z < (carSize?.z ?? 1) * 0.34;
+      if (!(tailNamed || brakeNamed || genericLamp || clusteredLamp || explicitLamp || warmLens || anonymousRearLens)) return;
+      const score = (tailNamed ? 12 : 0) + (brakeNamed ? 8 : 0) + (atRear ? 4 : 0)
+        + (clusteredLamp ? 3 : 0) + (explicitLamp ? 3 : 0) + (warmLens ? 3 : 0)
+        + (anonymousRearLens ? 2 : 0) + (genericLamp ? 1 : 0);
+      candidates.push({ node, nodeCenter, score, label });
+    });
+    const anchors = [-1, 1].map((side) => candidates
+      .filter((candidate) => candidate.nodeCenter.x * side > 0.01)
+      .sort((left, right) => right.score - left.score)[0])
+      .filter(Boolean);
+    const selected = anchors.length >= 2
+      ? anchors
+      : candidates
+        .filter(({ label }) => (
+          /tail|taillight|tail_light|lights?_brakes|lightcluster|lightrefracted|emiss|fanali|light|lamp|glow/.test(label)
+          || /(?:^|\s)lamp(?:\s|$)/.test(label)
+          || /(?:^|\s)meshpart\d+mtl(?:\s|$)/.test(label)
+          || label === ""
+        ))
+        .sort((left, right) => right.score - left.score)
+        .slice(0, 2);
+    if (!selected.length) return { nodes: [], materials: [] };
+    const materials = [...new Set(selected.flatMap(({ node }) =>
+      Array.isArray(node.material) ? node.material : [node.material]
+    ).filter((material) => material?.emissive && material?.color))];
+    return { nodes: selected.map(({ node }) => node), materials };
+  }
+
+  function diagnoseBrakeLampCandidates(model) {
+    if (!model?.traverse) return [];
+    model.updateMatrixWorld(true);
+    const candidates = [];
+    model.traverse((node) => {
+      if (!node?.isMesh || !node.material) return;
+      const material = Array.isArray(node.material) ? node.material[0] : node.material;
+      const label = materialLabelFor(node, material);
+      const color = material?.color;
+      const warm = color && color.r > color.g * 1.18 && color.r > color.b * 1.18;
+      if (!/light|lamp|glow|brake|tail|rear|back|emiss|red|orange/.test(label) && !warm) return;
+      const center = new THREE.Box3().setFromObject(node).getCenter(new THREE.Vector3());
+      const size = new THREE.Box3().setFromObject(node).getSize(new THREE.Vector3());
+      candidates.push(Object.freeze({
+        name: node.name ?? "",
+        label,
+        color: color ? [Number(color.r.toFixed(2)), Number(color.g.toFixed(2)), Number(color.b.toFixed(2))] : null,
+        size: [Number(size.x.toFixed(3)), Number(size.y.toFixed(3)), Number(size.z.toFixed(3))],
+        center: [Number(center.x.toFixed(3)), Number(center.y.toFixed(3)), Number(center.z.toFixed(3))]
+      }));
+    });
+    return candidates;
+  }
+
+  function isNonLampBrakePart(label) {
+    return /brake.*(disc|disk|rotor|caliper)|caliper|brakedisc|brake_disc|brake_rotor/.test(label);
+  }
+
+  function captureBrakeLightBaselines(materials) {
+    return materials.map((material) => Object.freeze({
+      color: material.color?.clone?.() ?? null,
+      emissive: material.emissive?.clone?.() ?? null,
+      emissiveIntensity: Number(material.emissiveIntensity ?? 0)
+    }));
   }
 
   function setCarBrakeLightsActive(targetCar, active) {
     const materials = targetCar?.userData?.brakeLightMaterials;
     if (!materials?.length) return false;
+    const baselines = targetCar.userData.brakeLightBaselines ?? [];
     const next = Boolean(active);
-    targetCar.userData.brakeLightsActive = next;
-    for (const material of materials) {
-      material.emissiveIntensity = next ? 2.55 : 0.08;
-      material.color.setHex(next ? 0xff2a1a : 0x3a1010);
-      material.emissive.setHex(next ? 0xff1a12 : 0x4a0808);
+    for (const [index, material] of materials.entries()) {
+      const baseline = baselines[index];
+      if (next) {
+        // Preserve the source tail-lamp albedo; braking adds emission only.
+        material.emissive.setHex(0xff1a12);
+        material.emissiveIntensity = (baseline?.emissiveIntensity ?? 0) + 2.55;
+      } else if (baseline) {
+        if (baseline.color) material.color.copy(baseline.color);
+        if (baseline.emissive) material.emissive.copy(baseline.emissive);
+        material.emissiveIntensity = baseline.emissiveIntensity;
+      }
+      material.needsUpdate = true;
     }
+    targetCar.userData.brakeLightsActive = next;
     return next;
   }
 
@@ -7666,6 +8511,7 @@ export function createRacingGame({
       stepPhysics(physicsConfig.stepSeconds);
       physicsAccumulator -= physicsConfig.stepSeconds;
       stepCount += 1;
+      physicsStepTotal += 1;
     }
     return stepCount;
   }
@@ -7704,6 +8550,7 @@ export function createRacingGame({
     syncPhysicalVehicleState();
     syncOpponentPhysicsState();
     provingGroundRunner.update(provingGroundObservation(), deltaSeconds);
+    recordRewindSample(deltaSeconds);
   }
 
   function applyPlayerJumpLaunch(deltaSeconds) {
@@ -7750,32 +8597,39 @@ export function createRacingGame({
       { x: velocity.x, y: velocity.z }
     );
     if (!launch) return;
-    const landingX = launch.direction > 0
-      ? FREE_DRIVE_JUMP.gapMaxX + FREE_DRIVE_JUMP.landingRun
-      : FREE_DRIVE_JUMP.gapMinX - FREE_DRIVE_JUMP.landingRun;
-    const landingSample = freeDriveShowcaseDrivingLine.reduce((nearest, sample) => {
-      if (Math.sign(Math.sin(sample.heading)) !== launch.direction || Math.abs(sample.z) <= 8) return nearest;
-      const score = Math.abs(sample.x - landingX) + Math.abs(sample.z - position.z) * 0.5;
-      return !nearest || score < nearest.score ? { sample, score } : nearest;
-    }, null)?.sample;
+
+    // Free-cruise: keep the driver's horizontal intent. Showcase race may still
+    // retarget onto the scripted landing line (that yank is #30 when roaming).
     let horizontalX = velocity.x;
     let horizontalZ = velocity.z;
-    if (landingSample) {
-      const toLandingX = landingSample.x - position.x;
-      const toLandingZ = landingSample.z - position.z;
-      const distance = Math.max(0.001, Math.hypot(toLandingX, toLandingZ));
-      const horizontalSpeed = Math.hypot(velocity.x, velocity.z);
-      horizontalX = toLandingX / distance * horizontalSpeed;
-      horizontalZ = toLandingZ / distance * horizontalSpeed;
+    if (!isCoastalFreeCruise()) {
+      const landingSample = freeDriveShowcaseDrivingLine.reduce((nearest, sample) => {
+        if (Math.sign(Math.sin(sample.heading)) !== launch.direction || Math.abs(sample.z) <= 8) return nearest;
+        const score = Math.abs(sample.x - (
+          launch.direction > 0
+            ? FREE_DRIVE_JUMP.gapMaxX + FREE_DRIVE_JUMP.landingRun
+            : FREE_DRIVE_JUMP.gapMinX - FREE_DRIVE_JUMP.landingRun
+        )) + Math.abs(sample.z - position.z) * 0.5;
+        return !nearest || score < nearest.score ? { sample, score } : nearest;
+      }, null)?.sample;
+      if (landingSample) {
+        const toLandingX = landingSample.x - position.x;
+        const toLandingZ = landingSample.z - position.z;
+        const distance = Math.max(0.001, Math.hypot(toLandingX, toLandingZ));
+        const horizontalSpeed = Math.hypot(velocity.x, velocity.z);
+        horizontalX = toLandingX / distance * horizontalSpeed;
+        horizontalZ = toLandingZ / distance * horizontalSpeed;
+      }
+      const launchHeading = Math.atan2(horizontalX, horizontalZ);
+      physics.playerBody.setRotation(rapierRotationFromYaw(launchHeading), true);
+      physics.playerBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      freeDriveJumpState.attitudeAssistSeconds = 4;
+      freeDriveJumpState.assistedHeading = launchHeading;
+      freeDriveJumpState.assistedVelocityX = horizontalX;
+      freeDriveJumpState.assistedVelocityZ = horizontalZ;
+      freeDriveJumpState.assistWasAirborne = false;
     }
-    const launchHeading = Math.atan2(horizontalX, horizontalZ);
-    physics.playerBody.setRotation(rapierRotationFromYaw(launchHeading), true);
-    physics.playerBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
-    freeDriveJumpState.attitudeAssistSeconds = 4;
-    freeDriveJumpState.assistedHeading = launchHeading;
-    freeDriveJumpState.assistedVelocityX = horizontalX;
-    freeDriveJumpState.assistedVelocityZ = horizontalZ;
-    freeDriveJumpState.assistWasAirborne = false;
+
     physics.playerBody.setLinvel({
       x: horizontalX,
       y: Math.max(velocity.y, launch.verticalSpeed),
@@ -7844,7 +8698,7 @@ export function createRacingGame({
       0,
       deltaSeconds * physicalDrivingConfig.opponentYawRecovery
     );
-    physics.opponentCollider.setEnabled(raceState.opponentEnabled);
+    setOpponentColliderEnabled(raceState.opponentEnabled);
 
     if (!raceState.opponentEnabled) {
       return;
@@ -8443,7 +9297,7 @@ export function createRacingGame({
   }
 
   function updateCarTransform(deltaSeconds = 0) {
-    if (!physics?.playerBody) return;
+    if (!physics?.playerBody || !car) return;
     const translation = physics.playerBody.translation();
     const rotation = physics.playerBody.rotation();
     tempQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
@@ -8939,6 +9793,10 @@ ${shader.vertexShader}`
   }
 
   function updateCollisionDebugHud() {
+    if (!collisionDebug.enabled) {
+      updateCollisionDebugVisibility();
+      return;
+    }
     const hud = ensureCollisionDebugHud();
     const headingDegrees = THREE.MathUtils.radToDeg(state.heading);
     const velocityHeading = state.velocity.lengthSq() > 0.0001
@@ -9092,37 +9950,55 @@ ${shader.vertexShader}`
   }
 
   function updateChaseCamera(deltaSeconds) {
-    const speedRatio = clamp(state.velocity.length() / Math.max(playerMaxForwardSpeed(), 0.0001), 0, 1);
+    // Rewind teleports the body on a 30Hz sample grid. Chase lerp + FOV/bob
+    // kicks fighting those snaps is what reads as continuous screen shake (#29).
+    const rewinding = rewindBuffer.active;
+    const speedRatio = rewinding
+      ? 0
+      : clamp(state.velocity.length() / Math.max(playerMaxForwardSpeed(), 0.0001), 0, 1);
     const dynamicLookAhead = cameraConfig.lookAhead + cameraConfig.speedLookAheadBoost * speedRatio;
-    const headingFollow = 1 - Math.exp(-deltaSeconds * cameraConfig.headingFollowTightness);
-    cameraHeading = normalizeAngle(
-      cameraHeading + shortestAngleDelta(cameraHeading, state.heading) * headingFollow
-    );
+    if (rewinding) {
+      cameraHeading = state.heading;
+    } else {
+      const headingFollow = 1 - Math.exp(-deltaSeconds * cameraConfig.headingFollowTightness);
+      cameraHeading = normalizeAngle(
+        cameraHeading + shortestAngleDelta(cameraHeading, state.heading) * headingFollow
+      );
+    }
     const forward = new THREE.Vector3(Math.sin(cameraHeading), 0, Math.cos(cameraHeading));
     const right = new THREE.Vector3(Math.cos(cameraHeading), 0, -Math.sin(cameraHeading));
     const elevation = playerVisualElevation;
     const target = new THREE.Vector3(state.position.x, cameraConfig.targetHeight + elevation, state.position.y)
       .addScaledVector(forward, dynamicLookAhead)
       .addScaledVector(right, state.steering * speedRatio * 0.3);
+    const bob = rewinding ? 0 : Math.sin(wheelSpinAngle * 0.16) * speedRatio * 0.035;
     const desired = new THREE.Vector3(state.position.x, elevation, state.position.y)
       .addScaledVector(forward, -cameraConfig.followDistance)
-      .addScaledVector(forward, -boostCameraKick * 0.9)
+      .addScaledVector(forward, -(rewinding ? 0 : boostCameraKick) * 0.9)
       .addScaledVector(right, -state.steering * speedRatio * 0.42)
-      .add(new THREE.Vector3(0, cameraConfig.height + presentationState.jumpLiftPulse * 0.34
-        - presentationState.landingKick * 0.18 + Math.sin(wheelSpinAngle * 0.16) * speedRatio * 0.035, 0));
+      .add(new THREE.Vector3(0, cameraConfig.height
+        + (rewinding ? 0 : presentationState.jumpLiftPulse * 0.34)
+        - (rewinding ? 0 : presentationState.landingKick * 0.18)
+        + bob, 0));
 
-    const follow = 1 - Math.exp(-deltaSeconds * cameraConfig.followTightness);
-    camera.position.lerp(desired, follow);
-    const targetFov = cameraConfig.fov + cameraConfig.speedFovBoost * speedRatio + boostCameraKick * 6
-      + presentationState.jumpFovPulse * 2.4 + presentationState.landingKick * 1.2;
-    const fovFollow = 1 - Math.exp(-deltaSeconds * cameraConfig.speedFovResponse);
-    camera.fov += (targetFov - camera.fov) * fovFollow;
+    if (rewinding) {
+      camera.position.copy(desired);
+      camera.fov = cameraConfig.fov;
+    } else {
+      const follow = 1 - Math.exp(-deltaSeconds * cameraConfig.followTightness);
+      camera.position.lerp(desired, follow);
+      const targetFov = cameraConfig.fov + cameraConfig.speedFovBoost * speedRatio + boostCameraKick * 6
+        + presentationState.jumpFovPulse * 2.4 + presentationState.landingKick * 1.2;
+      const fovFollow = 1 - Math.exp(-deltaSeconds * cameraConfig.speedFovResponse);
+      camera.fov += (targetFov - camera.fov) * fovFollow;
+    }
     if (camera.near !== 0.1) camera.near = 0.1;
     camera.updateProjectionMatrix();
     camera.lookAt(target);
   }
 
   function updateHoodCamera(deltaSeconds) {
+    const rewinding = rewindBuffer.active;
     const metrics = car?.userData.cameraMetrics;
     const hoodConfig = metrics
       ? {
@@ -9134,18 +10010,27 @@ ${shader.vertexShader}`
     const [localX, localY, localZ] = hoodConfig.position;
     const forward = new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading));
     const right = new THREE.Vector3(Math.cos(state.heading), 0, -Math.sin(state.heading));
-    const speedRatio = clamp(state.velocity.length() / Math.max(playerMaxForwardSpeed(), 0.0001), 0, 1);
+    const speedRatio = rewinding
+      ? 0
+      : clamp(state.velocity.length() / Math.max(playerMaxForwardSpeed(), 0.0001), 0, 1);
+    const bob = rewinding ? 0 : Math.sin(wheelSpinAngle * 0.18) * speedRatio * 0.018;
     const desired = new THREE.Vector3(state.position.x, playerVisualElevation, state.position.y)
       .addScaledVector(right, localX)
       .addScaledVector(forward, localZ)
-      .add(new THREE.Vector3(0, localY + presentationState.jumpLiftPulse * 0.16
-        - presentationState.landingKick * 0.1 + Math.sin(wheelSpinAngle * 0.18) * speedRatio * 0.018, 0));
+      .add(new THREE.Vector3(0, localY
+        + (rewinding ? 0 : presentationState.jumpLiftPulse * 0.16)
+        - (rewinding ? 0 : presentationState.landingKick * 0.1)
+        + bob, 0));
     camera.position.copy(desired);
 
-    const targetFov = hoodConfig.fov + speedRatio * 2.5 + boostCameraKick * 4
-      + presentationState.jumpFovPulse * 1.6 + presentationState.landingKick * 0.8;
-    const fovFollow = 1 - Math.exp(-deltaSeconds * 8);
-    camera.fov += (targetFov - camera.fov) * fovFollow;
+    if (rewinding) {
+      camera.fov = hoodConfig.fov;
+    } else {
+      const targetFov = hoodConfig.fov + speedRatio * 2.5 + boostCameraKick * 4
+        + presentationState.jumpFovPulse * 1.6 + presentationState.landingKick * 0.8;
+      const fovFollow = 1 - Math.exp(-deltaSeconds * 8);
+      camera.fov += (targetFov - camera.fov) * fovFollow;
+    }
     camera.near = 0.03;
     camera.updateProjectionMatrix();
     camera.lookAt(
@@ -9305,6 +10190,9 @@ ${shader.vertexShader}`
     pauseOverlay.hidden = true;
     collisionDebug.lastCollision = null;
     physicsAccumulator = 0;
+    physicsStepTotal = 0;
+    rewindBuffer.clear();
+    rewindInputHeld = false;
     provingGroundRunner.reset();
     freeDriveRallyChallenge?.reset();
     freeDriveShowcaseChallenge?.reset();
@@ -9372,7 +10260,7 @@ ${shader.vertexShader}`
     playerVisualElevation = playerSurfaceState.height;
     setOpponentBodyPose(opponentState.position, opponentState.heading);
     if (physics?.opponentCollider) {
-      physics.opponentCollider.setEnabled(raceState.opponentEnabled);
+      setOpponentColliderEnabled(raceState.opponentEnabled);
     }
     syncPlayerPhysicsState(state.trackIndex);
     syncOpponentPhysicsState();
@@ -9604,12 +10492,12 @@ ${shader.vertexShader}`
   }
 
   function toggleOpponent() {
-    if (isShowcase) return false;
+    if (isFreeDrive) return false;
     raceState.opponentEnabled = !raceState.opponentEnabled;
     opponentState.collisionHoldSeconds = 0;
     raceState.playerPlace = 1;
     if (physics?.opponentCollider) {
-      physics.opponentCollider.setEnabled(raceState.opponentEnabled);
+      setOpponentColliderEnabled(raceState.opponentEnabled);
     }
     updateOpponentTransform();
     updateHud();
@@ -9636,18 +10524,37 @@ ${shader.vertexShader}`
     }
   }
 
-  function resizeRenderer() {
+  function resizeRenderer(sources = ["manual"]) {
     if (renderer && camera) {
       const rect = canvas.getBoundingClientRect();
-      const width = Math.max(320, Math.floor(rect.width || 960));
-      const height = Math.max(320, Math.floor(rect.height || 620));
+      const cssWidth = Math.max(320, rect.width || 960);
+      const cssHeight = Math.max(320, rect.height || 620);
+      const width = Math.floor(cssWidth);
+      const height = Math.floor(cssHeight);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, qualityPreset.maxPixelRatio));
       renderer.setSize(width, height, false);
-      camera.aspect = width / height;
+      // Projection follows the actual CSS box; the drawing buffer may round
+      // to pixels but must not change the camera's visible composition.
+      camera.aspect = cssWidth / cssHeight;
       camera.updateProjectionMatrix();
+      rendererResizeSync.count += 1;
+      for (const source of sources) {
+        rendererResizeSync.sources[source] = (rendererResizeSync.sources[source] ?? 0) + 1;
+      }
     }
 
     resizeSelectedCarPreview();
+  }
+
+  function scheduleRendererResize(source) {
+    pendingRendererResizeSources.add(source);
+    if (rendererResizeFrameId) return;
+    rendererResizeFrameId = window.requestAnimationFrame(() => {
+      rendererResizeFrameId = 0;
+      const sources = [...pendingRendererResizeSources];
+      pendingRendererResizeSources.clear();
+      resizeRenderer(sources);
+    });
   }
 
   function resizeSelectedCarPreview() {
@@ -9669,7 +10576,6 @@ ${shader.vertexShader}`
     if (listening) return;
 
     input.start();
-    window.addEventListener("resize", resizeRenderer);
     selectedCarPreviewCanvas.addEventListener("pointerdown", handleSelectedCarPreviewPointerDown);
     selectedCarPreviewCanvas.addEventListener("pointermove", handleSelectedCarPreviewPointerMove);
     selectedCarPreviewCanvas.addEventListener("pointerup", handleSelectedCarPreviewPointerUp);
@@ -9681,7 +10587,7 @@ ${shader.vertexShader}`
     if (!listening) return;
 
     input.stop();
-    window.removeEventListener("resize", resizeRenderer);
+    stopRendererResizeObservation();
     selectedCarPreviewCanvas.removeEventListener("pointerdown", handleSelectedCarPreviewPointerDown);
     selectedCarPreviewCanvas.removeEventListener("pointermove", handleSelectedCarPreviewPointerMove);
     selectedCarPreviewCanvas.removeEventListener("pointerup", handleSelectedCarPreviewPointerUp);
@@ -9689,12 +10595,52 @@ ${shader.vertexShader}`
     listening = false;
   }
 
+  function handleWindowRendererResize() {
+    scheduleRendererResize("window");
+  }
+
+  function handleVisualViewportRendererResize() {
+    scheduleRendererResize("visual-viewport");
+  }
+
+  function startRendererResizeObservation() {
+    if (rendererResizeObserver) return;
+    window.addEventListener("resize", handleWindowRendererResize);
+    window.visualViewport?.addEventListener("resize", handleVisualViewportRendererResize);
+    rendererResizeObserver = new ResizeObserver(() => scheduleRendererResize("observer"));
+    rendererResizeObserver.observe(racingStage || canvas);
+  }
+
+  function stopRendererResizeObservation() {
+    window.removeEventListener("resize", handleWindowRendererResize);
+    window.visualViewport?.removeEventListener("resize", handleVisualViewportRendererResize);
+    rendererResizeObserver?.disconnect();
+    rendererResizeObserver = null;
+    if (rendererResizeFrameId) {
+      window.cancelAnimationFrame(rendererResizeFrameId);
+      rendererResizeFrameId = 0;
+    }
+    pendingRendererResizeSources.clear();
+  }
+
   function handleBlur() {
     keyState.clear();
     endSelectedCarPreviewDrag();
+    if (isAwaitingLobbyConfirmation()) return;
+    // #22 E3: blur pauses only — never opens the car picker.
+    if (
+      active
+      && initialized
+      && !isStartOverlayVisible()
+      && !raceState.resultVisible
+      && !raceState.paused
+    ) {
+      setPaused(true);
+    }
   }
 
   function handleVisibilityChange() {
+    if (isAwaitingLobbyConfirmation()) return;
     if (document.hidden && active && !isStartOverlayVisible() && !raceState.resultVisible) {
       setPaused(true);
     }
@@ -9952,7 +10898,7 @@ ${shader.vertexShader}`
     setOpponentBodyPose(opponentState.position, opponentState.heading);
     setPlayerBodyPose(state.position, state.heading);
     if (physics?.opponentCollider) {
-      physics.opponentCollider.setEnabled(true);
+      setOpponentColliderEnabled(true);
     }
     syncPlayerPhysicsState(state.trackIndex);
     syncOpponentPhysicsState();
@@ -10229,7 +11175,14 @@ ${shader.vertexShader}`
   challengeConfirmButton?.addEventListener("click", handleChallengeConfirmButtonClick);
   challengeCancelButton?.addEventListener("click", handleChallengeCancelButtonClick);
 
-  return { start, stop, reset: resetRace, destroy };
+  return {
+    start,
+    confirmStart: confirmLobbyCruiseStart,
+    requiresPlayerConfirmation: requiresLobbyConfirmation,
+    stop,
+    reset: resetRace,
+    destroy
+  };
 }
 
 function resolveRacingQualityPreset() {
@@ -10274,6 +11227,7 @@ export function createGame(context) {
     initialSnapshot: context.payload,
     onHome: context.home,
     onEditMap: () => context.open("racing-editor"),
-    onReplaceSession: context.replaceSelf
+    onReplaceSession: context.replaceSelf,
+    onLoadingStage: (stage, message) => context.reportLoading?.(stage, message)
   });
 }
