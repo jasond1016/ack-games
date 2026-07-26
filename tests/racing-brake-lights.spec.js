@@ -2,7 +2,7 @@ const { test, expect } = require("@playwright/test");
 
 test("brake lights light while braking and extinguish on release", async ({ page }) => {
   await page.goto("/?quality=low");
-  await page.locator("#racingGameCard").click();
+  await page.goto("/#racing-select");
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
   await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-f1-practice"] .map-select-card-button').click();
   await page.locator("#racingMapSelectRaceButton").click();
@@ -15,6 +15,10 @@ test("brake lights light while braking and extinguish on release", async ({ page
   await expect.poll(() => page.evaluate(() =>
     globalThis.__ackGamesDebug.racing.getState().brakeLights?.count ?? 0
   )).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() =>
+    globalThis.__ackGamesDebug.racing.getState().brakeLights?.anchor
+  )).toBe("model-tail-lamps");
+  const baseline = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().brakeLights);
 
   await page.keyboard.down("KeyS");
   await expect.poll(() => page.evaluate(() =>
@@ -26,9 +30,6 @@ test("brake lights light while braking and extinguish on release", async ({ page
 
   await page.keyboard.up("KeyS");
   await expect.poll(() => page.evaluate(() =>
-    globalThis.__ackGamesDebug.racing.getState().brakeLights.active
-  )).toBe(false);
-  await expect.poll(() => page.evaluate(() =>
-    globalThis.__ackGamesDebug.racing.getState().brakeLights.intensity
-  )).toBeLessThan(0.2);
+    globalThis.__ackGamesDebug.racing.getState().brakeLights
+  )).toMatchObject({ active: false, intensity: baseline.baselineIntensity });
 });

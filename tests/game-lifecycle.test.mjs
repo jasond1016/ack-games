@@ -18,6 +18,7 @@ function createHarness(loaders) {
     view: {
       getGameRoot: () => ({}),
       showLoading: ({ gameId }) => events.push(`loading:${gameId}`),
+      prepareGame: ({ gameId }) => events.push(`prepare:${gameId}`),
       showGame: ({ gameId }) => events.push(`game:${gameId}`),
       showFailure: ({ gameId }) => events.push(`failed:${gameId}`),
       showHome: () => events.push("home")
@@ -46,6 +47,145 @@ test("打开新游戏时先销毁旧实例但保留已加载 module", async () =
   await harness.lifecycle.open("two");
   assert.equal(loads, 1);
   assert.ok(harness.events.indexOf("destroy:one") < harness.events.indexOf("start:two"));
+});
+
+test("game stays covered until its async start finishes", async () => {
+  const events = [];
+  let resolveStart;
+  const lifecycle = createGameLifecycle({
+    registry: {
+      race: {
+        title: "race",
+        load: async () => ({
+          createGame: () => ({
+            start: () => new Promise((resolve) => { resolveStart = () => { events.push("start:race"); resolve(); }; }),
+            stop: () => {},
+            destroy: async () => {}
+          })
+        })
+      }
+    },
+    diagnostics: { error: () => {} },
+    history: { pathname: () => "/", push: () => {}, replace: () => {}, reload: () => {} },
+    view: {
+      getGameRoot: () => ({}),
+      showLoading: () => events.push("loading:race"),
+      prepareGame: () => events.push("prepare:race"),
+      showGame: () => events.push("game:race"),
+      showFailure: () => {},
+      showHome: () => {}
+    }
+  });
+  const opening = lifecycle.open("race");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(events.join("|"), "loading:race|prepare:race");
+  resolveStart();
+  await opening;
+  assert.equal(events.join("|"), "loading:race|prepare:race|start:race|game:race");
+});
+
+test("ready-to-enter keeps a prepared game covered until one confirmation", async () => {
+  const events = [];
+  let confirms = 0;
+  const lifecycle = createGameLifecycle({
+    registry: {
+      race: {
+        title: "race",
+        load: async () => ({
+          createGame: () => ({
+            requiresPlayerConfirmation: true,
+            start: async () => events.push("prepared:race"),
+            confirmStart: async () => { confirms += 1; events.push("confirmed:race"); },
+            stop: () => {},
+            destroy: async () => {}
+          })
+        })
+      }
+    },
+    diagnostics: { error: () => {} },
+    history: { pathname: () => "/", push: () => {}, replace: () => {}, reload: () => {} },
+    view: {
+      getGameRoot: () => ({}),
+      showLoading: () => events.push("loading:race"),
+      prepareGame: () => events.push("prepare:race"),
+      showReady: () => events.push("ready:race"),
+      showConfirming: () => events.push("confirming:race"),
+      showGame: () => events.push("game:race"),
+      showFailure: () => {},
+      showHome: () => {}
+    }
+  });
+
+  await lifecycle.open("race");
+  assert.deepEqual(events, ["loading:race", "prepare:race", "prepared:race", "ready:race"]);
+  assert.equal(lifecycle.getLastLoadReport().awaitingConfirmation, true);
+  await Promise.all([lifecycle.confirm(), lifecycle.confirm()]);
+  assert.equal(confirms, 1);
+  assert.deepEqual(events, ["loading:race", "prepare:race", "prepared:race", "ready:race", "confirming:race", "confirmed:race", "game:race"]);
+  assert.equal(lifecycle.getLastLoadReport().timeline.at(-1).stage, "first-drivable-frame");
+});
+
+test("a stalled start keeps the cover up and exposes a retryable timeout", async () => {
+  const events = [];
+  let failureMessage = null;
+  const lifecycle = createGameLifecycle({
+    registry: {
+      race: {
+        title: "race",
+        load: async () => ({
+          createGame: () => ({
+            start: () => new Promise(() => {}),
+            stop: () => events.push("stop:race"),
+            destroy: async () => events.push("destroy:race")
+          })
+        })
+      }
+    },
+    diagnostics: { error: () => {} },
+    history: { pathname: () => "/", push: () => {}, replace: () => {}, reload: () => {} },
+    view: {
+      getGameRoot: () => ({}),
+      showLoading: () => events.push("loading:race"),
+      prepareGame: () => events.push("prepare:race"),
+      showGame: () => events.push("game:race"),
+      showFailure: ({ message }) => { failureMessage = message; events.push("failed:race"); },
+      showHome: () => {}
+    },
+    startTimeoutMs: 1
+  });
+
+  await lifecycle.open("race");
+  assert.deepEqual(events, ["loading:race", "prepare:race", "stop:race", "destroy:race", "failed:race"]);
+  assert.equal(failureMessage, "准备时间过长，请重试。");
+  assert.equal(lifecycle.getLastLoadReport().timeline.at(-1).stage, "failed");
+});
+
+test("load report records real module, game, and drivable milestones", async () => {
+  let tick = 0;
+  const lifecycle = createGameLifecycle({
+    registry: {
+      race: {
+        title: "race",
+        load: async () => ({
+          createGame: (context) => ({
+            start: async () => context.reportLoading("physics", "physics ready"),
+            stop: () => {},
+            destroy: async () => {}
+          })
+        })
+      }
+    },
+    diagnostics: { error: () => {} },
+    history: { pathname: () => "/", push: () => {}, replace: () => {}, reload: () => {} },
+    view: { getGameRoot: () => ({}), showLoading: () => {}, showGame: () => {}, showFailure: () => {}, showHome: () => {} },
+    now: () => tick += 10
+  });
+  await lifecycle.open("race");
+  const report = lifecycle.getLastLoadReport();
+  assert.equal(report.gameId, "race");
+  assert.ok(report.timeline.some(({ stage }) => stage === "module-ready"));
+  assert.ok(report.timeline.some(({ stage }) => stage === "physics"));
+  assert.equal(report.timeline.at(-1).stage, "first-drivable-frame");
 });
 
 test("快速导航只有最后请求创建实例", async () => {

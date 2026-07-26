@@ -2,7 +2,7 @@ const { test, expect } = require("@playwright/test");
 
 test("free-drive benchmark exposes stable telemetry and scene-complexity budgets", async ({ page }) => {
   await page.goto("/?quality=low");
-  await page.locator("#racingGameCard").click();
+  await page.goto("/?quality=low#racing-select");
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
   await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-coastal-showcase"] .map-select-card-button').click();
   await page.locator("#racingMapSelectRaceButton").click();

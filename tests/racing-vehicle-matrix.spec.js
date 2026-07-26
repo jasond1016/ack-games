@@ -87,7 +87,7 @@ async function startProvingGround(page, carId) {
     }));
   });
   await page.goto("/?quality=low");
-  await page.locator("#racingGameCard").click();
+  await page.goto("/#racing-select");
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
   await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-proving-ground"] .map-select-card-button').click();
   await page.locator("#racingMapSelectRaceButton").click();
@@ -104,7 +104,7 @@ async function startShowcase(page, carId) {
     }));
   });
   await page.goto("/?quality=low");
-  await page.locator("#racingGameCard").click();
+  await page.goto("/#racing-select");
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
   await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-coastal-showcase"] .map-select-card-button').click();
   await page.locator("#racingMapSelectRaceButton").click();

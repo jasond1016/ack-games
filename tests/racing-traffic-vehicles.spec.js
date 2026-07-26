@@ -2,7 +2,7 @@ const { test, expect } = require("@playwright/test");
 
 test("Coastal free-cruise spawns four typed civilian traffic vehicles", async ({ page }) => {
   await page.goto("/?quality=low");
-  await page.locator("#racingGameCard").click();
+  await page.goto("/#racing-select");
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
   await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-coastal-showcase"] .map-select-card-button').click();
   await page.locator("#racingMapSelectRaceButton").click();
@@ -29,4 +29,11 @@ test("Coastal free-cruise spawns four typed civilian traffic vehicles", async ({
   expect(traffic.every(({ eventOpponent }) => eventOpponent === false)).toBe(true);
   expect(traffic.every(({ cruiseSpeedKmh }) => cruiseSpeedKmh >= 48 && cruiseSpeedKmh <= 72)).toBe(true);
   expect(new Set(traffic.map(({ trafficId }) => trafficId)).size).toBe(4);
+
+  // #21: civilians must not park on the Tour start grid (kinematic blockers kill throttle).
+  await page.keyboard.down("KeyW");
+  await expect.poll(() =>
+    page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().speedKmh)
+  , { timeout: 8_000 }).toBeGreaterThan(8);
+  await page.keyboard.up("KeyW");
 });

@@ -4,9 +4,11 @@ import test from "node:test";
 import {
   RACING_CAMERA_MODES,
   RACING_COASTAL_PLAY_MODES,
+  ENTRY_DEFAULT_CAR_ID,
   getDefaultRacingStartConfig,
   loadActiveRacingStartConfig,
   normalizeCoastalPlayMode,
+  resolveEntryPlayerCarId,
   saveActiveRacingStartConfig
 } from "../racing-start-config.js";
 
@@ -49,6 +51,24 @@ test("默认开赛配置为 version 4 且 coastalPlayMode 默认 island-tour", (
   assert.equal(defaults.version, 4);
   assert.equal(defaults.coastalPlayMode, RACING_COASTAL_PLAY_MODES.ISLAND_TOUR);
   assert.equal(defaults.cameraMode, RACING_CAMERA_MODES.CHASE);
+});
+
+test("resolveEntryPlayerCarId：无效 id 优先 veneno（已解锁时）", () => {
+  withMockLocalStorage((storage) => {
+    storage.setItem("ack-games:racing-challenge-unlocks:v1", JSON.stringify({
+      unlockedCarIds: ["veneno"]
+    }));
+    assert.equal(ENTRY_DEFAULT_CAR_ID, "veneno");
+    assert.equal(resolveEntryPlayerCarId(null), "veneno");
+    assert.equal(resolveEntryPlayerCarId("not-a-car"), "veneno");
+  });
+});
+
+test("resolveEntryPlayerCarId：veneno 锁定时回退到已解锁车", () => {
+  withMockLocalStorage(() => {
+    assert.equal(resolveEntryPlayerCarId("veneno"), "aventador");
+    assert.equal(resolveEntryPlayerCarId(null), "aventador");
+  });
 });
 
 test("没有记忆时（无 localStorage）加载得到默认配置", () => {

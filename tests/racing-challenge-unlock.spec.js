@@ -2,7 +2,7 @@ const { test, expect } = require("@playwright/test");
 
 test("challenge reward cars stay locked until unlock storage is set", async ({ page }) => {
   await page.goto("/?quality=low");
-  await page.locator("#racingGameCard").click();
+  await page.goto("/#racing-select");
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
   await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-f1-practice"] .map-select-card-button').click();
   await page.locator("#racingMapSelectRaceButton").click();
@@ -18,7 +18,7 @@ test("challenge reward cars stay locked until unlock storage is set", async ({ p
     }));
   });
   await page.goto("/?quality=low");
-  await page.locator("#racingGameCard").click();
+  await page.goto("/#racing-select");
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
   await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-f1-practice"] .map-select-card-button').click();
   await page.locator("#racingMapSelectRaceButton").click();

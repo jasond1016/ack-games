@@ -2,7 +2,7 @@ const { test, expect } = require("@playwright/test");
 
 test("Coastal day cycle probe exposes phase and freeze day/night", async ({ page }) => {
   await page.goto("/?quality=low");
-  await page.locator("#racingGameCard").click();
+  await page.goto("/#racing-select");
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
   await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-coastal-showcase"] .map-select-card-button').click();
   await page.locator("#racingMapSelectRaceButton").click();
@@ -26,7 +26,10 @@ test("Coastal day cycle probe exposes phase and freeze day/night", async ({ page
   expect(night.exposureScale).toBeLessThan(0.7);
   expect(night.headlightBoost).toBeGreaterThan(0.5);
 
-  await page.keyboard.press("Escape");
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
   await expect(page.locator("#racingPauseOverlay")).toBeVisible();
   await expect(page.locator("#racingDayCycleRow")).toBeVisible();
   await page.locator("#racingDayCycleDayButton").click();

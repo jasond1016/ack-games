@@ -3,7 +3,7 @@ const { test, expect } = require("@playwright/test");
 test("racing start flow stays usable across selection, race start, pause, and re-entry", async ({ page }) => {
   await page.goto("/");
 
-  await page.locator("#racingGameCard").click();
+  await page.goto("/#racing-select");
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
   await page.locator("#racingMapSelectRaceButton").click();
 
@@ -41,7 +41,7 @@ test("racing start flow stays usable across selection, race start, pause, and re
   await page.locator("#racingPauseHomeButton").click();
   await expect(page.locator("#homeView")).toBeVisible();
 
-  await page.locator("#racingGameCard").click();
+  await page.goto("/#racing-select");
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
   await page.locator("#racingMapSelectRaceButton").click();
   await expect(startOverlay).toBeVisible({ timeout: 25_000 });
@@ -59,7 +59,7 @@ test("racing start flow stays usable across selection, race start, pause, and re
 
 test("nitro renders blue flames from every configured Veneno exhaust", async ({ page }) => {
   await page.goto("/");
-  await page.locator("#racingGameCard").click();
+  await page.goto("/#racing-select");
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
   await page.locator("#racingMapSelectRaceButton").click();
 
@@ -94,7 +94,7 @@ test("nitro renders blue flames from every configured Veneno exhaust", async ({ 
 
 test("free-drive traffic uses its own limited blue nitro", async ({ page }) => {
   await page.goto("/");
-  await page.locator("#racingGameCard").click();
+  await page.goto("/#racing-select");
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
   await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-island-freedrive"] .map-select-card-button').click();
   await page.locator("#racingMapSelectRaceButton").click();
@@ -121,7 +121,7 @@ test("free-drive traffic uses its own limited blue nitro", async ({ page }) => {
 
 test("Coastal Showcase runs countdown, timed route, result, and in-place retry", async ({ page }) => {
   await page.goto("/");
-  await page.locator("#racingGameCard").click();
+  await page.goto("/#racing-select");
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
   await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-coastal-showcase"] .map-select-card-button').click();
   await page.locator("#racingMapSelectRaceButton").click();
@@ -214,7 +214,7 @@ test("Coastal Showcase runs countdown, timed route, result, and in-place retry",
 
 test("Coastal Showcase free-cruise skips the tour machine and remembers the choice", async ({ page }) => {
   await page.goto("/");
-  await page.locator("#racingGameCard").click();
+  await page.goto("/#racing-select");
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
   await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-coastal-showcase"] .map-select-card-button').click();
   await page.locator("#racingMapSelectRaceButton").click();
@@ -262,20 +262,29 @@ test("Coastal Showcase free-cruise skips the tour machine and remembers the choi
 
   await page.keyboard.press("F2");
   await expect.poll(() =>
-    page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().collisionDebugEnabled)
+    page.evaluate(() => {
+      const state = globalThis.__ackGamesDebug.racing.getState();
+      return state.collisionDebugEnabled && state.collisionDebugHudVisible;
+    })
   ).toBe(true);
   await page.keyboard.press("F2");
   await expect.poll(() =>
-    page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().collisionDebugEnabled)
-  ).toBe(false);
+    page.evaluate(() => {
+      const state = globalThis.__ackGamesDebug.racing.getState();
+      return !state.collisionDebugEnabled && !state.collisionDebugHudVisible;
+    })
+  ).toBe(true);
 
-  await page.keyboard.press("Escape");
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
   const pauseOverlay = page.locator("#racingPauseOverlay");
   await expect(pauseOverlay).toBeVisible();
   await page.locator("#racingPauseHomeButton").click();
   await expect(page.locator("#homeView")).toBeVisible();
 
-  await page.locator("#racingGameCard").click();
+  await page.goto("/#racing-select");
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
   await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-coastal-showcase"] .map-select-card-button').click();
   await page.locator("#racingMapSelectRaceButton").click();
@@ -292,7 +301,7 @@ test("Coastal Showcase free-cruise skips the tour machine and remembers the choi
 
 test("Coastal Tour difficulty persists and scales opponent cruise", async ({ page }) => {
   await page.goto("/");
-  await page.locator("#racingGameCard").click();
+  await page.goto("/#racing-select");
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
   await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-coastal-showcase"] .map-select-card-button').click();
   await page.locator("#racingMapSelectRaceButton").click();
@@ -317,7 +326,7 @@ test("Coastal Tour difficulty persists and scales opponent cruise", async ({ pag
   await page.locator("#racingPauseHomeButton").click();
   await expect(page.locator("#homeView")).toBeVisible();
 
-  await page.locator("#racingGameCard").click();
+  await page.goto("/#racing-select");
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
   await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-coastal-showcase"] .map-select-card-button').click();
   await page.locator("#racingMapSelectRaceButton").click();
@@ -333,7 +342,7 @@ test("Coastal Tour difficulty persists and scales opponent cruise", async ({ pag
 
 test("Urus clears both Showcase bridges at 88 km/h", async ({ page }) => {
   await page.goto("/?quality=low");
-  await page.locator("#racingGameCard").click();
+  await page.goto("/#racing-select");
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
   await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-coastal-showcase"] .map-select-card-button').click();
   await page.locator("#racingMapSelectRaceButton").click();
@@ -374,7 +383,7 @@ test("jsDelivr failure is isolated to racing and can be retried", async ({ page 
   await page.route("https://cdn.jsdelivr.net/**", (route) => route.abort("failed"));
   await page.goto("/");
 
-  await page.locator("#racingGameCard").click();
+  await page.goto("/#racing-select");
   await expect(page.locator("#racingMapSelectView")).toBeVisible();
   await page.locator("#racingMapSelectRaceButton").click();
   const lifecycleView = page.locator("#gameLifecycleView");
@@ -405,7 +414,7 @@ test("deep link opens the requested game without showing home", async ({ page })
 test("editing a preset map creates a user-map copy before entering the editor", async ({ page }) => {
   await page.goto("/");
 
-  await page.locator("#racingGameCard").click();
+  await page.goto("/#racing-select");
   await expect(page.locator("#racingMapSelectView")).toBeVisible({ timeout: 25_000 });
 
   const presetCards = page.locator("#racingPresetMaps .map-select-card");

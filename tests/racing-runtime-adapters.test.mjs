@@ -81,7 +81,90 @@ test("Xbox 标准手柄将摇杆、十字键和扳机映射为驾驶输入", () 
 
   buttons[15] = { pressed: true, value: 1 };
   const dpadState = readRacingGamepad([{ connected: true, index: 2, axes: [-0.3], buttons }]);
-  assert.equal(dpadState.steering, -1);
+  // D-pad no longer steers; stick axis still does.
+  assert.ok(dpadState.steering > 0.1 && dpadState.steering < 0.25);
+  assert.equal(dpadState.dpadRight, true);
+  assert.equal(dpadState.rewindHeld, false);
+});
+
+test("手柄 Y 为倒流按住、十字键右不参与转向", () => {
+  const buttons = Array.from({ length: 16 }, () => ({ pressed: false, value: 0 }));
+  buttons[3] = { pressed: true, value: 1 };
+  buttons[15] = { pressed: true, value: 1 };
+  const state = readRacingGamepad([{
+    connected: true,
+    index: 0,
+    axes: [0],
+    buttons
+  }]);
+  assert.equal(state.rewindHeld, true);
+  assert.equal(state.dpadRight, true);
+  assert.ok(Math.abs(state.steering) < 1e-9);
+});
+
+test("十字键右边沿切视角；Y 不切视角", () => {
+  const windowObject = createEventTarget();
+  const documentObject = createEventTarget();
+  const buttons = Array.from({ length: 16 }, () => ({ pressed: false, value: 0 }));
+  const gamepad = { connected: true, index: 0, axes: [0], buttons };
+  const actions = [];
+  let rewindHeld = false;
+  const input = createBrowserRacingInput({
+    onDrive() {},
+    onPause() {},
+    onBoost() {},
+    onToggleOpponent() {},
+    onToggleCamera() { actions.push("camera"); },
+    onReplaceSession() {},
+    onToggleDebug() {},
+    onRewindHeld(held) { rewindHeld = held; },
+    onBlur() {},
+    onHidden() {}
+  }, {
+    windowObject,
+    documentObject,
+    navigatorObject: { getGamepads: () => [gamepad] }
+  });
+
+  input.start();
+  buttons[3] = { pressed: true, value: 1 };
+  input.pollGamepad();
+  assert.equal(rewindHeld, true);
+  assert.deepEqual(actions, []);
+  buttons[15] = { pressed: true, value: 1 };
+  input.pollGamepad();
+  assert.deepEqual(actions, ["camera"]);
+  input.pollGamepad();
+  assert.deepEqual(actions, ["camera"]);
+  input.stop();
+});
+
+test("键盘 Z 按住触发倒流、C 仍切视角", () => {
+  const windowObject = createEventTarget();
+  const documentObject = createEventTarget();
+  const actions = [];
+  let rewindHeld = false;
+  const input = createBrowserRacingInput({
+    onDrive() {},
+    onPause() {},
+    onBoost() {},
+    onToggleOpponent() {},
+    onToggleCamera() { actions.push("camera"); },
+    onReplaceSession() {},
+    onToggleDebug() {},
+    onRewindHeld(held) { rewindHeld = held; },
+    onBlur() {},
+    onHidden() {}
+  }, { windowObject, documentObject });
+
+  input.start();
+  windowObject.dispatch("keydown", { code: "KeyZ", repeat: false, preventDefault() {} });
+  assert.equal(rewindHeld, true);
+  windowObject.dispatch("keydown", { code: "KeyC", repeat: false, preventDefault() {} });
+  windowObject.dispatch("keyup", { code: "KeyZ", preventDefault() {} });
+  assert.equal(rewindHeld, false);
+  input.stop();
+  assert.deepEqual(actions, ["camera"]);
 });
 
 test("存在虚拟手柄时优先读取 Xbox 手柄", () => {

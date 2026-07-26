@@ -8,6 +8,7 @@ test("资源租约并发复用一次加载且释放幂等", async () => {
   const cache = createResourceLeaseCache({ load: async (value) => { loads += 1; return value; } });
   const [left, right] = await Promise.all([cache.acquire("car", 7), cache.acquire("car", 7)]);
   assert.equal(loads, 1);
+  assert.equal(cache.has("car"), true);
   assert.equal(left.value, 7);
   left.release();
   left.release();
@@ -24,4 +25,5 @@ test("非保留资源在最后一个租约释放时销毁", async () => {
   const lease = await cache.acquire("scene", "resource");
   lease.release();
   assert.deepEqual(disposed, ["resource"]);
+  assert.equal(cache.has("scene"), false);
 });
