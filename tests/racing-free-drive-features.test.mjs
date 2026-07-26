@@ -13,6 +13,7 @@ import {
   createFreeDriveRallyRibbon,
   createFreeDriveRallyRoute,
   createFreeDriveTunnelSegments,
+  isCoastalSafePoseEligible,
   sampleFreeDriveShowcaseDrivingLine,
   showcaseRouteLookAheadDistance
 } from "../racing-free-drive-features.mjs";
@@ -44,6 +45,25 @@ test("Coastal Festival 把开放探索区与海洋和技术夹层分开", () => 
     nearestRoadDistance: 60,
     contactSurfaceIds: ["ground"]
   }), { reason: null, region: "island" });
+});
+
+test("Coastal 安全恢复点必须连续建立在稳定的三轮以上接触上", () => {
+  const stable = {
+    grounded: true,
+    contactCount: 4,
+    allContactsDrivable: true,
+    upright: 0.98,
+    verticalSpeed: 0.1,
+    angularSpeed: 0.2,
+    region: "island",
+    bodyY: 1
+  };
+  assert.equal(isCoastalSafePoseEligible(stable), true);
+  assert.equal(isCoastalSafePoseEligible({ ...stable, contactCount: 2 }), false);
+  assert.equal(isCoastalSafePoseEligible({ ...stable, allContactsDrivable: false }), false);
+  assert.equal(isCoastalSafePoseEligible({ ...stable, verticalSpeed: 1.2 }), false);
+  assert.equal(isCoastalSafePoseEligible({ ...stable, angularSpeed: 1.2 }), false);
+  assert.equal(isCoastalSafePoseEligible({ ...stable, region: "outside" }), false);
 });
 
 test("自由地图隧道连续覆盖指定赛道区间", () => {

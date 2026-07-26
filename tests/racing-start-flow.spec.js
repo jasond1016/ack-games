@@ -269,6 +269,10 @@ test("Coastal Showcase free-cruise skips the tour machine and remembers the choi
   const voidRecovery = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState());
   expect(voidRecovery.coastalRecovery.lastReason).toBe("invalid-world");
   expect(voidRecovery.coastalRecovery.recoveryCount).toBe(2);
+  await page.waitForTimeout(2_200);
+  const settledRecovery = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState());
+  expect(settledRecovery.coastalRecovery.recoveryCount).toBe(2);
+  expect(settledRecovery.surface.contacts).toBeGreaterThanOrEqual(3);
 
   expect(await page.evaluate(() => globalThis.__ackGamesDebug.racing.activateBoost())).toBe(true);
   await expect.poll(() =>

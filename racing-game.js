@@ -94,6 +94,7 @@ import {
   createFreeDriveRallyRibbon,
   createFreeDriveRallyRoute,
   createFreeDriveTunnelSegments,
+  isCoastalSafePoseEligible,
   sampleFreeDriveShowcaseDrivingLine,
   showcaseRouteLookAheadDistance
 } from "./racing-free-drive-features.mjs";
@@ -702,6 +703,7 @@ export function createRacingGame({
   const coastalRecovery = {
     safePose: null,
     safePoseSampleSeconds: 0,
+    pendingValidation: null,
     upsideDownSeconds: 0,
     outsideSeconds: 0,
     cooldownSeconds: 0,
@@ -1170,8 +1172,10 @@ export function createRacingGame({
         hasSafePose: Boolean(coastalRecovery.safePose),
         safePose: coastalRecovery.safePose ? Object.freeze({
           x: Number(coastalRecovery.safePose.x.toFixed(1)),
+          y: Number(coastalRecovery.safePose.y.toFixed(1)),
           z: Number(coastalRecovery.safePose.z.toFixed(1)),
-          heading: Number(coastalRecovery.safePose.heading.toFixed(3))
+          heading: Number(coastalRecovery.safePose.heading.toFixed(3)),
+          surfaceId: coastalRecovery.safePose.surfaceId
         }) : null
       }) : null,
       presentation: Object.freeze({
@@ -9107,6 +9111,7 @@ export function createRacingGame({
   function resetCoastalRecoveryState() {
     coastalRecovery.safePose = null;
     coastalRecovery.safePoseSampleSeconds = 0;
+    coastalRecovery.pendingValidation = null;
     coastalRecovery.upsideDownSeconds = 0;
     coastalRecovery.outsideSeconds = 0;
     coastalRecovery.cooldownSeconds = 0;
@@ -9141,6 +9146,11 @@ export function createRacingGame({
     tempQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
     const upright = new THREE.Vector3(0, 1, 0).applyQuaternion(tempQuaternion).y;
     const grounded = playerSurfaceState.grounded && !freeDriveJumpState.airborne;
+    const velocity = physics.playerBody.linvel();
+    const angularVelocity = physics.playerBody.angvel();
+    const angularSpeed = Math.hypot(angularVelocity.x, angularVelocity.y, angularVelocity.z);
+    const allContactsDrivable = playerSurfaceState.contacts.length > 0
+      && playerSurfaceState.contacts.every(({ surfaceId }) => isPhysicalVehicleSurface(surfaceId));
     const support = upright < 0.45 ? resolveSurfaceSupport(state.position, state.heading, state.trackIndex) : null;
     const nearGround = support?.grounded
       && body.y - support.height < playerVehicleSpec().spawnHeight + 1.6
@@ -9156,22 +9166,47 @@ export function createRacingGame({
       return recoverCoastalPlayer("invalid-world");
     }
 
-    coastalRecovery.safePoseSampleSeconds += deltaSeconds;
     const safeRegion = coastalPlayableRegion(
       { x: body.x, z: body.z },
       nearestRoadDistance,
       { safe: true }
     );
-    const hasDrivableContact = playerSurfaceState.contacts.some(({ surfaceId }) => isPhysicalVehicleSurface(surfaceId));
-    if (
-      coastalRecovery.safePoseSampleSeconds >= 0.25
-      && grounded
-      && upright >= 0.75
-      && safeRegion !== "outside"
-      && hasDrivableContact
-      && body.y > COASTAL_PLAYABLE_WORLD.waterHeight
-    ) {
-      coastalRecovery.safePose = Object.freeze({ x: body.x, z: body.z, heading: state.heading });
+    const safePoseEligible = isCoastalSafePoseEligible({
+      grounded,
+      contactCount: playerSurfaceState.contacts.length,
+      allContactsDrivable,
+      upright,
+      verticalSpeed: velocity.y,
+      angularSpeed,
+      region: safeRegion,
+      bodyY: body.y
+    });
+    if (coastalRecovery.pendingValidation) {
+      if (safePoseEligible) {
+        coastalRecovery.pendingValidation = null;
+      } else {
+        coastalRecovery.pendingValidation.secondsRemaining -= deltaSeconds;
+        if (coastalRecovery.pendingValidation.secondsRemaining <= 0) {
+          const fallback = coastalRecovery.pendingValidation.fallback;
+          coastalRecovery.pendingValidation = null;
+          presentationState.suppressJumpTransitions = true;
+          const placed = placeWorldScenario(fallback.x, fallback.z, fallback.heading);
+          presentationState.suppressJumpTransitions = false;
+          if (placed) coastalRecovery.cooldownSeconds = 2;
+          return placed;
+        }
+      }
+    }
+    coastalRecovery.safePoseSampleSeconds = safePoseEligible
+      ? coastalRecovery.safePoseSampleSeconds + deltaSeconds : 0;
+    if (coastalRecovery.safePoseSampleSeconds >= 0.5) {
+      coastalRecovery.safePose = Object.freeze({
+        x: body.x,
+        y: body.y,
+        z: body.z,
+        heading: state.heading,
+        surfaceId: playerSurfaceState.surfaceId
+      });
       coastalRecovery.safePoseSampleSeconds = 0;
     }
     return false;
@@ -9185,6 +9220,11 @@ export function createRacingGame({
     const checkpoint = freeDriveShowcaseCheckpoints[checkpointIndex];
     const safePose = !runningTour ? coastalRecovery.safePose : null;
     const recoveryPose = safePose ?? checkpoint;
+    coastalRecovery.safePose = null;
+    coastalRecovery.safePoseSampleSeconds = 0;
+    coastalRecovery.pendingValidation = safePose && checkpoint
+      ? { secondsRemaining: 0.75, fallback: checkpoint }
+      : null;
     presentationState.suppressJumpTransitions = true;
     const placed = recoveryPose && placeWorldScenario(recoveryPose.x, recoveryPose.z, recoveryPose.heading);
     presentationState.suppressJumpTransitions = false;
@@ -10284,6 +10324,7 @@ ${shader.vertexShader}`
     freeDriveShowcaseChallenge?.reset();
     activeFreeDriveChallenge = null;
     displayedFreeDriveChallenge = null;
+    if (isShowcase) resetCoastalRecoveryState();
 
     const start = trackProfileAtProgress(raceConfig.startProgress);
     const startPosition = start.center.clone().add(start.normal.clone().multiplyScalar(2.8));

@@ -82,6 +82,26 @@ export function classifyCoastalRecovery({ position, nearestRoadDistance, contact
   });
 }
 
+export function isCoastalSafePoseEligible({
+  grounded = false,
+  contactCount = 0,
+  allContactsDrivable = false,
+  upright = 0,
+  verticalSpeed = Infinity,
+  angularSpeed = Infinity,
+  region = "outside",
+  bodyY = -Infinity
+} = {}) {
+  return grounded
+    && contactCount >= 3
+    && allContactsDrivable
+    && upright >= 0.8
+    && Math.abs(verticalSpeed) <= 0.75
+    && angularSpeed <= 0.75
+    && region !== "outside"
+    && bodyY > COASTAL_PLAYABLE_WORLD.waterHeight;
+}
+
 export function createFreeDriveShowcaseRoute({
   sampleTrack,
   elevationAt,
