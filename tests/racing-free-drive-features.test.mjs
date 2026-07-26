@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  COASTAL_PLAYABLE_WORLD,
   COASTAL_SHOWCASE_TUNNEL,
   FREE_DRIVE_RALLY,
   FREE_DRIVE_TUNNEL,
+  classifyCoastalRecovery,
+  coastalPlayableRegion,
   createFreeDriveShowcaseDrivingLine,
   createFreeDriveShowcaseRoute,
   createFreeDriveRallyRibbon,
@@ -19,6 +22,29 @@ import { inspectRacingTrack } from "../racing-track.mjs";
 function straightTrack(progress) {
   return { center: { x: progress * 100, y: 20 }, halfWidth: 9 };
 }
+
+test("Coastal Festival 把开放探索区与海洋和技术夹层分开", () => {
+  assert.equal(coastalPlayableRegion({ x: 150, z: 40 }), "island");
+  assert.equal(coastalPlayableRegion({ x: 340, z: 100 }), "city");
+  assert.equal(coastalPlayableRegion({ x: 200, z: 20 }, 12), "road");
+  assert.equal(coastalPlayableRegion({ x: 0, z: 205 }, 80), "outside");
+  assert.equal(coastalPlayableRegion({ x: 180, z: 0 }, 80, { safe: true }), "outside");
+
+  assert.deepEqual(classifyCoastalRecovery({
+    position: { x: 0, y: COASTAL_PLAYABLE_WORLD.recoveryHeight - 0.1, z: 205 },
+    nearestRoadDistance: 80
+  }), { reason: "water", region: "outside" });
+  assert.deepEqual(classifyCoastalRecovery({
+    position: { x: 20, y: -4, z: 20 },
+    nearestRoadDistance: 12,
+    contactSurfaceIds: ["recovery-only"]
+  }), { reason: "invalid-world", region: "island" });
+  assert.deepEqual(classifyCoastalRecovery({
+    position: { x: 150, y: 1, z: 40 },
+    nearestRoadDistance: 60,
+    contactSurfaceIds: ["ground"]
+  }), { reason: null, region: "island" });
+});
 
 test("自由地图隧道连续覆盖指定赛道区间", () => {
   const segments = createFreeDriveTunnelSegments({ sampleTrack: straightTrack, elevationAt: () => 2 });

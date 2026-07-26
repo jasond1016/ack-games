@@ -45,6 +45,43 @@ export const COASTAL_SHOWCASE_ROUTE = Object.freeze({
   gateRadius: 12
 });
 
+export const COASTAL_PLAYABLE_WORLD = Object.freeze({
+  waterHeight: -1.5,
+  recoveryHeight: -2.2,
+  island: Object.freeze({ x: 0, z: 0, radius: 191, safeRadius: 172 }),
+  city: Object.freeze({ minX: 215, maxX: 465, minZ: -111, maxZ: 139, safeInset: 6 }),
+  roadReach: 34,
+  safeRoadReach: 18
+});
+
+export function coastalPlayableRegion({ x, z } = {}, nearestRoadDistance = Infinity, { safe = false } = {}) {
+  if (![x, z].every(Number.isFinite)) return "outside";
+  const world = COASTAL_PLAYABLE_WORLD;
+  const islandRadius = safe ? world.island.safeRadius : world.island.radius;
+  if (Math.hypot(x - world.island.x, z - world.island.z) <= islandRadius) return "island";
+  const cityInset = safe ? world.city.safeInset : 0;
+  if (
+    x >= world.city.minX + cityInset
+    && x <= world.city.maxX - cityInset
+    && z >= world.city.minZ + cityInset
+    && z <= world.city.maxZ - cityInset
+  ) return "city";
+  const roadReach = safe ? world.safeRoadReach : world.roadReach;
+  return Number.isFinite(nearestRoadDistance) && nearestRoadDistance <= roadReach ? "road" : "outside";
+}
+
+export function classifyCoastalRecovery({ position, nearestRoadDistance, contactSurfaceIds = [] } = {}) {
+  const region = coastalPlayableRegion(position, nearestRoadDistance);
+  const reachedRecoveryFloor = contactSurfaceIds.includes("recovery-only");
+  if (!reachedRecoveryFloor && Number.isFinite(position?.y) && position.y >= COASTAL_PLAYABLE_WORLD.recoveryHeight) {
+    return Object.freeze({ reason: null, region });
+  }
+  return Object.freeze({
+    reason: region === "outside" ? "water" : "invalid-world",
+    region
+  });
+}
+
 export function createFreeDriveShowcaseRoute({
   sampleTrack,
   elevationAt,

@@ -251,6 +251,25 @@ test("Coastal Showcase free-cruise skips the tour machine and remembers the choi
   ).toBe("idle");
   expect(await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().speedKmh)).toBeGreaterThan(0);
 
+  const safePosition = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().playerPosition);
+  expect(await page.evaluate(() =>
+    globalThis.__ackGamesDebug.racing.triggerCoastalRecoveryScenario("water")
+  )).toBe(true);
+  const waterRecovery = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState());
+  expect(waterRecovery.coastalRecovery.lastReason).toBe("water");
+  expect(waterRecovery.coastalRecovery.recoveryCount).toBe(1);
+  expect(Math.hypot(
+    waterRecovery.playerPosition.x - safePosition.x,
+    waterRecovery.playerPosition.y - safePosition.y
+  )).toBeLessThan(8);
+
+  expect(await page.evaluate(() =>
+    globalThis.__ackGamesDebug.racing.triggerCoastalRecoveryScenario("invalid-world")
+  )).toBe(true);
+  const voidRecovery = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState());
+  expect(voidRecovery.coastalRecovery.lastReason).toBe("invalid-world");
+  expect(voidRecovery.coastalRecovery.recoveryCount).toBe(2);
+
   expect(await page.evaluate(() => globalThis.__ackGamesDebug.racing.activateBoost())).toBe(true);
   await expect.poll(() =>
     page.evaluate(() => globalThis.__ackGamesDebug.racing.getState().boostSeconds)

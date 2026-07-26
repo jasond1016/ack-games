@@ -81,11 +81,14 @@ import {
   validateDrivableSurfaceSet
 } from "./racing-drivable-surface-validation.mjs";
 import {
+  COASTAL_PLAYABLE_WORLD,
   COASTAL_SHOWCASE_ROUTE,
   COASTAL_SHOWCASE_TUNNEL,
   FREE_DRIVE_RALLY,
   FREE_DRIVE_SHOWCASE,
   FREE_DRIVE_TUNNEL,
+  classifyCoastalRecovery,
+  coastalPlayableRegion,
   createFreeDriveShowcaseDrivingLine,
   createFreeDriveShowcaseRoute,
   createFreeDriveRallyRibbon,
@@ -696,6 +699,16 @@ export function createRacingGame({
   let freeDriveShowcaseChallenge = null;
   let activeFreeDriveChallenge = null;
   let displayedFreeDriveChallenge = null;
+  const coastalRecovery = {
+    safePose: null,
+    safePoseSampleSeconds: 0,
+    upsideDownSeconds: 0,
+    outsideSeconds: 0,
+    cooldownSeconds: 0,
+    recoveryCount: 0,
+    lastReason: null,
+    region: "outside"
+  };
   const showcaseEvent = {
     phase: isShowcase ? "idle" : "unavailable",
     countdownSeconds: 0,
@@ -818,6 +831,7 @@ export function createRacingGame({
     launchShowcaseBridgeScenario: (speedKmh = 88, direction = 1) =>
       launchShowcaseBridgeScenario(speedKmh, direction),
     recoverShowcaseScenario: () => recoverShowcaseScenario(),
+    triggerCoastalRecoveryScenario: (reason = "invalid-world") => triggerCoastalRecoveryScenario(reason),
     rollShowcaseScenario: () => rollShowcaseScenario(),
     placeTrackScenario: (progress = 0) => placeTrackScenario(progress),
     placeWorldScenario: (x, z, heading = 0) => placeWorldScenario(x, z, heading),
@@ -1148,6 +1162,17 @@ export function createRacingGame({
           distance: Number((eventDistance ?? 0).toFixed(1)),
           finishTimeSeconds: finishTimeSeconds == null ? null : Number(finishTimeSeconds.toFixed(2))
         }))
+      }) : null,
+      coastalRecovery: isShowcase ? Object.freeze({
+        recoveryCount: coastalRecovery.recoveryCount,
+        lastReason: coastalRecovery.lastReason,
+        region: coastalRecovery.region,
+        hasSafePose: Boolean(coastalRecovery.safePose),
+        safePose: coastalRecovery.safePose ? Object.freeze({
+          x: Number(coastalRecovery.safePose.x.toFixed(1)),
+          z: Number(coastalRecovery.safePose.z.toFixed(1)),
+          heading: Number(coastalRecovery.safePose.heading.toFixed(3))
+        }) : null
       }) : null,
       presentation: Object.freeze({
         environment: presentationState.environment,
@@ -4974,7 +4999,10 @@ export function createRacingGame({
         .setTranslation(sceneCenter.x, fallbackGroundHeight - 0.3, sceneCenter.y)
         .setFriction(1.2)
     );
-    physics.colliderTags.set(groundCollider.handle, isProvingGround ? "road" : "ground");
+    physics.colliderTags.set(
+      groundCollider.handle,
+      isProvingGround ? "road" : isShowcase ? "recovery-only" : "ground"
+    );
 
     if (roadCollisionMeshData?.vertices.length && roadCollisionMeshData.indices.length) {
       const roadCollider = world.createCollider(
@@ -8899,6 +8927,7 @@ export function createRacingGame({
 
   function updateFreeDriveChallenges(deltaSeconds) {
     if (isShowcase) {
+      updateCoastalWorldRecovery(deltaSeconds);
       updateShowcaseEvent(deltaSeconds);
       return;
     }
@@ -8997,7 +9026,6 @@ export function createRacingGame({
         if (showcaseEvent.bannerSeconds === 0) hideEventBanner();
       }
       updateShowcasePlayerProgress();
-      updateShowcaseRecovery(deltaSeconds);
       const previousChallenge = freeDriveShowcaseChallenge.getState();
       const challenge = updateFreeDriveShowcaseChallenge(deltaSeconds);
       if (challenge?.nextCheckpoint > previousChallenge.nextCheckpoint) {
@@ -9065,59 +9093,117 @@ export function createRacingGame({
     showcaseEvent.recoveryCooldownSeconds = 0;
     showcaseEvent.recoveryNoticeSeconds = 0;
     showcaseEvent.recoveryCount = 0;
+    resetCoastalRecoveryState();
   }
 
   function updateShowcaseRecovery(deltaSeconds) {
-    if (!physics?.playerBody || showcaseEvent.phase !== "running") return;
-    showcaseEvent.recoveryCooldownSeconds = Math.max(0, showcaseEvent.recoveryCooldownSeconds - deltaSeconds);
+    if (!physics?.playerBody || showcaseEvent.phase !== "running") return false;
     showcaseEvent.recoveryNoticeSeconds = Math.max(0, showcaseEvent.recoveryNoticeSeconds - deltaSeconds);
+    showcaseEvent.recoveryCooldownSeconds = coastalRecovery.cooldownSeconds;
+    showcaseEvent.upsideDownSeconds = coastalRecovery.upsideDownSeconds;
+    return false;
+  }
+
+  function resetCoastalRecoveryState() {
+    coastalRecovery.safePose = null;
+    coastalRecovery.safePoseSampleSeconds = 0;
+    coastalRecovery.upsideDownSeconds = 0;
+    coastalRecovery.outsideSeconds = 0;
+    coastalRecovery.cooldownSeconds = 0;
+    coastalRecovery.recoveryCount = 0;
+    coastalRecovery.lastReason = null;
+    coastalRecovery.region = "outside";
+  }
+
+  function nearestCoastalRoadDistance(position = state.position) {
+    return freeDriveShowcaseDrivingLine.reduce((nearest, sample) =>
+      Math.min(nearest, Math.hypot(sample.x - position.x, sample.z - position.y)), Infinity);
+  }
+
+  function updateCoastalWorldRecovery(deltaSeconds) {
+    if (!isShowcase || !physics?.playerBody || rewindBuffer.active) return false;
+    coastalRecovery.cooldownSeconds = Math.max(0, coastalRecovery.cooldownSeconds - deltaSeconds);
+    if (showcaseEvent.phase === "running") updateShowcaseRecovery(deltaSeconds);
+
     const body = physics.playerBody.translation();
-    const velocity = physics.playerBody.linvel();
-    const bridgeSurfaceHeight = isFreeDriveJumpCorridor(state.position)
-      ? freeDriveElevationAtPosition(state.position, state.trackProgress) : null;
-    const strandedBelowBridge = bridgeSurfaceHeight !== null
-      && body.y < bridgeSurfaceHeight - 4
-      && velocity.y <= 1;
-    if (body.y < -12 || strandedBelowBridge) {
-      recoverShowcasePlayer();
-      return;
+    const nearestRoadDistance = nearestCoastalRoadDistance();
+    const classification = classifyCoastalRecovery({
+      position: { x: body.x, y: body.y, z: body.z },
+      nearestRoadDistance,
+      contactSurfaceIds: playerSurfaceState.contacts.map(({ surfaceId }) => surfaceId)
+    });
+    coastalRecovery.region = classification.region;
+    if (classification.reason && coastalRecovery.cooldownSeconds <= 0) {
+      return recoverCoastalPlayer(classification.reason);
     }
 
-    const grounded = playerSurfaceState.grounded && !freeDriveJumpState.airborne;
     const rotation = physics.playerBody.rotation();
     tempQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
     const upright = new THREE.Vector3(0, 1, 0).applyQuaternion(tempQuaternion).y;
+    const grounded = playerSurfaceState.grounded && !freeDriveJumpState.airborne;
     const support = upright < 0.45 ? resolveSurfaceSupport(state.position, state.heading, state.trackIndex) : null;
     const nearGround = support?.grounded
       && body.y - support.height < playerVehicleSpec().spawnHeight + 1.6
       && Math.abs(physics.playerBody.linvel().y) < 2;
-    showcaseEvent.upsideDownSeconds = upright < 0.45 && (grounded || nearGround)
-      ? showcaseEvent.upsideDownSeconds + deltaSeconds : 0;
-    const nearestDistance = freeDriveShowcaseDrivingLine.reduce((nearest, sample) =>
-      Math.min(nearest, Math.hypot(sample.x - state.position.x, sample.z - state.position.y)), Infinity);
-    showcaseEvent.offRouteSeconds = grounded && nearestDistance > 35
-      ? showcaseEvent.offRouteSeconds + deltaSeconds : 0;
-    if (showcaseEvent.recoveryCooldownSeconds <= 0
-      && (showcaseEvent.upsideDownSeconds >= 2 || showcaseEvent.offRouteSeconds >= 3)) recoverShowcasePlayer();
+    coastalRecovery.upsideDownSeconds = upright < 0.45 && (grounded || nearGround)
+      ? coastalRecovery.upsideDownSeconds + deltaSeconds : 0;
+    if (coastalRecovery.upsideDownSeconds >= 2 && coastalRecovery.cooldownSeconds <= 0) {
+      return recoverCoastalPlayer("upside-down");
+    }
+    coastalRecovery.outsideSeconds = grounded && classification.region === "outside"
+      ? coastalRecovery.outsideSeconds + deltaSeconds : 0;
+    if (coastalRecovery.outsideSeconds >= 0.5 && coastalRecovery.cooldownSeconds <= 0) {
+      return recoverCoastalPlayer("invalid-world");
+    }
+
+    coastalRecovery.safePoseSampleSeconds += deltaSeconds;
+    const safeRegion = coastalPlayableRegion(
+      { x: body.x, z: body.z },
+      nearestRoadDistance,
+      { safe: true }
+    );
+    const hasDrivableContact = playerSurfaceState.contacts.some(({ surfaceId }) => isPhysicalVehicleSurface(surfaceId));
+    if (
+      coastalRecovery.safePoseSampleSeconds >= 0.25
+      && grounded
+      && upright >= 0.75
+      && safeRegion !== "outside"
+      && hasDrivableContact
+      && body.y > COASTAL_PLAYABLE_WORLD.waterHeight
+    ) {
+      coastalRecovery.safePose = Object.freeze({ x: body.x, z: body.z, heading: state.heading });
+      coastalRecovery.safePoseSampleSeconds = 0;
+    }
+    return false;
   }
 
-  function recoverShowcasePlayer() {
-    if (showcaseEvent.phase !== "running" || showcaseEvent.recoveryCooldownSeconds > 0) return false;
+  function recoverCoastalPlayer(reason) {
+    if (!isShowcase || coastalRecovery.cooldownSeconds > 0) return false;
+    const runningTour = showcaseEvent.phase === "running";
     const challenge = freeDriveShowcaseChallenge.getState();
     const checkpointIndex = Math.max(0, Math.min(challenge.nextCheckpoint - 1, freeDriveShowcaseCheckpoints.length - 1));
     const checkpoint = freeDriveShowcaseCheckpoints[checkpointIndex];
+    const safePose = !runningTour ? coastalRecovery.safePose : null;
+    const recoveryPose = safePose ?? checkpoint;
     presentationState.suppressJumpTransitions = true;
-    const placed = checkpoint && placeWorldScenario(checkpoint.x, checkpoint.z, checkpoint.heading);
+    const placed = recoveryPose && placeWorldScenario(recoveryPose.x, recoveryPose.z, recoveryPose.heading);
     presentationState.suppressJumpTransitions = false;
     if (!placed) return false;
-    freeDriveShowcaseChallenge.addPenalty(showcaseRecoveryPenaltySeconds);
-    showcaseEvent.playerDistance = freeDriveShowcaseCheckpointDistances[checkpointIndex] ?? 0;
-    updateShowcasePlace();
+    if (runningTour) {
+      freeDriveShowcaseChallenge.addPenalty(showcaseRecoveryPenaltySeconds);
+      showcaseEvent.playerDistance = freeDriveShowcaseCheckpointDistances[checkpointIndex] ?? 0;
+      updateShowcasePlace();
+      showcaseEvent.recoveryNoticeSeconds = 2.2;
+      showcaseEvent.recoveryCount += 1;
+    }
     showcaseEvent.upsideDownSeconds = 0;
     showcaseEvent.offRouteSeconds = 0;
     showcaseEvent.recoveryCooldownSeconds = 2;
-    showcaseEvent.recoveryNoticeSeconds = 2.2;
-    showcaseEvent.recoveryCount += 1;
+    coastalRecovery.upsideDownSeconds = 0;
+    coastalRecovery.outsideSeconds = 0;
+    coastalRecovery.cooldownSeconds = 2;
+    coastalRecovery.recoveryCount += 1;
+    coastalRecovery.lastReason = reason;
     updateRouteGuide();
     return true;
   }
@@ -11059,13 +11145,26 @@ ${shader.vertexShader}`
 
   function recoverShowcaseScenario() {
     if (!isShowcase || showcaseEvent.phase !== "running" || !physics?.playerBody) return false;
-    physics.playerBody.setTranslation({ x: 190, y: 0, z: -18 }, true);
+    coastalRecovery.cooldownSeconds = 0;
+    physics.playerBody.setTranslation({ x: 190, y: -4, z: -18 }, true);
     physics.playerBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
     syncPlayerPhysicsState();
-    updateShowcaseRecovery(0.016);
+    updateCoastalWorldRecovery(0.016);
     updateHud();
     renderer.render(scene, camera);
     return showcaseEvent.recoveryCount > 0;
+  }
+
+  function triggerCoastalRecoveryScenario(reason = "invalid-world") {
+    if (!isShowcase || !physics?.playerBody) return false;
+    const target = reason === "water"
+      ? { x: 0, y: -3, z: COASTAL_PLAYABLE_WORLD.island.radius + 80 }
+      : { x: 20, y: -4, z: 20 };
+    coastalRecovery.cooldownSeconds = 0;
+    physics.playerBody.setTranslation(target, true);
+    physics.playerBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    syncPlayerPhysicsState();
+    return updateCoastalWorldRecovery(0.016);
   }
 
   function launchShowcaseBridgeScenario(speedKmh = 88, requestedDirection = 1) {
