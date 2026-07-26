@@ -45,26 +45,26 @@ export const COASTAL_SHOWCASE_ROUTE = Object.freeze({
   gateRadius: 12
 });
 
-export const COASTAL_PLAYABLE_WORLD = Object.freeze({
+export const COASTAL_WORLD_LAYOUT = Object.freeze({
   waterHeight: -1.5,
   recoveryHeight: -2.2,
-  island: Object.freeze({ x: 0, z: 0, radius: 191, safeRadius: 172 }),
-  city: Object.freeze({ minX: 215, maxX: 465, minZ: -111, maxZ: 139, safeInset: 6 }),
+  island: Object.freeze({ x: 0, z: 0, terrainRadius: 188, coastOuterRadius: 191, safeRadius: 172 }),
+  city: Object.freeze({ x: 340, z: 14, width: 250, depth: 250, safeInset: 6 }),
   roadReach: 34,
   safeRoadReach: 18
 });
 
 export function coastalPlayableRegion({ x, z } = {}, nearestRoadDistance = Infinity, { safe = false } = {}) {
   if (![x, z].every(Number.isFinite)) return "outside";
-  const world = COASTAL_PLAYABLE_WORLD;
-  const islandRadius = safe ? world.island.safeRadius : world.island.radius;
+  const world = COASTAL_WORLD_LAYOUT;
+  const islandRadius = safe ? world.island.safeRadius : world.island.coastOuterRadius;
   if (Math.hypot(x - world.island.x, z - world.island.z) <= islandRadius) return "island";
   const cityInset = safe ? world.city.safeInset : 0;
   if (
-    x >= world.city.minX + cityInset
-    && x <= world.city.maxX - cityInset
-    && z >= world.city.minZ + cityInset
-    && z <= world.city.maxZ - cityInset
+    x >= world.city.x - world.city.width * 0.5 + cityInset
+    && x <= world.city.x + world.city.width * 0.5 - cityInset
+    && z >= world.city.z - world.city.depth * 0.5 + cityInset
+    && z <= world.city.z + world.city.depth * 0.5 - cityInset
   ) return "city";
   const roadReach = safe ? world.safeRoadReach : world.roadReach;
   return Number.isFinite(nearestRoadDistance) && nearestRoadDistance <= roadReach ? "road" : "outside";
@@ -73,7 +73,7 @@ export function coastalPlayableRegion({ x, z } = {}, nearestRoadDistance = Infin
 export function classifyCoastalRecovery({ position, nearestRoadDistance, contactSurfaceIds = [] } = {}) {
   const region = coastalPlayableRegion(position, nearestRoadDistance);
   const reachedRecoveryFloor = contactSurfaceIds.includes("recovery-only");
-  if (!reachedRecoveryFloor && Number.isFinite(position?.y) && position.y >= COASTAL_PLAYABLE_WORLD.recoveryHeight) {
+  if (!reachedRecoveryFloor && Number.isFinite(position?.y) && position.y >= COASTAL_WORLD_LAYOUT.recoveryHeight) {
     return Object.freeze({ trigger: null, reason: null, region });
   }
   const overAuthoredLand = coastalPlayableRegion(position, Infinity) !== "outside";
@@ -101,7 +101,7 @@ export function isCoastalSafePoseEligible({
     && Math.abs(verticalSpeed) <= 0.75
     && angularSpeed <= 0.75
     && region !== "outside"
-    && bodyY > COASTAL_PLAYABLE_WORLD.waterHeight;
+    && bodyY > COASTAL_WORLD_LAYOUT.waterHeight;
 }
 
 export function createFreeDriveShowcaseRoute({

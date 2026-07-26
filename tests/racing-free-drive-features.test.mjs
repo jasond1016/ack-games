@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  COASTAL_PLAYABLE_WORLD,
+  COASTAL_WORLD_LAYOUT,
   COASTAL_SHOWCASE_TUNNEL,
   FREE_DRIVE_RALLY,
   FREE_DRIVE_TUNNEL,
@@ -32,7 +32,7 @@ test("Coastal Festival 把开放探索区与海洋和技术夹层分开", () => 
   assert.equal(coastalPlayableRegion({ x: 180, z: 0 }, 80, { safe: true }), "outside");
 
   assert.deepEqual(classifyCoastalRecovery({
-    position: { x: 0, y: COASTAL_PLAYABLE_WORLD.recoveryHeight - 0.1, z: 205 },
+    position: { x: 0, y: COASTAL_WORLD_LAYOUT.recoveryHeight - 0.1, z: 205 },
     nearestRoadDistance: 80
   }), { trigger: "kill-height", reason: "water", region: "outside" });
   assert.deepEqual(classifyCoastalRecovery({
@@ -49,6 +49,16 @@ test("Coastal Festival 把开放探索区与海洋和技术夹层分开", () => 
     nearestRoadDistance: 60,
     contactSurfaceIds: ["ground"]
   }), { trigger: null, reason: null, region: "island" });
+});
+
+test("Coastal 世界布局同时定义渲染几何与可玩边界", () => {
+  assert.equal(COASTAL_WORLD_LAYOUT.island.terrainRadius + 3, COASTAL_WORLD_LAYOUT.island.coastOuterRadius);
+  assert.equal(coastalPlayableRegion({ x: COASTAL_WORLD_LAYOUT.island.coastOuterRadius, z: 0 }), "island");
+  assert.equal(coastalPlayableRegion({ x: COASTAL_WORLD_LAYOUT.island.coastOuterRadius + 0.1, z: 0 }), "outside");
+  assert.equal(coastalPlayableRegion({
+    x: COASTAL_WORLD_LAYOUT.city.x + COASTAL_WORLD_LAYOUT.city.width * 0.5,
+    z: COASTAL_WORLD_LAYOUT.city.z
+  }), "city");
 });
 
 test("Coastal 安全恢复点必须连续建立在稳定的三轮以上接触上", () => {

@@ -81,7 +81,7 @@ import {
   validateDrivableSurfaceSet
 } from "./racing-drivable-surface-validation.mjs";
 import {
-  COASTAL_PLAYABLE_WORLD,
+  COASTAL_WORLD_LAYOUT,
   COASTAL_SHOWCASE_ROUTE,
   COASTAL_SHOWCASE_TUNNEL,
   FREE_DRIVE_RALLY,
@@ -2958,12 +2958,12 @@ export function createRacingGame({
     });
     const ocean = new THREE.Mesh(new THREE.CircleGeometry(groundRadius + 220, 128), waterMaterial);
     ocean.rotation.x = -Math.PI / 2;
-    ocean.position.set(sceneCenter.x, -1.5, sceneCenter.y);
+    ocean.position.set(sceneCenter.x, COASTAL_WORLD_LAYOUT.waterHeight, sceneCenter.y);
     freeDriveWater = ocean;
     scene.add(ocean);
 
-    const islandRadius = 188;
-    const islandCenter = new THREE.Vector2(0, 0);
+    const islandRadius = COASTAL_WORLD_LAYOUT.island.terrainRadius;
+    const islandCenter = new THREE.Vector2(COASTAL_WORLD_LAYOUT.island.x, COASTAL_WORLD_LAYOUT.island.z);
     const islandGeometry = new THREE.CircleGeometry(islandRadius, 96, 24);
     const positions = islandGeometry.getAttribute("position");
     for (let index = 0; index < positions.count; index += 1) {
@@ -3003,24 +3003,31 @@ export function createRacingGame({
     const coastStart = islandRadius - 42;
     const coastMeshes = [
       createFreeDriveCoastRing(coastStart, islandRadius - 12, -0.2, -0.78, createSandMaterial(0xc7ad82), islandCenter),
-      createFreeDriveCoastRing(islandRadius - 13, islandRadius + 3, -0.76, -1.38, createSandMaterial(0x766b5d), islandCenter)
+      createFreeDriveCoastRing(
+        islandRadius - 13,
+        COASTAL_WORLD_LAYOUT.island.coastOuterRadius,
+        -0.76,
+        -1.38,
+        createSandMaterial(0x766b5d),
+        islandCenter
+      )
     ];
     coastMeshes.forEach((mesh) => registerStaticWorldMesh(mesh, "ground"));
     scene.add(...coastMeshes);
     const cityGround = new THREE.Mesh(
-      new THREE.BoxGeometry(250, 0.7, 250),
+      new THREE.BoxGeometry(COASTAL_WORLD_LAYOUT.city.width, 0.7, COASTAL_WORLD_LAYOUT.city.depth),
       createFreeDrivePbrMaterial("brushed_concrete", { color: 0x737b7c, repeatX: 28, repeatY: 28, roughness: 0.92 })
     );
-    cityGround.position.set(340, -0.42, 14);
+    cityGround.position.set(COASTAL_WORLD_LAYOUT.city.x, -0.42, COASTAL_WORLD_LAYOUT.city.z);
     cityGround.receiveShadow = true;
     scene.add(cityGround);
     registerStaticWorldBox({
       x: cityGround.position.x,
       y: cityGround.position.y,
       z: cityGround.position.z,
-      width: 250,
+      width: COASTAL_WORLD_LAYOUT.city.width,
       height: 0.7,
-      depth: 250,
+      depth: COASTAL_WORLD_LAYOUT.city.depth,
       tag: "ground"
     });
     scene.add(
@@ -11271,7 +11278,7 @@ ${shader.vertexShader}`
   function triggerCoastalRecoveryScenario(reason = "invalid-world") {
     if (!isShowcase || !physics?.playerBody) return false;
     const target = reason === "water"
-      ? { x: 0, y: -3, z: COASTAL_PLAYABLE_WORLD.island.radius + 80 }
+      ? { x: 0, y: -3, z: COASTAL_WORLD_LAYOUT.island.coastOuterRadius + 80 }
       : { x: 20, y: -4, z: 20 };
     coastalRecovery.cooldownSeconds = 0;
     physics.playerBody.setTranslation(target, true);
