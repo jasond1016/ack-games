@@ -98,9 +98,10 @@ import {
 } from "./racing-free-drive-challenge.mjs";
 import {
   advanceWheelSpin,
+  classifyWheelVisualRole,
   createWheelAnimationState,
   findWheelGeometryLayout,
-  isWheelVisualLabel
+  resolveWheelAnimationAxes
 } from "./racing-wheel-animation.mjs";
 import {
   shouldActivateComputerBoost
@@ -328,6 +329,11 @@ export function createRacingGame({
     selectedCarId = getRacingCarById("aventador").id;
   }
   let cameraMode = startConfig.cameraMode;
+  // Test-only inspection camera. It is unset in normal play and lets the
+  // visual regression suite take rear three-quarter evidence without adding
+  // a second rendered car or any world-space brake-light geometry.
+  let brakeLightEvidenceView = null;
+  let wheelEvidenceView = null;
   let coastalPlayMode = normalizeCoastalPlayMode(startConfig.coastalPlayMode);
   let racingDifficulty = normalizeRacingDifficulty(startConfig.difficulty);
   const activeChallenge = initialSnapshot?.challenge ?? null;
@@ -770,6 +776,16 @@ export function createRacingGame({
       ({ x, z, heading, section, distance }) => ({ x, z, heading, section, distance })
     ),
     setShowcaseMatrixControls: (controls = null) => setShowcaseMatrixControls(controls),
+    setBrakeLightEvidenceView: (view = null) => {
+      brakeLightEvidenceView = ["rear", "left-rear", "right-rear"].includes(view) ? view : null;
+      return brakeLightEvidenceView;
+    },
+    setWheelEvidenceView: (view = null) => {
+      wheelEvidenceView = ["front-left", "front-right", "rear-left", "rear-right"].includes(view)
+        ? view
+        : null;
+      return wheelEvidenceView;
+    },
     toggleOpponent,
     toggleCollisionDebug: () => setCollisionDebugEnabled(!collisionDebug.enabled),
     listNitroAudioPresets: () => listNitroAudioPresets(),
@@ -785,6 +801,7 @@ export function createRacingGame({
       eventOpponent: Boolean(traffic.eventOpponent),
       progress: Number(traffic.progress.toFixed(3))
     })),
+    diagnoseWheelVisuals: () => diagnoseWheelVisuals(),
     getState: () => ({
       quality: qualityPreset.id,
       render: renderer ? {
@@ -8456,14 +8473,88 @@ export function createRacingGame({
     );
   }
 
+  function diagnoseWheelVisuals() {
+    if (!car) return null;
+    const box = new THREE.Box3().setFromObject(car);
+    const size = box.getSize(new THREE.Vector3());
+    const wheelMeshes = [];
+    const layoutReports = [];
+    car.traverse((mesh) => {
+      if (!mesh.isMesh || !mesh.geometry) return;
+      const sourceMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      const label = sourceMaterials.map((material) => materialLabelFor(mesh, material)).join(" ");
+      const role = classifyWheelVisualRole(label);
+      if (!role) return;
+      const meshBox = new THREE.Box3().setFromObject(mesh);
+      const meshSize = meshBox.getSize(new THREE.Vector3());
+      const center = meshBox.getCenter(new THREE.Vector3());
+      wheelMeshes.push({
+        name: mesh.name || "",
+        label: label.slice(0, 80),
+        role: role.id,
+        channels: { roll: role.roll, steer: role.steer },
+        height: Number(meshSize.y.toFixed(2)),
+        width: Number(meshSize.x.toFixed(2)),
+        length: Number(meshSize.z.toFixed(2)),
+        centerY: Number(center.y.toFixed(2)),
+        minY: Number(meshBox.min.y.toFixed(2)),
+        maxY: Number(meshBox.max.y.toFixed(2))
+      });
+      const positionAttribute = mesh.geometry.attributes?.position;
+      if (!positionAttribute) return;
+      const layout = findWheelGeometryLayout(positionAttribute.array, positionAttribute.itemSize);
+      if (!layout) return;
+      layoutReports.push({
+        name: (mesh.name || "").slice(0, 48),
+        role: role.id,
+        type: layout.type,
+        axis: layout.longitudinalAxis,
+        animationAxes: resolveWheelAnimationAxes(layout),
+        radiusLimit: Number(layout.radiusLimit.toFixed(2)),
+        centers: layout.centers.map((entry) => ({
+          x: Number(entry.x.toFixed(2)),
+          y: Number(entry.y.toFixed(2)),
+          z: Number(entry.z.toFixed(2))
+        }))
+      });
+    });
+    return Object.freeze({
+      carHeight: Number(size.y.toFixed(2)),
+      carMinY: Number(box.min.y.toFixed(2)),
+      carMaxY: Number(box.max.y.toFixed(2)),
+      carY: Number(car.position.y.toFixed(2)),
+      carWidth: Number(size.x.toFixed(2)),
+      carLength: Number(size.z.toFixed(2)),
+      wheelCount: car.userData.wheelCount ?? 0,
+      shaderBindings: car.userData.wheelShaderBindings?.length ?? 0,
+      bindings: (car.userData.wheelShaderBindings ?? []).map((binding) => ({
+        mesh: binding.meshName,
+        role: binding.role,
+        rollAxis: binding.axes.roll,
+        steerAxis: binding.axes.steer,
+        canonicalHubs: binding.canonicalHubs,
+        frontFlags: binding.frontFlags,
+        radiusLimit: binding.radiusLimit,
+        rollEnabled: binding.rollEnabled,
+        steerEnabled: binding.steerEnabled,
+        spinAngle: Number(binding.spin.value.toFixed(3)),
+        steeringAngle: Number(binding.steering.value.toFixed(3))
+      })),
+      wheelMeshes,
+      layouts: layoutReports,
+      contacts: physics?.playerVehicle?.contactCount ?? 0,
+      suspensionLengths: (physics?.playerVehicle?.suspensionLengths ?? []).map((value) => Number(value.toFixed(3)))
+    });
+  }
+
   function animateWheelVisuals(targetCar, spinAngle, steeringAngle = 0) {
     if (!targetCar) return;
     const motion = createWheelAnimationState({ spinAngle, steeringAngle });
     targetCar.userData.wheelAnimationState = motion;
 
     for (const binding of targetCar.userData.wheelShaderBindings ?? []) {
-      binding.spin.value = motion.spinAngle;
-      binding.steering.value = motion.steeringAngle;
+      binding.spin.value = binding.rollEnabled ? motion.spinAngle : 0;
+      binding.steering.value = binding.steerEnabled ? motion.steeringAngle : 0;
     }
 
     const wheelNodes = targetCar.userData.wheelNodes;
@@ -8486,12 +8577,14 @@ export function createRacingGame({
     const bindings = [];
     const logicalCenters = new Set();
     visualRoot.updateMatrixWorld(true);
+    const candidates = [];
 
     model.traverse((mesh) => {
       if (!mesh.isMesh || !mesh.geometry?.attributes?.position || !mesh.material) return;
       const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       const label = materials.map((material) => materialLabelFor(mesh, material)).join(" ");
-      if (!isWheelVisualLabel(label)) return;
+      const role = classifyWheelVisualRole(label);
+      if (!role) return;
 
       const positionAttribute = mesh.geometry.attributes.position;
       const layout = findWheelGeometryLayout(positionAttribute.array, positionAttribute.itemSize);
@@ -8501,22 +8594,44 @@ export function createRacingGame({
         const worldCenter = center.clone().applyMatrix4(mesh.matrixWorld);
         return visualRoot.worldToLocal(worldCenter);
       });
+      candidates.push({ mesh, materials, role, layout, localCenters, carSpaceCenters });
+    });
+
+    // Joined/optimized GLBs often store tire, rim, rotor and caliper geometry
+    // as separate materials in the same four-wheel coordinate frame. The tire
+    // is the authoritative hub source; using each submesh's centroid makes an
+    // offset caliper rotate about itself and look like a crawling front part.
+    const canonical = candidates
+      .filter(({ role, layout }) => role.id === "tire" && layout.type !== "single")
+      .sort((left, right) => right.layout.centers.length - left.layout.centers.length)[0] ?? null;
+
+    for (const candidate of candidates) {
+      const { mesh, materials, role, layout, localCenters, carSpaceCenters } = candidate;
+      const resolved = resolveCanonicalWheelCenters(candidate, canonical, visualRoot);
       for (const center of carSpaceCenters) {
         logicalCenters.add(`${Math.round(center.x * 10)}:${Math.round(center.z * 10)}`);
       }
 
       const singleIsFront = layout.type !== "four-wheel" && (carSpaceCenters[0]?.z ?? 0) >= 0;
-      const frontDirection = layout.type === "four-wheel"
-        && (carSpaceCenters[0]?.z ?? 0) < (carSpaceCenters[2]?.z ?? 0)
-        ? -1
-        : 1;
+      const frontMidpoint = carSpaceCenters.reduce((sum, center) => sum + center.z, 0)
+        / Math.max(1, carSpaceCenters.length);
+      const frontFlags = carSpaceCenters.map((center) =>
+        layout.type === "four-wheel" ? Number(center.z >= frontMidpoint) : Number(singleIsFront)
+      );
+      const axes = resolveMeshWheelAxes(mesh, visualRoot);
       for (const material of materials) {
-        bindings.push(installWheelMaterialAnimation(material, layout, localCenters, {
-          frontDirection,
-          singleIsFront
+        bindings.push(installWheelMaterialAnimation(material, layout, resolved.centers, {
+          frontFlags,
+          axes,
+          role,
+          meshName: mesh.name || "",
+          canonicalHubs: resolved.canonical,
+          radiusLimit: resolved.canonical
+            ? Math.min(layout.radiusLimit, canonical.layout.radiusLimit * 1.1)
+            : layout.radiusLimit
         }));
       }
-    });
+    }
 
     return {
       bindings,
@@ -8524,57 +8639,125 @@ export function createRacingGame({
     };
   }
 
-  function installWheelMaterialAnimation(material, layout, centers, { frontDirection, singleIsFront }) {
+  function resolveMeshWheelAxes(mesh, visualRoot) {
+    const meshWorld = mesh.getWorldQuaternion(new THREE.Quaternion());
+    const carWorld = visualRoot.getWorldQuaternion(new THREE.Quaternion());
+    const carToMesh = meshWorld.invert().multiply(carWorld);
+    const rollVector = new THREE.Vector3(1, 0, 0).applyQuaternion(carToMesh).normalize();
+    const steerVector = new THREE.Vector3(0, 1, 0).applyQuaternion(carToMesh).normalize();
+    return Object.freeze({
+      roll: dominantAxisLabel(rollVector),
+      steer: dominantAxisLabel(steerVector),
+      rollVector,
+      steerVector
+    });
+  }
+
+  function dominantAxisLabel(vector) {
+    const components = [
+      ["x", Math.abs(vector.x)],
+      ["y", Math.abs(vector.y)],
+      ["z", Math.abs(vector.z)]
+    ];
+    components.sort((left, right) => right[1] - left[1]);
+    return components[0][0];
+  }
+
+  function resolveCanonicalWheelCenters(candidate, canonical, visualRoot) {
+    if (
+      !canonical
+      || candidate.layout.type !== canonical.layout.type
+      || candidate.localCenters.length !== canonical.carSpaceCenters.length
+    ) {
+      return { centers: candidate.localCenters, canonical: false };
+    }
+
+    const sameCoordinateFrame = candidate.mesh.matrixWorld.elements.every((value, index) =>
+      Math.abs(value - canonical.mesh.matrixWorld.elements[index]) < 1e-5
+    );
+    const available = canonical.carSpaceCenters.map((center, index) => ({ center, index }));
+    const assignments = candidate.carSpaceCenters.map((candidateCenter) => {
+      available.sort((left, right) =>
+        candidateCenter.distanceToSquared(left.center) - candidateCenter.distanceToSquared(right.center)
+      );
+      return available.shift();
+    });
+    const maximumDistance = Math.max(
+      0,
+      ...assignments.map((assignment, index) =>
+        candidate.carSpaceCenters[index].distanceTo(assignment.center)
+      )
+    );
+    if (!sameCoordinateFrame && maximumDistance > 0.75) {
+      return { centers: candidate.localCenters, canonical: false };
+    }
+
+    const centers = assignments.map(({ center }) => {
+      const worldCenter = center.clone();
+      visualRoot.localToWorld(worldCenter);
+      return candidate.mesh.worldToLocal(worldCenter);
+    });
+    return { centers, canonical: true };
+  }
+
+  function installWheelMaterialAnimation(material, layout, centers, {
+    frontFlags,
+    axes,
+    role,
+    meshName,
+    canonicalHubs,
+    radiusLimit: configuredRadiusLimit
+  }) {
     const spin = { value: 0 };
     const steering = { value: 0 };
     const originalCompile = material.onBeforeCompile;
-    const wheelUniforms = layout.type === "four-wheel"
-      ? {
-          uWheelCenters: { value: centers },
-          uWheelSplit: { value: new THREE.Vector2(layout.splitX, layout.splitLongitudinal) },
-          uWheelFrontDirection: { value: frontDirection }
-        }
-      : layout.type === "axle-pair"
-        ? {
-            uWheelCenters: { value: centers },
-            uWheelSplitX: { value: layout.splitX },
-            uWheelIsFront: { value: singleIsFront ? 1 : 0 }
-          }
-      : {
-          uWheelCenter: { value: centers[0] },
-          uWheelIsFront: { value: singleIsFront ? 1 : 0 }
-        };
-    const longitudinalComponent = layout.longitudinalAxis === "y" ? "y" : "z";
-    const declarations = layout.type === "four-wheel"
-      ? `
-uniform vec3 uWheelCenters[4];
-uniform vec2 uWheelSplit;
-uniform float uWheelFrontDirection;
+    const radiusLimit = Number.isFinite(configuredRadiusLimit) ? configuredRadiusLimit : 0.85;
+    const centerCount = centers.length;
+    const wheelUniforms = {
+      uWheelCenters: { value: centers },
+      uWheelFront: { value: frontFlags },
+      uWheelRollAxis: { value: axes.rollVector },
+      uWheelSteerAxis: { value: axes.steerVector },
+      uWheelRadiusLimit: { value: radiusLimit }
+    };
+    const nearestComparisons = Array.from({ length: centerCount - 1 }, (_, offset) => {
+      const index = offset + 1;
+      return `
+  candidateDistance = dot(point - uWheelCenters[${index}], point - uWheelCenters[${index}]);
+  if (candidateDistance < bestDistance) {
+    bestDistance = candidateDistance;
+    center = uWheelCenters[${index}];
+  }`;
+    }).join("");
+    const nearestFrontComparisons = Array.from({ length: centerCount - 1 }, (_, offset) => {
+      const index = offset + 1;
+      return `
+  candidateDistance = dot(point - uWheelCenters[${index}], point - uWheelCenters[${index}]);
+  if (candidateDistance < bestDistance) {
+    bestDistance = candidateDistance;
+    front = uWheelFront[${index}];
+  }`;
+    }).join("");
+    const declarations = `
+uniform vec3 uWheelCenters[${centerCount}];
+uniform float uWheelFront[${centerCount}];
+uniform vec3 uWheelRollAxis;
+uniform vec3 uWheelSteerAxis;
+uniform float uWheelRadiusLimit;
 vec3 wheelCenterFor(vec3 point) {
-  if (point.${longitudinalComponent} >= uWheelSplit.y) {
-    return point.x >= uWheelSplit.x ? uWheelCenters[1] : uWheelCenters[0];
-  }
-  return point.x >= uWheelSplit.x ? uWheelCenters[3] : uWheelCenters[2];
+  vec3 center = uWheelCenters[0];
+  float bestDistance = dot(point - center, point - center);
+  float candidateDistance;
+${nearestComparisons}
+  return center;
 }
 float wheelFrontFor(vec3 point) {
-  return ((point.${longitudinalComponent} - uWheelSplit.y) * uWheelFrontDirection >= 0.0) ? 1.0 : 0.0;
-}`
-      : layout.type === "axle-pair"
-        ? `
-uniform vec3 uWheelCenters[2];
-uniform float uWheelSplitX;
-uniform float uWheelIsFront;
-vec3 wheelCenterFor(vec3 point) {
-  return point.x >= uWheelSplitX ? uWheelCenters[1] : uWheelCenters[0];
-}
-float wheelFrontFor(vec3 point) { return uWheelIsFront; }
-`
-      : `
-uniform vec3 uWheelCenter;
-uniform float uWheelIsFront;
-vec3 wheelCenterFor(vec3 point) { return uWheelCenter; }
-float wheelFrontFor(vec3 point) { return uWheelIsFront; }
-`;
+  float front = uWheelFront[0];
+  float bestDistance = dot(point - uWheelCenters[0], point - uWheelCenters[0]);
+  float candidateDistance;
+${nearestFrontComparisons}
+  return front;
+}`;
     material.onBeforeCompile = (shader, renderer) => {
       originalCompile?.(shader, renderer);
       shader.uniforms.uWheelSpin = spin;
@@ -8584,28 +8767,56 @@ float wheelFrontFor(vec3 point) { return uWheelIsFront; }
 uniform float uWheelSpin;
 uniform float uWheelSteering;
 ${declarations}
-vec3 rotateWheelX(vec3 value, float angle) {
+vec3 rotateWheelAround(vec3 value, vec3 axis, float angle) {
   float cosine = cos(angle);
   float sine = sin(angle);
-  return vec3(value.x, cosine * value.y - sine * value.z, sine * value.y + cosine * value.z);
-}
-vec3 rotateWheelY(vec3 value, float angle) {
-  float cosine = cos(angle);
-  float sine = sin(angle);
-  return vec3(cosine * value.x + sine * value.z, value.y, -sine * value.x + cosine * value.z);
+  return value * cosine
+    + cross(axis, value) * sine
+    + axis * dot(axis, value) * (1.0 - cosine);
 }
 ${shader.vertexShader}`
         .replace("#include <beginnormal_vertex>", `#include <beginnormal_vertex>
-  objectNormal = rotateWheelX(objectNormal, uWheelSpin);
-  objectNormal = rotateWheelY(objectNormal, uWheelSteering * wheelFrontFor(position));`)
+  {
+    vec3 wheelCenter = wheelCenterFor(position);
+    vec3 wheelOffset = position - wheelCenter;
+    if (dot(wheelOffset, wheelOffset) <= uWheelRadiusLimit * uWheelRadiusLimit) {
+      objectNormal = rotateWheelAround(objectNormal, uWheelRollAxis, uWheelSpin);
+      objectNormal = rotateWheelAround(
+        objectNormal,
+        uWheelSteerAxis,
+        uWheelSteering * wheelFrontFor(position)
+      );
+    }
+  }`)
         .replace("#include <begin_vertex>", `#include <begin_vertex>
-  vec3 wheelCenter = wheelCenterFor(position);
-  vec3 wheelOffset = rotateWheelX(transformed - wheelCenter, uWheelSpin);
-  transformed = wheelCenter + rotateWheelY(wheelOffset, uWheelSteering * wheelFrontFor(position));`);
+  {
+    vec3 wheelCenter = wheelCenterFor(position);
+    vec3 wheelOffset = transformed - wheelCenter;
+    if (dot(wheelOffset, wheelOffset) <= uWheelRadiusLimit * uWheelRadiusLimit) {
+      wheelOffset = rotateWheelAround(wheelOffset, uWheelRollAxis, uWheelSpin);
+      transformed = wheelCenter + rotateWheelAround(
+        wheelOffset,
+        uWheelSteerAxis,
+        uWheelSteering * wheelFrontFor(position)
+      );
+    }
+  }`);
     };
-    material.customProgramCacheKey = () => `racing-wheel-${layout.type}-${singleIsFront ? "front" : "rear"}`;
+    material.customProgramCacheKey = () =>
+      `racing-wheel-${layout.type}-${role.id}-${axes.roll}${axes.steer}-${frontFlags.join("")}-r${radiusLimit.toFixed(2)}`;
     material.needsUpdate = true;
-    return { spin, steering };
+    return {
+      spin,
+      steering,
+      role: role.id,
+      axes,
+      meshName,
+      canonicalHubs,
+      frontFlags: Object.freeze([...frontFlags]),
+      radiusLimit,
+      rollEnabled: role.roll,
+      steerEnabled: role.steer
+    };
   }
 
   function updateOpponentTransform() {
@@ -8829,12 +9040,55 @@ ${shader.vertexShader}`
     presentationState.jumpFovPulse = Math.max(0, presentationState.jumpFovPulse - deltaSeconds * 2.7);
     presentationState.jumpLiftPulse = Math.max(0, presentationState.jumpLiftPulse - deltaSeconds * 2.2);
     presentationState.landingKick = Math.max(0, presentationState.landingKick - deltaSeconds * 5.2);
+    if (brakeLightEvidenceView) {
+      updateBrakeLightEvidenceCamera(brakeLightEvidenceView);
+      return;
+    }
+    if (wheelEvidenceView) {
+      updateWheelEvidenceCamera(wheelEvidenceView);
+      return;
+    }
     if (cameraMode === RACING_CAMERA_MODES.HOOD) {
       updateHoodCamera(deltaSeconds);
       return;
     }
 
     updateChaseCamera(deltaSeconds);
+  }
+
+  function updateBrakeLightEvidenceCamera(view) {
+    const forward = new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading));
+    const right = new THREE.Vector3(Math.cos(state.heading), 0, -Math.sin(state.heading));
+    const side = view === "left-rear" ? -1 : view === "right-rear" ? 1 : 0;
+    const focus = new THREE.Vector3(state.position.x, playerVisualElevation + 1.05, state.position.y)
+      .addScaledVector(forward, -0.35);
+    camera.position.copy(focus)
+      .addScaledVector(forward, -8.4)
+      .addScaledVector(right, side * 6.4)
+      .add(new THREE.Vector3(0, 2.15, 0));
+    camera.near = 0.03;
+    camera.fov = 48;
+    camera.updateProjectionMatrix();
+    camera.lookAt(focus);
+  }
+
+  function updateWheelEvidenceCamera(view) {
+    const forward = new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading));
+    const right = new THREE.Vector3(Math.cos(state.heading), 0, -Math.sin(state.heading));
+    const front = view.startsWith("front");
+    const side = view.endsWith("left") ? -1 : 1;
+    const axleOffset = front ? 1.45 : -1.45;
+    const focus = new THREE.Vector3(state.position.x, playerVisualElevation + 0.82, state.position.y)
+      .addScaledVector(forward, axleOffset)
+      .addScaledVector(right, side * 0.82);
+    camera.position.copy(focus)
+      .addScaledVector(forward, front ? 4.1 : -4.1)
+      .addScaledVector(right, side * 3.4)
+      .add(new THREE.Vector3(0, 1.15, 0));
+    camera.near = 0.03;
+    camera.fov = 42;
+    camera.updateProjectionMatrix();
+    camera.lookAt(focus);
   }
 
   function updateChaseCamera(deltaSeconds) {
