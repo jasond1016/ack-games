@@ -34,17 +34,21 @@ test("Coastal Festival 把开放探索区与海洋和技术夹层分开", () => 
   assert.deepEqual(classifyCoastalRecovery({
     position: { x: 0, y: COASTAL_PLAYABLE_WORLD.recoveryHeight - 0.1, z: 205 },
     nearestRoadDistance: 80
-  }), { reason: "water", region: "outside" });
+  }), { trigger: "kill-height", reason: "water", region: "outside" });
+  assert.deepEqual(classifyCoastalRecovery({
+    position: { x: 0, y: -3, z: 205 },
+    nearestRoadDistance: 12
+  }), { trigger: "kill-height", reason: "water", region: "road" });
   assert.deepEqual(classifyCoastalRecovery({
     position: { x: 20, y: -4, z: 20 },
     nearestRoadDistance: 12,
     contactSurfaceIds: ["recovery-only"]
-  }), { reason: "invalid-world", region: "island" });
+  }), { trigger: "recovery-floor", reason: "invalid-world", region: "island" });
   assert.deepEqual(classifyCoastalRecovery({
     position: { x: 150, y: 1, z: 40 },
     nearestRoadDistance: 60,
     contactSurfaceIds: ["ground"]
-  }), { reason: null, region: "island" });
+  }), { trigger: null, reason: null, region: "island" });
 });
 
 test("Coastal 安全恢复点必须连续建立在稳定的三轮以上接触上", () => {

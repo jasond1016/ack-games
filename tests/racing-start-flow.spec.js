@@ -258,6 +258,15 @@ test("Coastal Showcase free-cruise skips the tour machine and remembers the choi
   const waterRecovery = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState());
   expect(waterRecovery.coastalRecovery.lastReason).toBe("water");
   expect(waterRecovery.coastalRecovery.recoveryCount).toBe(1);
+  expect(waterRecovery.coastalRecovery.reasonCounts.water).toBe(1);
+  expect(waterRecovery.coastalRecovery.events[0]).toMatchObject({
+    trigger: "kill-height",
+    reason: "water",
+    destinationType: "safe-pose",
+    mode: "free-cruise"
+  });
+  expect(waterRecovery.coastalRecovery.events[0].originZ).toBeGreaterThan(250);
+  await expect(page.locator("#racingEventBannerValue")).toHaveText("RETURNED TO SHORE");
   expect(Math.hypot(
     waterRecovery.playerPosition.x - safePosition.x,
     waterRecovery.playerPosition.y - safePosition.y
@@ -269,6 +278,12 @@ test("Coastal Showcase free-cruise skips the tour machine and remembers the choi
   const voidRecovery = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState());
   expect(voidRecovery.coastalRecovery.lastReason).toBe("invalid-world");
   expect(voidRecovery.coastalRecovery.recoveryCount).toBe(2);
+  expect(voidRecovery.coastalRecovery.events[1]).toMatchObject({
+    trigger: "kill-height",
+    reason: "invalid-world",
+    destinationType: "checkpoint"
+  });
+  await expect(page.locator("#racingEventBannerValue")).toHaveText("RETURNED TO SAFE GROUND");
   await page.waitForTimeout(2_200);
   const settledRecovery = await page.evaluate(() => globalThis.__ackGamesDebug.racing.getState());
   expect(settledRecovery.coastalRecovery.recoveryCount).toBe(2);

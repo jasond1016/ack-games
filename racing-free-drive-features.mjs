@@ -74,10 +74,12 @@ export function classifyCoastalRecovery({ position, nearestRoadDistance, contact
   const region = coastalPlayableRegion(position, nearestRoadDistance);
   const reachedRecoveryFloor = contactSurfaceIds.includes("recovery-only");
   if (!reachedRecoveryFloor && Number.isFinite(position?.y) && position.y >= COASTAL_PLAYABLE_WORLD.recoveryHeight) {
-    return Object.freeze({ reason: null, region });
+    return Object.freeze({ trigger: null, reason: null, region });
   }
+  const overAuthoredLand = coastalPlayableRegion(position, Infinity) !== "outside";
   return Object.freeze({
-    reason: region === "outside" ? "water" : "invalid-world",
+    trigger: reachedRecoveryFloor ? "recovery-floor" : "kill-height",
+    reason: overAuthoredLand ? "invalid-world" : "water",
     region
   });
 }

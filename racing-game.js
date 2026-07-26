@@ -228,6 +228,7 @@ export function createRacingGame({
   onHome = () => {},
   onEditMap = () => {},
   onReplaceSession = () => {},
+  onRecoveryEvent = () => {},
   onLoadingStage = () => {}
 } = {}) {
   const qualityPreset = resolveRacingQualityPreset();
@@ -707,8 +708,13 @@ export function createRacingGame({
     upsideDownSeconds: 0,
     outsideSeconds: 0,
     cooldownSeconds: 0,
+    noticeSeconds: 0,
+    elapsedSeconds: 0,
     recoveryCount: 0,
     lastReason: null,
+    lastRecoverySeconds: null,
+    reasonCounts: { water: 0, "invalid-world": 0, "upside-down": 0 },
+    events: [],
     region: "outside"
   };
   const showcaseEvent = {
@@ -1168,6 +1174,8 @@ export function createRacingGame({
       coastalRecovery: isShowcase ? Object.freeze({
         recoveryCount: coastalRecovery.recoveryCount,
         lastReason: coastalRecovery.lastReason,
+        reasonCounts: Object.freeze({ ...coastalRecovery.reasonCounts }),
+        events: Object.freeze(coastalRecovery.events.map((event) => Object.freeze({ ...event }))),
         region: coastalRecovery.region,
         hasSafePose: Boolean(coastalRecovery.safePose),
         safePose: coastalRecovery.safePose ? Object.freeze({
@@ -9115,8 +9123,13 @@ export function createRacingGame({
     coastalRecovery.upsideDownSeconds = 0;
     coastalRecovery.outsideSeconds = 0;
     coastalRecovery.cooldownSeconds = 0;
+    coastalRecovery.noticeSeconds = 0;
+    coastalRecovery.elapsedSeconds = 0;
     coastalRecovery.recoveryCount = 0;
     coastalRecovery.lastReason = null;
+    coastalRecovery.lastRecoverySeconds = null;
+    coastalRecovery.reasonCounts = { water: 0, "invalid-world": 0, "upside-down": 0 };
+    coastalRecovery.events = [];
     coastalRecovery.region = "outside";
   }
 
@@ -9127,7 +9140,11 @@ export function createRacingGame({
 
   function updateCoastalWorldRecovery(deltaSeconds) {
     if (!isShowcase || !physics?.playerBody || rewindBuffer.active) return false;
+    coastalRecovery.elapsedSeconds += deltaSeconds;
     coastalRecovery.cooldownSeconds = Math.max(0, coastalRecovery.cooldownSeconds - deltaSeconds);
+    const previousNoticeSeconds = coastalRecovery.noticeSeconds;
+    coastalRecovery.noticeSeconds = Math.max(0, coastalRecovery.noticeSeconds - deltaSeconds);
+    if (isCoastalFreeCruise() && previousNoticeSeconds > 0 && coastalRecovery.noticeSeconds === 0) hideEventBanner();
     if (showcaseEvent.phase === "running") updateShowcaseRecovery(deltaSeconds);
 
     const body = physics.playerBody.translation();
@@ -9139,7 +9156,11 @@ export function createRacingGame({
     });
     coastalRecovery.region = classification.region;
     if (classification.reason && coastalRecovery.cooldownSeconds <= 0) {
-      return recoverCoastalPlayer(classification.reason);
+      return recoverCoastalPlayer(classification.reason, {
+        trigger: classification.trigger,
+        region: classification.region,
+        nearestRoadDistance
+      });
     }
 
     const rotation = physics.playerBody.rotation();
@@ -9158,12 +9179,20 @@ export function createRacingGame({
     coastalRecovery.upsideDownSeconds = upright < 0.45 && (grounded || nearGround)
       ? coastalRecovery.upsideDownSeconds + deltaSeconds : 0;
     if (coastalRecovery.upsideDownSeconds >= 2 && coastalRecovery.cooldownSeconds <= 0) {
-      return recoverCoastalPlayer("upside-down");
+      return recoverCoastalPlayer("upside-down", {
+        trigger: "upside-down",
+        region: classification.region,
+        nearestRoadDistance
+      });
     }
     coastalRecovery.outsideSeconds = grounded && classification.region === "outside"
       ? coastalRecovery.outsideSeconds + deltaSeconds : 0;
     if (coastalRecovery.outsideSeconds >= 0.5 && coastalRecovery.cooldownSeconds <= 0) {
-      return recoverCoastalPlayer("invalid-world");
+      return recoverCoastalPlayer("invalid-world", {
+        trigger: "outside-bounds",
+        region: classification.region,
+        nearestRoadDistance
+      });
     }
 
     const safeRegion = coastalPlayableRegion(
@@ -9212,8 +9241,14 @@ export function createRacingGame({
     return false;
   }
 
-  function recoverCoastalPlayer(reason) {
+  function recoverCoastalPlayer(reason, {
+    trigger = reason,
+    region = coastalRecovery.region,
+    nearestRoadDistance = nearestCoastalRoadDistance()
+  } = {}) {
     if (!isShowcase || coastalRecovery.cooldownSeconds > 0) return false;
+    const origin = physics.playerBody.translation();
+    const contactSurfaceIds = [...new Set(playerSurfaceState.contacts.map(({ surfaceId }) => surfaceId))];
     const runningTour = showcaseEvent.phase === "running";
     const challenge = freeDriveShowcaseChallenge.getState();
     const checkpointIndex = Math.max(0, Math.min(challenge.nextCheckpoint - 1, freeDriveShowcaseCheckpoints.length - 1));
@@ -9244,6 +9279,43 @@ export function createRacingGame({
     coastalRecovery.cooldownSeconds = 2;
     coastalRecovery.recoveryCount += 1;
     coastalRecovery.lastReason = reason;
+    coastalRecovery.reasonCounts[reason] = (coastalRecovery.reasonCounts[reason] ?? 0) + 1;
+    const recoveryEvent = Object.freeze({
+      trigger,
+      reason,
+      originX: Number(origin.x.toFixed(2)),
+      originY: Number(origin.y.toFixed(2)),
+      originZ: Number(origin.z.toFixed(2)),
+      region,
+      nearestRoadDistance: Number(nearestRoadDistance.toFixed(1)),
+      contactSurfaceIds: Object.freeze(contactSurfaceIds),
+      destinationType: safePose ? "safe-pose" : "checkpoint",
+      destinationX: Number(recoveryPose.x.toFixed(2)),
+      destinationZ: Number(recoveryPose.z.toFixed(2)),
+      mode: isCoastalFreeCruise() ? "free-cruise" : "island-tour",
+      phase: showcaseEvent.phase,
+      recoveryCount: coastalRecovery.recoveryCount,
+      secondsSincePrevious: coastalRecovery.lastRecoverySeconds == null
+        ? null : Number((coastalRecovery.elapsedSeconds - coastalRecovery.lastRecoverySeconds).toFixed(2))
+    });
+    coastalRecovery.lastRecoverySeconds = coastalRecovery.elapsedSeconds;
+    coastalRecovery.events.push(recoveryEvent);
+    if (coastalRecovery.events.length > 8) coastalRecovery.events.shift();
+    try {
+      onRecoveryEvent(recoveryEvent);
+    } catch (error) {
+      console.warn("Coastal recovery diagnostics callback failed.", error);
+    }
+    if (isCoastalFreeCruise()) {
+      const labels = {
+        water: ["RETURNED TO SHORE", "COASTAL RESCUE"],
+        "invalid-world": ["RETURNED TO SAFE GROUND", "MAP RECOVERY"],
+        "upside-down": ["VEHICLE RESET", "COASTAL RESCUE"]
+      };
+      const [value, detail] = labels[reason] ?? labels["invalid-world"];
+      coastalRecovery.noticeSeconds = 2.2;
+      showEventBanner({ value, detail });
+    }
     updateRouteGuide();
     return true;
   }
