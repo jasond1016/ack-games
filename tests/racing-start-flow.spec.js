@@ -180,7 +180,9 @@ test("Coastal Showcase runs countdown, timed route, result, and in-place retry",
   await expect(page.locator("#racingRouteNotice")).toHaveText("RECOVERED +2.5S");
   await expect(page.locator("#racingRouteNotice")).toBeVisible();
 
-  await page.waitForTimeout(2_200);
+  await expect.poll(() => page.evaluate(() =>
+    globalThis.__ackGamesDebug.racing.getState().coastalRecovery.cooldownSeconds
+  ), { timeout: 6_000 }).toBe(0);
   expect(await page.evaluate(() => globalThis.__ackGamesDebug.racing.rollShowcaseScenario())).toBe(true);
   await expect.poll(() => page.evaluate(() =>
     globalThis.__ackGamesDebug.racing.getState().showcaseEvent.recoveryCount
@@ -242,6 +244,9 @@ test("Coastal Showcase free-cruise skips the tour machine and remembers the choi
   expect(initialState.startConfig.coastalPlayMode).toBe("free-cruise");
   expect(initialState.showcaseEvent).not.toBeNull();
   expect(initialState.showcaseEvent.phase).toBe("idle");
+  expect(initialState.surfaceValidation.valid).toBe(true);
+  expect(initialState.surfaceValidation.probeCount).toBeGreaterThan(100);
+  expect(initialState.surfaceValidation.boxSurfaceCount).toBeGreaterThan(0);
 
   await page.keyboard.down("KeyW");
   await page.waitForTimeout(700);

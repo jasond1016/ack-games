@@ -185,6 +185,30 @@ export function validateDrivableSurfaceSet(surfaces) {
   });
 }
 
+export function validateSurfaceCoverageProbes(probes, sampleSurface) {
+  if (!Array.isArray(probes) || typeof sampleSurface !== "function") {
+    return Object.freeze({ valid: false, probeCount: 0, errors: Object.freeze([
+      issue("invalid-coverage-probes", "coverage", "碰撞覆盖探针配置无效。")
+    ]) });
+  }
+  const errors = [];
+  for (const probe of probes) {
+    if (probe.exempt) continue;
+    const surfaceId = sampleSurface(probe);
+    if (probe.allowedSurfaceIds?.includes(surfaceId)) continue;
+    errors.push(issue(
+      "missing-surface-coverage",
+      probe.id ?? "coverage",
+      `关键位置 (${Number(probe.x).toFixed(1)}, ${Number(probe.z).toFixed(1)}) 未命中合法驾驶碰撞面。`
+    ));
+  }
+  return Object.freeze({
+    valid: errors.length === 0,
+    probeCount: probes.filter(({ exempt }) => !exempt).length,
+    errors: Object.freeze(errors)
+  });
+}
+
 export function partitionSurfaceTrianglesBySlope(
   vertices,
   indices,

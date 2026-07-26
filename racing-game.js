@@ -78,7 +78,8 @@ import { createRacingHapticsController } from "./racing-haptics.mjs";
 import {
   partitionSurfaceTrianglesBySlope,
   validateDrivableRibbon,
-  validateDrivableSurfaceSet
+  validateDrivableSurfaceSet,
+  validateSurfaceCoverageProbes
 } from "./racing-drivable-surface-validation.mjs";
 import {
   COASTAL_WORLD_LAYOUT,
@@ -994,6 +995,8 @@ export function createRacingGame({
         valid: surfaceValidationReport.valid,
         surfaceCount: surfaceValidationReport.surfaceCount,
         triangleCount: surfaceValidationReport.triangleCount,
+        boxSurfaceCount: surfaceValidationReport.boxSurfaceCount ?? 0,
+        probeCount: surfaceValidationReport.probeCount ?? 0,
         errorCount: surfaceValidationReport.errors.length,
         warningCount: surfaceValidationReport.warnings.length,
         errors: surfaceValidationReport.errors.slice(0, 6)
@@ -1173,6 +1176,7 @@ export function createRacingGame({
       }) : null,
       coastalRecovery: isShowcase ? Object.freeze({
         recoveryCount: coastalRecovery.recoveryCount,
+        cooldownSeconds: Number(coastalRecovery.cooldownSeconds.toFixed(2)),
         lastReason: coastalRecovery.lastReason,
         reasonCounts: Object.freeze({ ...coastalRecovery.reasonCounts }),
         events: Object.freeze(coastalRecovery.events.map((event) => Object.freeze({ ...event }))),
@@ -4554,6 +4558,8 @@ export function createRacingGame({
     const ribbonErrors = surfaceRibbonReports.flatMap((report) => report.errors);
     surfaceValidationReport = Object.freeze({
       ...meshReport,
+      boxSurfaceCount: staticWorldColliderSpecs.filter((spec) => isPhysicalVehicleSurface(spec.tag)).length,
+      probeCount: 0,
       valid: meshReport.valid && ribbonErrors.length === 0,
       errors: Object.freeze([...meshReport.errors, ...ribbonErrors])
     });
@@ -4563,6 +4569,57 @@ export function createRacingGame({
         .map((entry) => `${entry.surfaceId}: ${entry.message}`)
         .join("；");
       throw new Error(`可驾驶表面校验失败：${summary}`);
+    }
+  }
+
+  function validateCoastalCriticalColliderCoverage() {
+    const allowedSurfaceIds = Object.freeze(["road", "bridge", "stunt-ramp"]);
+    const probes = [];
+    for (let index = 0; index < freeDriveShowcaseDrivingLine.length; index += 18) {
+      const sample = freeDriveShowcaseDrivingLine[index];
+      const inJumpGap = isFreeDriveJumpGap(new THREE.Vector2(sample.x, sample.z));
+      for (const lateralOffset of [-1.25, 0, 1.25]) {
+        probes.push({
+          id: `showcase-route:${index}:${lateralOffset}`,
+          x: sample.x + sample.normalX * lateralOffset,
+          y: sample.y,
+          z: sample.z + sample.normalZ * lateralOffset,
+          allowedSurfaceIds,
+          exempt: inJumpGap
+        });
+      }
+    }
+    freeDriveShowcaseCheckpoints.forEach((checkpoint, index) => {
+      probes.push({
+        id: `showcase-checkpoint:${index}`,
+        x: checkpoint.x,
+        y: checkpoint.y,
+        z: checkpoint.z,
+        allowedSurfaceIds,
+        exempt: isFreeDriveJumpGap(new THREE.Vector2(checkpoint.x, checkpoint.z))
+      });
+    });
+
+    const coverageReport = validateSurfaceCoverageProbes(probes, (probe) => {
+      const ray = new RAPIER.Ray(
+        { x: probe.x, y: probe.y + 6, z: probe.z },
+        { x: 0, y: -1, z: 0 }
+      );
+      const hit = physics.world.castRay(ray, 12, true);
+      return hit?.collider ? physics.colliderTags.get(hit.collider.handle) : null;
+    });
+    const errors = Object.freeze([...surfaceValidationReport.errors, ...coverageReport.errors]);
+    surfaceValidationReport = Object.freeze({
+      ...surfaceValidationReport,
+      valid: surfaceValidationReport.valid && coverageReport.valid,
+      probeCount: coverageReport.probeCount,
+      errors
+    });
+    if (!coverageReport.valid) {
+      const summary = coverageReport.errors.slice(0, 4)
+        .map((entry) => `${entry.surfaceId}: ${entry.message}`)
+        .join("；");
+      throw new Error(`Coastal 关键碰撞覆盖校验失败：${summary}`);
     }
   }
 
@@ -5053,6 +5110,11 @@ export function createRacingGame({
           .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS)
       );
       physics.colliderTags.set(collider.handle, spec.tag);
+    }
+
+    if (isShowcase) {
+      physics.world.step(physics.eventQueue);
+      validateCoastalCriticalColliderCoverage();
     }
 
     if (!isFreeDrive) {

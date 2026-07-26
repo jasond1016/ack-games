@@ -5,7 +5,8 @@ import {
   partitionSurfaceTrianglesBySlope,
   validateDrivableRibbon,
   validateDrivableSurfaceMesh,
-  validateDrivableSurfaceSet
+  validateDrivableSurfaceSet,
+  validateSurfaceCoverageProbes
 } from "../racing-drivable-surface-validation.mjs";
 
 const flatRoad = {
@@ -74,4 +75,17 @@ test("危险的近距离双碰撞面会被发现，合法路面过渡不误报",
 
   const rallyTransition = { ...duplicate, id: "rally:1", tag: "rally-dirt" };
   assert.equal(findUnsafeSurfaceOverlaps([flatRoad, rallyTransition]).length, 0);
+});
+
+test("关键路线探针会报告缺失碰撞面并允许显式跳跃缺口", () => {
+  const probes = [
+    { id: "route:0", x: 0, z: 0, allowedSurfaceIds: ["road"] },
+    { id: "route:1", x: 10, z: 0, allowedSurfaceIds: ["road"] },
+    { id: "jump-gap", x: 20, z: 0, allowedSurfaceIds: ["road"], exempt: true }
+  ];
+  const report = validateSurfaceCoverageProbes(probes, ({ x }) => x < 5 ? "road" : null);
+  assert.equal(report.valid, false);
+  assert.equal(report.probeCount, 2);
+  assert.deepEqual(report.errors.map(({ surfaceId }) => surfaceId), ["route:1"]);
+  assert.equal(report.errors[0].code, "missing-surface-coverage");
 });
