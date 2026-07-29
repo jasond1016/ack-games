@@ -103,6 +103,22 @@
             </span>
           </button>
 
+          <button id="tennisGameCard" class="game-card tennis-game-card" type="button">
+            <span class="game-card-art tennis-card-art" aria-hidden="true">
+              <span class="tennis-card-fence"></span>
+              <span class="tennis-card-court"></span>
+              <span class="tennis-card-lines"></span>
+              <span class="tennis-card-net"></span>
+              <span class="tennis-card-player"></span>
+              <span class="tennis-card-ball"></span>
+            </span>
+            <span class="game-card-copy">
+              <span class="game-state">新游戏</span>
+              <strong>城市网球</strong>
+              <span>选手各有所长 · 手柄与键盘对打</span>
+            </span>
+          </button>
+
           <article class="game-card game-card-disabled" aria-label="更多游戏">
             <span class="game-card-art empty-art" aria-hidden="true">
               <span></span>
@@ -245,6 +261,64 @@
         </section>
 
         <canvas id="vacuumCanvas" class="game-canvas vacuum-canvas" width="640" height="760" aria-label="吸尘器接管道游戏画面"></canvas>
+      </section>
+
+      <section id="tennisView" class="game-view tennis-view" aria-label="城市网球" hidden>
+        <div class="tennis-stage">
+          <canvas id="tennisCanvas" width="1280" height="720" aria-label="城市铁笼网球场比赛画面"></canvas>
+          <header class="tennis-topbar">
+            <button id="tennisHomeButton" class="tennis-pill-button" type="button">返回大厅</button>
+            <div class="tennis-scoreboard" aria-label="比分">
+              <span id="tennisPlayerName">林风</span>
+              <strong><b id="tennisPlayerScore">0</b><i>—</i><b id="tennisAiScore">0</b></strong>
+              <span id="tennisAiName">铁壁</span>
+            </div>
+            <button id="tennisRestartButton" class="tennis-pill-button" type="button">重新开球</button>
+          </header>
+
+          <div id="tennisCallout" class="tennis-callout" aria-live="polite">按 A / 空格 发球</div>
+
+          <section id="tennisSelect" class="tennis-select" aria-label="选择球员">
+            <div class="tennis-select-heading">
+              <p>ACK CITY COURT · MATCH 01</p>
+              <h1>选择你的球员</h1>
+              <span>每个人都有自己的赢球方式</span>
+              <div class="tennis-mode-switch" aria-label="比赛模式">
+                <button id="tennisSoloModeButton" class="is-selected" type="button">单人挑战</button>
+                <button id="tennisVersusModeButton" type="button">双人对战</button>
+              </div>
+              <div id="tennisPlayerSlots" class="tennis-player-slots" hidden>
+                <button id="tennisPlayerOneSlot" class="is-selected" type="button"><span>P1</span><strong>林风</strong></button>
+                <button id="tennisPlayerTwoSlot" type="button"><span>P2</span><strong>诺亚</strong></button>
+              </div>
+            </div>
+            <div id="tennisCharacters" class="tennis-characters"></div>
+            <div class="tennis-select-footer">
+              <div id="tennisControls" class="tennis-controls">
+                <span><kbd>方向键 / WASD</kbd> 移动</span>
+                <span><kbd>A / 空格 / J</kbd> 击球 / 高球扣杀</span>
+                <span><kbd>B / Shift / K</kbd> 挑高球</span>
+              </div>
+              <button id="tennisStartButton" class="tennis-start-button" type="button">上场比赛 <span>A / ENTER</span></button>
+            </div>
+          </section>
+
+          <section id="tennisResult" class="tennis-result" aria-live="assertive" hidden>
+            <p>GAME, SET &amp; MATCH</p>
+            <h2 id="tennisResultTitle">城市之王</h2>
+            <span id="tennisResultCopy">你拿下了这场比赛</span>
+            <div>
+              <button id="tennisRematchButton" class="tennis-start-button" type="button">再来一场</button>
+              <button id="tennisReselectButton" class="tennis-pill-button" type="button">换球员</button>
+            </div>
+          </section>
+
+          <div id="tennisSplitHud" class="tennis-split-hud" hidden aria-hidden="true">
+            <span><b>P1</b><strong id="tennisSplitPlayerOne">林风</strong></span>
+            <i></i>
+            <span><b>P2</b><strong id="tennisSplitPlayerTwo">诺亚</strong></span>
+          </div>
+        </div>
       </section>
 
       <section id="racingMapSelectView" class="game-view racing-map-select-view map-select-horizon-strip" aria-label="赛车地图选择" hidden>

@@ -16,6 +16,11 @@ const registry = Object.freeze({
     viewId: "vacuumView",
     load: () => import("./vacuum-game.js")
   },
+  tennis: {
+    title: "城市网球 - ACK Games",
+    viewId: "tennisView",
+    load: () => import("./tennis-game.js")
+  },
   "racing-select": {
     title: "赛车地图选择 - ACK Games",
     viewId: "racingMapSelectView",
@@ -236,6 +241,7 @@ requestAnimationFrame(pollLifecycleGamepad);
 
 document.getElementById("typingGarageCard").addEventListener("click", () => void lifecycle.open("typing-garage"));
 document.getElementById("vacuumGameCard").addEventListener("click", () => void lifecycle.open("vacuum"));
+document.getElementById("tennisGameCard").addEventListener("click", () => void lifecycle.open("tennis"));
 document.getElementById("racingGameCard").addEventListener("click", () => {
   void (async () => {
     const { createCoastalFreeCruiseLaunchSnapshot } = await import("./racing-entry.mjs");
@@ -246,6 +252,7 @@ document.getElementById("racingEditorCard").addEventListener("click", () => void
 document.getElementById("busRushCard").addEventListener("click", () => void lifecycle.open("bus-rush"));
 document.getElementById("typingGarageHomeButton").addEventListener("click", () => void lifecycle.home());
 document.getElementById("vacuumHomeButton").addEventListener("click", () => void lifecycle.home());
+document.getElementById("tennisHomeButton").addEventListener("click", () => void lifecycle.home());
 document.getElementById("busRushHomeButton").addEventListener("click", () => void lifecycle.home());
 document.getElementById("racingEditorHomeButton").addEventListener("click", () => void lifecycle.open("racing-select"));
 

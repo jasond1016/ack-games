@@ -20,7 +20,9 @@ async function findGlbs(directory) {
 }
 const pageGlbs = await findGlbs(pagesDir);
 const unexpectedPageGlbs = pageGlbs.filter((file) =>
-  !path.relative(pagesDir, file).replaceAll("\\", "/").startsWith("assets/freedrive/models/")
+  !["assets/freedrive/models/", "assets/tennis/models/"].some((directory) =>
+    path.relative(pagesDir, file).replaceAll("\\", "/").startsWith(directory)
+  )
 );
 if (unexpectedPageGlbs.length) throw new Error(`Pages output contains unexpected GLBs:\n${unexpectedPageGlbs.join("\n")}`);
 await verifyPagesAllowlist();
@@ -46,10 +48,10 @@ try {
   });
   page.on("pageerror", (error) => failures.push(error.message));
   await page.goto(pagesUrl);
-  await page.locator("#racingGameCard").click();
+  await page.locator("#racingEditorCard").click();
   await page.locator('#racingPresetMaps .map-select-card[data-map-id="preset-island-freedrive"] .map-select-card-button').click();
   await page.locator("#racingMapSelectRaceButton").click();
-  await page.locator("#racingCarOptions .race-car-option").last().click();
+  await page.locator("#racingCarOptions .race-car-option:not(:disabled)").last().click();
   await page.waitForTimeout(3_000);
   await page.locator("#racingStartRaceButton").click();
   await page.waitForFunction(() => document.getElementById("racingStartOverlay")?.hidden === true, null, { timeout: 45_000 });

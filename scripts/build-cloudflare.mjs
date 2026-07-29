@@ -89,7 +89,8 @@ async function validateStaging() {
     const info = await stat(file);
     if (info.size > assetGraph.pages.limits.maxFileBytes) throw new Error(`Pages asset exceeds 25 MiB: ${path.relative(pagesDir, file)}`);
     const relative = path.relative(pagesDir, file).replaceAll("\\", "/");
-    if (file.toLowerCase().endsWith(".glb") && !relative.startsWith("assets/freedrive/models/")) {
+    const allowedPageModel = relative.startsWith("assets/freedrive/models/") || relative.startsWith("assets/tennis/models/");
+    if (file.toLowerCase().endsWith(".glb") && !allowedPageModel) {
       throw new Error(`Unexpected GLB leaked into Pages: ${relative}`);
     }
   }

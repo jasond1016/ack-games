@@ -2,7 +2,7 @@ export const cloudflarePagesAssetGraph = Object.freeze({
   pages: Object.freeze({
     files: Object.freeze([
       "index.html", "styles.css", "game.js", "game-lifecycle.mjs",
-      "vacuum-game.js", "typing-garage-game.js", "bus-rush-prototype.js",
+      "vacuum-game.js", "typing-garage-game.js", "bus-rush-prototype.js", "tennis-game.js",
       "racing-car-config.js", "racing-editor.js",
       "racing-audio.mjs", "racing-drivable-surface-validation.mjs", "racing-drivetrain.mjs", "racing-driving-dynamics.mjs", "racing-finish-cinematic.js", "racing-free-drive-challenge.mjs", "racing-free-drive-features.mjs", "racing-game.js", "racing-haptics.mjs", "racing-jump-rules.mjs", "racing-map-library-core.mjs",
       "racing-map-select.js", "racing-map.js",
@@ -22,7 +22,7 @@ export const cloudflarePagesAssetGraph = Object.freeze({
       "racing-day-cycle.mjs",
       "racing-traffic-vehicles.mjs"
     ]),
-    directories: Object.freeze(["assets/typing-garage", "assets/freedrive", "assets/racing"]),
+    directories: Object.freeze(["assets/typing-garage", "assets/freedrive", "assets/racing", "assets/tennis"]),
     generated: Object.freeze(["racing-model-manifest.js", "racing-deployment-config.js", "_headers"]),
     limits: Object.freeze({ maxFiles: 20_000, maxFileBytes: 25 * 1024 * 1024 })
   })
